@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/wso2/agent-manager/agent-manager-service/models"
-	"github.com/wso2/agent-manager/agent-manager-service/services"
-	"github.com/wso2/agent-manager/agent-manager-service/spec"
+	"github.com/wso2/ai-agent-management-platform/agent-manager-service/models"
+	"github.com/wso2/ai-agent-management-platform/agent-manager-service/services"
+	"github.com/wso2/ai-agent-management-platform/agent-manager-service/spec"
 )
 
 // AgentHandler bridges MCP tools to the agent manager service layer.
@@ -47,4 +47,8 @@ func (h *AgentHandler) GenerateToken(ctx context.Context, orgName string, projec
 		ExpiresIn:   expiresIn,
 	}
 	return h.tokenSvc.GenerateToken(ctx, req)
+}
+
+func (h *AgentHandler) GetAgentMetrics(ctx context.Context, orgName string, projectName string, agentName string, payload spec.MetricsFilterRequest) (*spec.MetricsResponse, error) {
+	return h.agentSvc.GetAgentMetrics(ctx, orgName, projectName, agentName, payload)
 }

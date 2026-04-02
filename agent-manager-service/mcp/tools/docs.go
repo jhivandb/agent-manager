@@ -17,7 +17,7 @@ func (t *Toolsets) registerDocTools(server *gomcp.Server) {
 		Name:        "get_docs_sitemap",
 		Description: "Return the Agent Manager documentation sitemap URL. use when further details about the agent manager platform or its capabilities are needed.",
 		InputSchema: createSchema(map[string]any{}, nil),
-	}, getDocsSitemap())
+	}, withToolLogging("get_docs_sitemap", getDocsSitemap()))
 }
 
 func getDocsSitemap() func(context.Context, *gomcp.CallToolRequest, map[string]any) (*gomcp.CallToolResult, any, error) {

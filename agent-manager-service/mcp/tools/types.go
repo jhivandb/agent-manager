@@ -2,9 +2,13 @@ package tools
 
 import (
 	"context"
+<<<<<<< HEAD
+	"time"
+=======
+>>>>>>> e9b61488 (mcp tools v1)
 
-	"github.com/wso2/agent-manager/agent-manager-service/models"
-	"github.com/wso2/agent-manager/agent-manager-service/spec"
+	"github.com/wso2/ai-agent-management-platform/agent-manager-service/models"
+	"github.com/wso2/ai-agent-management-platform/agent-manager-service/spec"
 )
 
 // Toolsets groups MCP tool handlers and configuration.
@@ -13,7 +17,7 @@ type Toolsets struct {
 	ProjectToolset    ProjectToolsetHandler
 	BuildToolset      BuildToolsetHandler
 	DeploymentToolset DeploymentToolsetHandler
-	// TraceToolset      TraceToolsetHandler
+	TraceToolset      TraceToolsetHandler
 	RuntimeLogToolset RuntimeLogToolsetHandler
 	DefaultOrg        string
 }
@@ -40,11 +44,11 @@ type DeploymentToolsetHandler interface {
 	GetAgentDeployments(ctx context.Context, orgName string, projectName string, agentName string) ([]*models.DeploymentResponse, error)
 }
 
-// type TraceToolsetHandler interface {
-// 	ListTraces(ctx context.Context, orgName string, projectName string, agentName string, environment string, startTime string, endTime string, sortOrder string, limit int, offset int) (*models.TraceOverviewResponse, error)
-// 	ExportTraces(ctx context.Context, orgName string, projectName string, agentName string, environment string, startTime string, endTime string, sortOrder string, limit int, offset int) (*models.TraceExportResponse, error)
-// 	GetTraceDetails(ctx context.Context, orgName string, projectName string, agentName string, traceID string, environment string) (*models.TraceResponse, error)
-// }
+type TraceToolsetHandler interface {
+	ListTraces(ctx context.Context, orgName string, projectName string, agentName string, environment string, startTime string, endTime string, sortOrder string, limit int, offset int) (*models.TraceOverviewResponse, error)
+	ExportTraces(ctx context.Context, orgName string, projectName string, agentName string, environment string, startTime string, endTime string, sortOrder string, limit int, offset int) (*models.TraceExportResponse, error)
+	GetTraceDetails(ctx context.Context, orgName string, projectName string, agentName string, traceID string, environment string) (*models.TraceResponse, error)
+}
 
 type RuntimeLogToolsetHandler interface {
 	GetRuntimeLogs(ctx context.Context, orgName string, projectName string, agentName string, payload spec.LogFilterRequest) (*models.LogsResponse, error)

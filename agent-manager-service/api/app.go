@@ -19,14 +19,14 @@ package api
 import (
 	"net/http"
 
-	"github.com/wso2/agent-manager/agent-manager-service/config"
-	"github.com/wso2/agent-manager/agent-manager-service/mcp"
-	mcphandlers "github.com/wso2/agent-manager/agent-manager-service/mcp/mcp_handlers"
-	mcptools "github.com/wso2/agent-manager/agent-manager-service/mcp/tools"
-	"github.com/wso2/agent-manager/agent-manager-service/middleware"
-	"github.com/wso2/agent-manager/agent-manager-service/middleware/logger"
-	mcpmiddleware "github.com/wso2/agent-manager/agent-manager-service/middleware/mcp"
-	"github.com/wso2/agent-manager/agent-manager-service/wiring"
+	"github.com/wso2/ai-agent-management-platform/agent-manager-service/config"
+	"github.com/wso2/ai-agent-management-platform/agent-manager-service/mcp"
+	mcphandlers "github.com/wso2/ai-agent-management-platform/agent-manager-service/mcp/mcp_handlers"
+	mcptools "github.com/wso2/ai-agent-management-platform/agent-manager-service/mcp/tools"
+	"github.com/wso2/ai-agent-management-platform/agent-manager-service/middleware"
+	"github.com/wso2/ai-agent-management-platform/agent-manager-service/middleware/logger"
+	mcpmiddleware "github.com/wso2/ai-agent-management-platform/agent-manager-service/middleware/mcp"
+	"github.com/wso2/ai-agent-management-platform/agent-manager-service/wiring"
 )
 
 // MakeHTTPHandler creates a new HTTP handler with middleware and routes
@@ -37,7 +37,6 @@ func MakeHTTPHandler(params *wiring.AppParams) http.Handler {
 	registerHealthCheck(mux)
 
 
-
 	registerOAuthProtectedResourceMetadata(mux)
 
 	// MCP endpoint (JWT-authenticated)
@@ -45,16 +44,23 @@ func MakeHTTPHandler(params *wiring.AppParams) http.Handler {
 	projectHandler := mcphandlers.NewProjectHandler(params.InfraResourceManager)
 	buildHandler := mcphandlers.NewBuildHandler(params.AgentManagerService)
 	deploymentHandler := mcphandlers.NewDeploymentHandler(params.AgentManagerService)
-	// traceHandler := mcphandlers.NewTraceHandler(params.ObservabilityManagerService)
-	runtimeLogHandler := mcphandlers.NewRuntimeLogHandler(params.AgentManagerService)
+	traceHandler := mcphandlers.NewTraceHandler(params.ObservabilityManagerService)
+	observerHandler := mcphandlers.NewObserverHandler(params.AgentManagerService)
+	evaluatorHandler := mcphandlers.NewEvaluatorHandler(params.EvaluatorManagerService)
+	monitorHandler := mcphandlers.NewMonitorHandler(params.MonitorManagerService)
+	monitorScoresHandler := mcphandlers.NewMonitorScoresHandler(params.MonitorScoresService)
 	toolsets := &mcptools.Toolsets{
-		AgentToolset:      agentHandler,
-		ProjectToolset:    projectHandler,
-		BuildToolset:      buildHandler,
-		DeploymentToolset: deploymentHandler,
-		// TraceToolset:      traceHandler,
-		RuntimeLogToolset: runtimeLogHandler,
-		DefaultOrg:        "default",
+		AgentToolset:         agentHandler,
+		ProjectToolset:       projectHandler,
+		// RepositoryToolset:    repositoryHandler,
+		BuildToolset:         buildHandler,
+		DeploymentToolset:    deploymentHandler,
+		TraceToolset:         traceHandler,
+		RuntimeLogToolset:    observerHandler,
+		EvaluatorToolset:     evaluatorHandler,
+		MonitorToolset:       monitorHandler,
+		MonitorScoresToolset: monitorScoresHandler,
+		DefaultOrg:           "default",
 	}
 	mcpHandler := mcp.NewHTTPServer(toolsets)
 	mcpHandler = params.AuthMiddleware(mcpHandler)

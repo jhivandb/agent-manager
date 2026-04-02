@@ -8,9 +8,9 @@ import (
 
 	gomcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/wso2/agent-manager/agent-manager-service/config"
-	"github.com/wso2/agent-manager/agent-manager-service/spec"
-	"github.com/wso2/agent-manager/agent-manager-service/utils"
+	"github.com/wso2/ai-agent-management-platform/agent-manager-service/config"
+	"github.com/wso2/ai-agent-management-platform/agent-manager-service/spec"
+	"github.com/wso2/ai-agent-management-platform/agent-manager-service/utils"
 )
 
 type envVarInput struct {
@@ -119,15 +119,30 @@ func (t *Toolsets) registerAgentTools(server *gomcp.Server) {
 			"description":  stringProperty("Optional Short description about what the agent does."),
 
 			"repository_url": stringProperty("Required. GitHub root repository URL. Do not enter .git and the end of repo name(eg: https://github.com/user/repo)"),
+<<<<<<< HEAD
+			"branch":         stringProperty("Optional. Github repository branch name (default: main)."),
+			"app_path":       stringProperty("Optional. Path of the project where agent code lives within the repository (default: /)."),
+
+			"language_version": stringProperty("Optional. Python version (default: 3.11)."),
+			"run_command":      stringProperty("Optional. Start command to run the agent (default: python main.py)."),
+
+			"interface_type": enumProperty("Optional. API interface type of the agent. DEFAULT (standard chat interface with /chat endpoint on port 8000) or CUSTOM (custom API with user-provided OpenAPI spec). Default: DEFAULT.", []string{"DEFAULT", "CUSTOM"}),
+			"port":           intProperty("Required when interface_type is CUSTOM. Port number where the agent will be listening."),
+			"base_path":      stringProperty("Optional. API base path (default: /). Required when interface_type is CUSTOM."),
+			"openapi_path":   stringProperty("Required when interface_type is CUSTOM. OpenAPI specification file path within the repository (must start with /)."),
+
+			"enable_auto_instrumentation": boolProperty("Automatically enables OTEL tracing instrumentation to your agent for observability."),
+			"env": arrayProperty("Optional. Environment variables and other configurations for the agent (from the .env file in the project repository).", map[string]any{
+=======
 			"branch":         stringProperty("Required. Github repository branch name."),
 			"app_path":       stringProperty("Required. Path of the project where agent code lives within the repository (use / for root. specify path if not)."),
 
-			"language_version": stringProperty("Required. Python version (eg: 3.11, 20, 1.21)."),
-			"run_command":      stringProperty("Required. Start command to run the agent. Correctly identify the entry file and required command. If not the agent build and deployment will fail."),
+			"language_version": stringProperty("Optional. Python version (default: 3.11)."),
+			"run_command":      stringProperty("Optional. Start command to run the agent (default: python main.py)."),
 
-			"interface_type": enumProperty("Required. API interface type of the agent. : DEFAULT(standard chat interface with /chat endpoint on port 8000) or CUSTOM(Custom API interface with user specified OpenAPI specification and port configuration).", []string{"DEFAULT", "CUSTOM"}),
+			"interface_type": enumProperty("Optional. API interface type of the agent. DEFAULT (standard chat interface with /chat endpoint on port 8000) or CUSTOM (custom API with user-provided OpenAPI spec). Default: DEFAULT.", []string{"DEFAULT", "CUSTOM"}),
 			"port":           intProperty("Required when interface_type is CUSTOM. Port number where the agent will be listening."),
-			"base_path":      stringProperty("Required when interface_type is CUSTOM. API base path (e.g., / or /api/v1)"),
+			"base_path":      stringProperty("Optional. API base path (default: /). Required when interface_type is CUSTOM."),
 			"openapi_path":   stringProperty("Required when interface_type is CUSTOM. OpenAPI specification file path within the repository (must start with /)."),
 
 			"enable_auto_instrumentation": boolProperty("Automatically enables OTEL tracing instrumentation to your agent for observability."),
@@ -140,7 +155,7 @@ func (t *Toolsets) registerAgentTools(server *gomcp.Server) {
 				"required": []string{"key", "value"},
 			}),
 		}, []string{"project_name", "display_name", "repository_url", "branch", "app_path", "language_version", "run_command", "interface_type", "env"}),
-	}, createInternalAgentPython(t.AgentToolset, t.DefaultOrg))
+	}, withToolLogging("create_internal_agent_python", createInternalAgentPython(t.AgentToolset, t.DefaultOrg)))
 
 	gomcp.AddTool(server, &gomcp.Tool{
 		Name:        "create_internal_agent_docker",
@@ -156,9 +171,9 @@ func (t *Toolsets) registerAgentTools(server *gomcp.Server) {
 			"app_path":        stringProperty("Required. Path within the repository (use / for root)."),
 			"dockerfile_path": stringProperty("Required. Path to Dockerfile in repo (must start with /)."),
 
-			"interface_type": enumProperty("Required. DEFAULT (chat API on /chat, port 8000) or CUSTOM (user-provided OpenAPI).", []string{"DEFAULT", "CUSTOM"}),
+			"interface_type": enumProperty("Optional. DEFAULT (chat API on /chat, port 8000) or CUSTOM (user-provided OpenAPI). Default: DEFAULT.", []string{"DEFAULT", "CUSTOM"}),
 			"port":           intProperty("Required when interface_type is CUSTOM. Port number where the agent listens."),
-			"base_path":      stringProperty("Required when interface_type is CUSTOM. API base path (e.g., / or /api/v1)."),
+			"base_path":      stringProperty("Optional. API base path (default: /). Required when interface_type is CUSTOM."),
 			"openapi_path":   stringProperty("Required when interface_type is CUSTOM. OpenAPI spec file path within the repo (must start with /)."),
 
 			"enable_auto_instrumentation": boolProperty("Optional. Enable OTEL auto instrumentation for observability."),
@@ -231,10 +246,10 @@ func createInternalAgentPython(handler AgentToolsetHandler, defaultOrg string) f
 			return nil, nil, fmt.Errorf("app_path is required")
 		}
 		if strings.TrimSpace(input.LanguageVersion) == "" {
-			return nil, nil, fmt.Errorf("language_version is required")
+			input.LanguageVersion = "3.11"
 		}
 		if strings.TrimSpace(input.RunCommand) == "" {
-			return nil, nil, fmt.Errorf("run_command is required")
+			input.RunCommand = "python main.py"
 		}
 		if strings.TrimSpace(input.InterfaceType) == "" {
 			return nil, nil, fmt.Errorf("interface_type is required")
@@ -313,7 +328,7 @@ func createInternalAgentDocker(handler AgentToolsetHandler, defaultOrg string) f
 			return nil, nil, fmt.Errorf("app_path is required")
 		}
 		if strings.TrimSpace(input.DockerfilePath) == "" {
-			return nil, nil, fmt.Errorf("dockerfile_path is required")
+			input.DockerfilePath = "/Dockerfile"
 		}
 		if strings.TrimSpace(input.InterfaceType) == "" {
 			return nil, nil, fmt.Errorf("interface_type is required")

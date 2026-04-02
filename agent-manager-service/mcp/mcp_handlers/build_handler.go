@@ -3,8 +3,8 @@ package mcp_handlers
 import (
 	"context"
 
-	"github.com/wso2/agent-manager/agent-manager-service/models"
-	"github.com/wso2/agent-manager/agent-manager-service/services"
+	"github.com/wso2/ai-agent-management-platform/agent-manager-service/models"
+	"github.com/wso2/ai-agent-management-platform/agent-manager-service/services"
 )
 
 // BuildHandler bridges MCP build tools to the agent manager service layer.
@@ -22,4 +22,8 @@ func (h *BuildHandler) ListAgentBuilds(ctx context.Context, orgName string, proj
 
 func (h *BuildHandler) GetBuildLogs(ctx context.Context, orgName string, projectName string, agentName string, buildName string) (*models.LogsResponse, error) {
 	return h.agentSvc.GetBuildLogs(ctx, orgName, projectName, agentName, buildName)
+}
+
+func (h *BuildHandler) BuildAgent(ctx context.Context, orgName string, projectName string, agentName string, commitId string) (*models.BuildResponse, error) {
+	return h.agentSvc.BuildAgent(ctx, orgName, projectName, agentName, commitId)
 }
