@@ -64,11 +64,14 @@ type AppParams struct {
 
 	// Services
 
-	AgentManagerService         services.AgentManagerService
-	AgentTokenManagerService    services.AgentTokenManagerService
-	InfraResourceManager        services.InfraResourceManager
+	AgentManagerService      services.AgentManagerService
+	AgentTokenManagerService services.AgentTokenManagerService
+	InfraResourceManager     services.InfraResourceManager
+	EvaluatorManagerService  services.EvaluatorManagerService
+	MonitorManagerService    services.MonitorManagerService
+	MonitorScoresService     *services.MonitorScoresService
 	// ObservabilityManagerService services.ObservabilityManagerService
-	LLMTemplateStore            *services.LLMTemplateStore
+	LLMTemplateStore *services.LLMTemplateStore
 
 	// Clients
 	OpenChoreoClient occlient.OpenChoreoClient
