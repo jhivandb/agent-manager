@@ -27,7 +27,7 @@ type getBuildLogsInput struct {
 func (t *Toolsets) registerBuildTools(server *gomcp.Server) {
 	gomcp.AddTool(server, &gomcp.Tool{
 		Name:        "list_builds",
-		Description: "List current builds for a specific agent.",
+		Description: "List current builds for a specific agent. If a specific build is in progress it may take some time to get complete. ",
 		InputSchema: createSchema(map[string]any{
 			"org_name":     stringProperty("Required. Organization name."),
 			"project_name": stringProperty("Required. Project name where the agent exists."),

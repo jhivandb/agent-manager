@@ -67,7 +67,7 @@ type AppParams struct {
 	AgentManagerService         services.AgentManagerService
 	AgentTokenManagerService    services.AgentTokenManagerService
 	InfraResourceManager        services.InfraResourceManager
-	ObservabilityManagerService services.ObservabilityManagerService
+	// ObservabilityManagerService services.ObservabilityManagerService
 	LLMTemplateStore            *services.LLMTemplateStore
 
 	// Clients

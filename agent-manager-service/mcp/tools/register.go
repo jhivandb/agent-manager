@@ -24,9 +24,9 @@ func (t *Toolsets) Register(server *gomcp.Server) {
 	if t.DeploymentToolset != nil {
 		t.registerDeploymentTools(server)
 	}
-	if t.TraceToolset != nil {
-		t.registerTraceTools(server)
-	}
+	// if t.TraceToolset != nil {
+	// 	t.registerTraceTools(server)
+	// }
 	if t.RuntimeLogToolset != nil {
 		t.registerRuntimeLogTools(server)
 	}

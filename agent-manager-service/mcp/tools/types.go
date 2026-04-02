@@ -13,7 +13,7 @@ type Toolsets struct {
 	ProjectToolset    ProjectToolsetHandler
 	BuildToolset      BuildToolsetHandler
 	DeploymentToolset DeploymentToolsetHandler
-	TraceToolset      TraceToolsetHandler
+	// TraceToolset      TraceToolsetHandler
 	RuntimeLogToolset RuntimeLogToolsetHandler
 	DefaultOrg        string
 }
@@ -40,11 +40,11 @@ type DeploymentToolsetHandler interface {
 	GetAgentDeployments(ctx context.Context, orgName string, projectName string, agentName string) ([]*models.DeploymentResponse, error)
 }
 
-type TraceToolsetHandler interface {
-	ListTraces(ctx context.Context, orgName string, projectName string, agentName string, environment string, startTime string, endTime string, sortOrder string, limit int, offset int) (*models.TraceOverviewResponse, error)
-	ExportTraces(ctx context.Context, orgName string, projectName string, agentName string, environment string, startTime string, endTime string, sortOrder string, limit int, offset int) (*models.TraceExportResponse, error)
-	GetTraceDetails(ctx context.Context, orgName string, projectName string, agentName string, traceID string, environment string) (*models.TraceResponse, error)
-}
+// type TraceToolsetHandler interface {
+// 	ListTraces(ctx context.Context, orgName string, projectName string, agentName string, environment string, startTime string, endTime string, sortOrder string, limit int, offset int) (*models.TraceOverviewResponse, error)
+// 	ExportTraces(ctx context.Context, orgName string, projectName string, agentName string, environment string, startTime string, endTime string, sortOrder string, limit int, offset int) (*models.TraceExportResponse, error)
+// 	GetTraceDetails(ctx context.Context, orgName string, projectName string, agentName string, traceID string, environment string) (*models.TraceResponse, error)
+// }
 
 type RuntimeLogToolsetHandler interface {
 	GetRuntimeLogs(ctx context.Context, orgName string, projectName string, agentName string, payload spec.LogFilterRequest) (*models.LogsResponse, error)

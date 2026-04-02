@@ -20,12 +20,12 @@ import (
 	"net/http"
 
 	"github.com/wso2/agent-manager/agent-manager-service/config"
-	"github.com/wso2/ai-agent-management-platform/agent-manager-service/mcp"
-	mcphandlers "github.com/wso2/ai-agent-management-platform/agent-manager-service/mcp/mcp_handlers"
-	mcptools "github.com/wso2/ai-agent-management-platform/agent-manager-service/mcp/tools"
+	"github.com/wso2/agent-manager/agent-manager-service/mcp"
+	mcphandlers "github.com/wso2/agent-manager/agent-manager-service/mcp/mcp_handlers"
+	mcptools "github.com/wso2/agent-manager/agent-manager-service/mcp/tools"
 	"github.com/wso2/agent-manager/agent-manager-service/middleware"
 	"github.com/wso2/agent-manager/agent-manager-service/middleware/logger"
-	mcpmiddleware "github.com/wso2/ai-agent-management-platform/agent-manager-service/middleware/mcp"
+	mcpmiddleware "github.com/wso2/agent-manager/agent-manager-service/middleware/mcp"
 	"github.com/wso2/agent-manager/agent-manager-service/wiring"
 )
 
@@ -45,14 +45,14 @@ func MakeHTTPHandler(params *wiring.AppParams) http.Handler {
 	projectHandler := mcphandlers.NewProjectHandler(params.InfraResourceManager)
 	buildHandler := mcphandlers.NewBuildHandler(params.AgentManagerService)
 	deploymentHandler := mcphandlers.NewDeploymentHandler(params.AgentManagerService)
-	traceHandler := mcphandlers.NewTraceHandler(params.ObservabilityManagerService)
+	// traceHandler := mcphandlers.NewTraceHandler(params.ObservabilityManagerService)
 	runtimeLogHandler := mcphandlers.NewRuntimeLogHandler(params.AgentManagerService)
 	toolsets := &mcptools.Toolsets{
 		AgentToolset:      agentHandler,
 		ProjectToolset:    projectHandler,
 		BuildToolset:      buildHandler,
 		DeploymentToolset: deploymentHandler,
-		TraceToolset:      traceHandler,
+		// TraceToolset:      traceHandler,
 		RuntimeLogToolset: runtimeLogHandler,
 		DefaultOrg:        "default",
 	}
