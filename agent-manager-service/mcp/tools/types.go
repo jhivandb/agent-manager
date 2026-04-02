@@ -7,8 +7,8 @@ import (
 =======
 >>>>>>> e9b61488 (mcp tools v1)
 
-	"github.com/wso2/ai-agent-management-platform/agent-manager-service/models"
-	"github.com/wso2/ai-agent-management-platform/agent-manager-service/spec"
+	"github.com/wso2/agent-manager/agent-manager-service/models"
+	"github.com/wso2/agent-manager/agent-manager-service/spec"
 )
 
 // Toolsets groups MCP tool handlers and configuration.

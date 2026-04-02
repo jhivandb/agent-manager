@@ -3,10 +3,10 @@ package mcp_handlers
 import (
 	"context"
 
-	"github.com/wso2/ai-agent-management-platform/agent-manager-service/catalog"
-	"github.com/wso2/ai-agent-management-platform/agent-manager-service/models"
-	"github.com/wso2/ai-agent-management-platform/agent-manager-service/services"
-	"github.com/wso2/ai-agent-management-platform/agent-manager-service/spec"
+	"github.com/wso2/agent-manager/agent-manager-service/catalog"
+	"github.com/wso2/agent-manager/agent-manager-service/models"
+	"github.com/wso2/agent-manager/agent-manager-service/services"
+	"github.com/wso2/agent-manager/agent-manager-service/spec"
 )
 
 // EvaluatorHandler bridges MCP evaluator tools to the evaluator service layer.

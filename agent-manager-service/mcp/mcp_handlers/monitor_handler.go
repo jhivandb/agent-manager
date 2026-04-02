@@ -3,8 +3,8 @@ package mcp_handlers
 import (
 	"context"
 
-	"github.com/wso2/ai-agent-management-platform/agent-manager-service/models"
-	"github.com/wso2/ai-agent-management-platform/agent-manager-service/services"
+	"github.com/wso2/agent-manager/agent-manager-service/models"
+	"github.com/wso2/agent-manager/agent-manager-service/services"
 )
 
 // MonitorHandler bridges MCP monitor tools to the monitor service layer.

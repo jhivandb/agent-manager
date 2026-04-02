@@ -19,14 +19,14 @@ package api
 import (
 	"net/http"
 
-	"github.com/wso2/ai-agent-management-platform/agent-manager-service/config"
-	"github.com/wso2/ai-agent-management-platform/agent-manager-service/mcp"
-	mcphandlers "github.com/wso2/ai-agent-management-platform/agent-manager-service/mcp/mcp_handlers"
-	mcptools "github.com/wso2/ai-agent-management-platform/agent-manager-service/mcp/tools"
-	"github.com/wso2/ai-agent-management-platform/agent-manager-service/middleware"
-	"github.com/wso2/ai-agent-management-platform/agent-manager-service/middleware/logger"
-	mcpmiddleware "github.com/wso2/ai-agent-management-platform/agent-manager-service/middleware/mcp"
-	"github.com/wso2/ai-agent-management-platform/agent-manager-service/wiring"
+	"github.com/wso2/agent-manager/agent-manager-service/config"
+	"github.com/wso2/agent-manager/agent-manager-service/mcp"
+	mcphandlers "github.com/wso2/agent-manager/agent-manager-service/mcp/mcp_handlers"
+	mcptools "github.com/wso2/agent-manager/agent-manager-service/mcp/tools"
+	"github.com/wso2/agent-manager/agent-manager-service/middleware"
+	"github.com/wso2/agent-manager/agent-manager-service/middleware/logger"
+	mcpmiddleware "github.com/wso2/agent-manager/agent-manager-service/middleware/mcp"
+	"github.com/wso2/agent-manager/agent-manager-service/wiring"
 )
 
 // MakeHTTPHandler creates a new HTTP handler with middleware and routes

@@ -7,8 +7,8 @@ package tools
 
 // 	gomcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
-// 	"github.com/wso2/ai-agent-management-platform/agent-manager-service/spec"
-// 	"github.com/wso2/ai-agent-management-platform/agent-manager-service/utils"
+// 	"github.com/wso2/agent-manager/agent-manager-service/spec"
+// 	"github.com/wso2/agent-manager/agent-manager-service/utils"
 // )
 
 // type listCommitsInput struct {

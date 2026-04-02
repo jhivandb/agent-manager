@@ -11,9 +11,9 @@ import (
 
 	gomcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	reqlogger "github.com/wso2/ai-agent-management-platform/agent-manager-service/middleware/logger"
-	"github.com/wso2/ai-agent-management-platform/agent-manager-service/models"
-	"github.com/wso2/ai-agent-management-platform/agent-manager-service/utils"
+	reqlogger "github.com/wso2/agent-manager/agent-manager-service/middleware/logger"
+	"github.com/wso2/agent-manager/agent-manager-service/models"
+	"github.com/wso2/agent-manager/agent-manager-service/utils"
 )
 
 func createSchema(properties map[string]any, required []string) map[string]any {

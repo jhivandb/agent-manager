@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/wso2/ai-agent-management-platform/agent-manager-service/models"
-	"github.com/wso2/ai-agent-management-platform/agent-manager-service/services"
-	"github.com/wso2/ai-agent-management-platform/agent-manager-service/spec"
+	"github.com/wso2/agent-manager/agent-manager-service/models"
+	"github.com/wso2/agent-manager/agent-manager-service/services"
+	"github.com/wso2/agent-manager/agent-manager-service/spec"
 )
 
 // AgentHandler bridges MCP tools to the agent manager service layer.

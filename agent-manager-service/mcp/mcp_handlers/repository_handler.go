@@ -3,9 +3,9 @@ package mcp_handlers
 // import (
 // 	"context"
 
-// 	"github.com/wso2/ai-agent-management-platform/agent-manager-service/clients/gitprovider"
-// 	"github.com/wso2/ai-agent-management-platform/agent-manager-service/services"
-// 	"github.com/wso2/ai-agent-management-platform/agent-manager-service/spec"
+// 	"github.com/wso2/agent-manager/agent-manager-service/clients/gitprovider"
+// 	"github.com/wso2/agent-manager/agent-manager-service/services"
+// 	"github.com/wso2/agent-manager/agent-manager-service/spec"
 // )
 
 // // RepositoryHandler bridges MCP repository tools to the repository service.

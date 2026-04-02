@@ -7,9 +7,9 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/wso2/ai-agent-management-platform/agent-manager-service/models"
-	"github.com/wso2/ai-agent-management-platform/agent-manager-service/repositories"
-	"github.com/wso2/ai-agent-management-platform/agent-manager-service/services"
+	"github.com/wso2/agent-manager/agent-manager-service/models"
+	"github.com/wso2/agent-manager/agent-manager-service/repositories"
+	"github.com/wso2/agent-manager/agent-manager-service/services"
 )
 
 // MonitorScoresHandler bridges MCP score tools to the score service layer.
