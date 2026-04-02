@@ -6,6 +6,7 @@ import (
 
 	gomcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/wso2/agent-manager/agent-manager-service/models"
 	"github.com/wso2/agent-manager/agent-manager-service/utils"
 )
 
@@ -18,6 +19,13 @@ type listBuildsInput struct {
 }
 
 type getBuildLogsInput struct {
+	OrgName     string `json:"org_name"`
+	ProjectName string `json:"project_name"`
+	AgentName   string `json:"agent_name"`
+	BuildName   string `json:"build_name"`
+}
+
+type getBuildDetailsInput struct {
 	OrgName     string `json:"org_name"`
 	ProjectName string `json:"project_name"`
 	AgentName   string `json:"agent_name"`
@@ -65,6 +73,17 @@ func (t *Toolsets) registerBuildTools(server *gomcp.Server) {
 			"build_name":   stringProperty("Required. Build name to fetch logs for."),
 		}, []string{"project_name", "agent_name", "build_name"}),
 	}, withToolLogging("get_build_logs", getBuildLogs(t.BuildToolset, t.DefaultOrg)))
+
+	gomcp.AddTool(server, &gomcp.Tool{
+		Name:        "get_build_details",
+		Description: "Get detailed build information (steps, duration, parameters) for a specific build.",
+		InputSchema: createSchema(map[string]any{
+			"org_name":     stringProperty("Required. Organization name."),
+			"project_name": stringProperty("Required. Project name where the agent exists."),
+			"agent_name":   stringProperty("Required. Agent name that owns the build."),
+			"build_name":   stringProperty("Required. Build name to fetch details for."),
+		}, []string{"project_name", "agent_name", "build_name"}),
+	}, withToolLogging("get_build_details", getBuildDetails(t.BuildToolset, t.DefaultOrg)))
 }
 
 func listBuilds(handler BuildToolsetHandler, defaultOrg string) func(context.Context, *gomcp.CallToolRequest, listBuildsInput) (*gomcp.CallToolResult, any, error) {
@@ -106,7 +125,7 @@ func listBuilds(handler BuildToolsetHandler, defaultOrg string) func(context.Con
 			"org_name":     orgName,
 			"project_name": input.ProjectName,
 			"agent_name":   input.AgentName,
-			"builds":       utils.ConvertToBuildListResponse(builds),
+			"builds":       reduceBuildListResponse(builds),
 			"total":        total,
 			"limit":        int32(limit),
 			"offset":       int32(offset),
@@ -143,6 +162,38 @@ func getBuildLogs(handler BuildToolsetHandler, defaultOrg string) func(context.C
 	}
 }
 
+func getBuildDetails(handler BuildToolsetHandler, defaultOrg string) func(context.Context, *gomcp.CallToolRequest, getBuildDetailsInput) (*gomcp.CallToolResult, any, error) {
+	return func(ctx context.Context, _ *gomcp.CallToolRequest, input getBuildDetailsInput) (*gomcp.CallToolResult, any, error) {
+		if input.ProjectName == "" {
+			return nil, nil, fmt.Errorf("project_name is required")
+		}
+		if input.AgentName == "" {
+			return nil, nil, fmt.Errorf("agent_name is required")
+		}
+		if input.BuildName == "" {
+			return nil, nil, fmt.Errorf("build_name is required")
+		}
+
+		orgName := resolveOrgName(defaultOrg, input.OrgName)
+		if orgName == "" {
+			return nil, nil, fmt.Errorf("org_name is required")
+		}
+
+		result, err := handler.GetBuild(ctx, orgName, input.ProjectName, input.AgentName, input.BuildName)
+		if err != nil {
+			return nil, nil, wrapToolError("get_build_details", err)
+		}
+
+		response := map[string]any{
+			"org_name":     orgName,
+			"project_name": input.ProjectName,
+			"agent_name":   input.AgentName,
+			"build":        utils.ConvertToBuildDetailsResponse(result),
+		}
+		return handleToolResult(response, nil)
+	}
+}
+
 func buildAgent(handler BuildToolsetHandler, defaultOrg string) func(context.Context, *gomcp.CallToolRequest, buildAgentInput) (*gomcp.CallToolResult, any, error) {
 	return func(ctx context.Context, _ *gomcp.CallToolRequest, input buildAgentInput) (*gomcp.CallToolResult, any, error) {
 		if input.ProjectName == "" {
@@ -176,4 +227,27 @@ func buildAgent(handler BuildToolsetHandler, defaultOrg string) func(context.Con
 
 		return handleToolResult(response, nil)
 	}
+}
+
+func reduceBuildListResponse(builds []*models.BuildResponse) []map[string]any {
+	if len(builds) == 0 {
+		return []map[string]any{}
+	}
+	out := make([]map[string]any, 0, len(builds))
+	for _, build := range builds {
+		if build == nil {
+			continue
+		}
+		out = append(out, map[string]any{
+			"buildId":     build.UUID,
+			"buildName":   build.Name,
+			"projectName": build.ProjectName,
+			"agentName":   build.AgentName,
+			"startedAt":   build.StartedAt,
+			"endedAt":     build.EndedAt,
+			"imageId":     build.ImageId,
+			"status":      build.Status,
+		})
+	}
+	return out
 }

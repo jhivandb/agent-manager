@@ -24,6 +24,10 @@ func (h *BuildHandler) GetBuildLogs(ctx context.Context, orgName string, project
 	return h.agentSvc.GetBuildLogs(ctx, orgName, projectName, agentName, buildName)
 }
 
+func (h *BuildHandler) GetBuild(ctx context.Context, orgName string, projectName string, agentName string, buildName string) (*models.BuildDetailsResponse, error) {
+	return h.agentSvc.GetBuild(ctx, orgName, projectName, agentName, buildName)
+}
+
 func (h *BuildHandler) BuildAgent(ctx context.Context, orgName string, projectName string, agentName string, commitId string) (*models.BuildResponse, error) {
 	return h.agentSvc.BuildAgent(ctx, orgName, projectName, agentName, commitId)
 }
