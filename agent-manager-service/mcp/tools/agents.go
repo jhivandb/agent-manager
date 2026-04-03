@@ -111,7 +111,9 @@ type listProjectAgentPairsOutput struct {
 func (t *Toolsets) registerAgentTools(server *gomcp.Server) {
 	gomcp.AddTool(server, &gomcp.Tool{
 		Name:        "create_internal_agent_python",
-		Description: "Register an agent as a platform-hosted (internal) Python buildpack agent. This will trigger an initial build automatically and return the created agent details.",
+		Description: "Register an agent as a platform-hosted (internal) Python buildpack agent. This will trigger an initial build automatically and return the created agent details."+
+					"If not sure about the the agent type(internal/external) ask the user and confirm the preference type before calling this tool",
+
 		InputSchema: createSchema(map[string]any{
 			"org_name":     stringProperty("Optional. Organization name."),
 			"project_name": stringProperty("Required. Project name where the agent will be created."),
@@ -144,7 +146,9 @@ func (t *Toolsets) registerAgentTools(server *gomcp.Server) {
 
 	gomcp.AddTool(server, &gomcp.Tool{
 		Name:        "create_internal_agent_docker",
-		Description: "Register an agent as platform-hosted (internal) Docker agent. This will trigger an initial build automatically and return the created agent details.",
+		Description: "Register an agent as platform-hosted (internal) Docker agent. This will trigger an initial build automatically and return the created agent details."+
+					"If not sure about the the agent type(internal/external) ask the user and confirm the preference type before calling this tool",
+
 		InputSchema: createSchema(map[string]any{
 			"org_name":     stringProperty("Optional. Organization name."),
 			"project_name": stringProperty("Required. Project name where the agent will be created."),
@@ -175,7 +179,8 @@ func (t *Toolsets) registerAgentTools(server *gomcp.Server) {
 
 	gomcp.AddTool(server, &gomcp.Tool{
 		Name:        "create_external_agent",
-		Description: "Register an agent as externally-hosted and return setup steps for enabling instrumentation. This will allow getting observalibity and evaluation for the agents",
+		Description: "Register an agent as externally-hosted and return setup steps for enabling instrumentation. This will allow getting observalibity and evaluation for the agents"+
+			"If not sure about the the agent type(internal/external) ask the user and confirm the preference type before calling this tool",
 		InputSchema: createSchema(map[string]any{
 			"org_name":     stringProperty("Optional. Organization name."),
 			"project_name": stringProperty("Required. Project name where the agent will be registered."),
