@@ -44,7 +44,7 @@ func (t *Toolsets) registerBuildTools(server *gomcp.Server) {
 		Name:        "list_builds",
 		Description: "List current builds for a specific agent. " +
 		 	"Builds represent the history of compilation processes for an agent, tied to specific commits and build parameters. " +
-			"If a specific build is still in progress, it might take sometime to get completed",
+			"If a specific build is still in progress, it might take some time to get completed",
 		InputSchema: createSchema(map[string]any{
 			"org_name":     stringProperty("Required. Organization name."),
 			"project_name": stringProperty("Required. Project name where the agent exists."),
@@ -58,7 +58,7 @@ func (t *Toolsets) registerBuildTools(server *gomcp.Server) {
 		Name:        "build_agent",
 		Description: "Trigger a new build for an existing agent." +
 		 " A build compiles the agent source into a runnable image, tied to a specific commit and build parameters." +
-		 "Once the build completes, deployment is automatically triggered.",
+		 "Once the build completes and succeeds, deployment is automatically triggered.",
 		InputSchema: createSchema(map[string]any{
 			"org_name":     stringProperty("Required. Organization name."),
 			"project_name": stringProperty("Required. Project name where the agent exists."),
@@ -82,7 +82,7 @@ func (t *Toolsets) registerBuildTools(server *gomcp.Server) {
 	gomcp.AddTool(server, &gomcp.Tool{
 		Name:        "get_build_details",
 		Description: "Get detailed build information for a specific build  including steps, duration, and build parameters. "+
-			"If the build is still in progress, it might take sometime to get completed",
+			"If the build is still in progress, it might take some time to get completed",
 		InputSchema: createSchema(map[string]any{
 			"org_name":     stringProperty("Required. Organization name."),
 			"project_name": stringProperty("Required. Project name where the agent exists."),
