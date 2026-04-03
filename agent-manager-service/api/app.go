@@ -44,7 +44,7 @@ func MakeHTTPHandler(params *wiring.AppParams) http.Handler {
 	projectHandler := mcphandlers.NewProjectHandler(params.InfraResourceManager)
 	buildHandler := mcphandlers.NewBuildHandler(params.AgentManagerService)
 	deploymentHandler := mcphandlers.NewDeploymentHandler(params.AgentManagerService)
-	traceHandler := mcphandlers.NewTraceHandler(params.ObservabilityManagerService)
+	// traceHandler := mcphandlers.NewTraceHandler(params.ObservabilityManagerService)
 	observerHandler := mcphandlers.NewObserverHandler(params.AgentManagerService)
 	evaluatorHandler := mcphandlers.NewEvaluatorHandler(params.EvaluatorManagerService)
 	monitorHandler := mcphandlers.NewMonitorHandler(params.MonitorManagerService)
@@ -55,7 +55,7 @@ func MakeHTTPHandler(params *wiring.AppParams) http.Handler {
 		// RepositoryToolset:    repositoryHandler,
 		BuildToolset:         buildHandler,
 		DeploymentToolset:    deploymentHandler,
-		TraceToolset:         traceHandler,
+		// TraceToolset:         traceHandler,
 		RuntimeLogToolset:    observerHandler,
 		EvaluatorToolset:     evaluatorHandler,
 		MonitorToolset:       monitorHandler,
