@@ -39,14 +39,17 @@ type buildAgentInput struct {
 	CommitID    *string `json:"commit_id,omitempty"`
 }
 
+const buildRetryAfterSeconds = 120
+
 func (t *Toolsets) registerBuildTools(server *gomcp.Server) {
 	gomcp.AddTool(server, &gomcp.Tool{
-		Name:        "list_builds",
+		Name: "list_builds",
 		Description: "List current builds for a specific agent. " +
-		 	"Builds represent the history of compilation processes for an agent, tied to specific commits and build parameters. " +
-			"If a specific build is still in progress, it might take some time to get completed",
+			"Builds represent the history of compilation processes for an agent, tied to specific commits and build parameters. " +
+			"If a specific build is still in progress, it might take some time (couple of minutes) to get completed. " +
+			"Once a build is completed successfully, deployment is triggered automatically.",
 		InputSchema: createSchema(map[string]any{
-			"org_name":     stringProperty("Required. Organization name."),
+			"org_name":     stringProperty("Optional. Organization name."),
 			"project_name": stringProperty("Required. Project name where the agent exists."),
 			"agent_name":   stringProperty("Required. Agent name to list builds for."),
 			"limit":        intProperty(fmt.Sprintf("Optional. Max builds to return (default %d, min %d, max %d).", utils.DefaultLimit, utils.MinLimit, utils.MaxLimit)),
@@ -55,24 +58,24 @@ func (t *Toolsets) registerBuildTools(server *gomcp.Server) {
 	}, withToolLogging("list_builds", listBuilds(t.BuildToolset, t.DefaultOrg)))
 
 	gomcp.AddTool(server, &gomcp.Tool{
-		Name:        "build_agent",
+		Name: "build_agent",
 		Description: "Trigger a new build for an existing agent." +
-		 " A build compiles the agent source into a runnable image, tied to a specific commit and build parameters." +
-		 "Once the build completes and succeeds, deployment is automatically triggered.",
+			" A build compiles the agent source into a runnable image, tied to a specific commit and build parameters." +
+			"Once the build completes and succeeds, deployment is automatically triggered.",
 		InputSchema: createSchema(map[string]any{
-			"org_name":     stringProperty("Required. Organization name."),
+			"org_name":     stringProperty("Optional. Organization name."),
 			"project_name": stringProperty("Required. Project name where the agent exists."),
-			"agent_name":   stringProperty("Required. Agent name to build."),
+			"agent_name":   stringProperty("Required. Agent name to trigger build for."),
 			"commit_id":    stringProperty("Optional. Commit ID to build. Defaults to latest."),
 		}, []string{"project_name", "agent_name"}),
 	}, withToolLogging("build_agent", buildAgent(t.BuildToolset, t.DefaultOrg)))
 
 	gomcp.AddTool(server, &gomcp.Tool{
-		Name:        "get_build_logs",
+		Name: "get_build_logs",
 		Description: "Fetch build logs for a specific build of an internal agent." +
 			"Use when troubleshooting build failures or monitoring build progress.",
 		InputSchema: createSchema(map[string]any{
-			"org_name":     stringProperty("Required. Organization name."),
+			"org_name":     stringProperty("Optional. Organization name."),
 			"project_name": stringProperty("Required. Project name where the agent exists."),
 			"agent_name":   stringProperty("Required. Agent name that owns the build."),
 			"build_name":   stringProperty("Required. Build name to fetch logs for."),
@@ -80,11 +83,11 @@ func (t *Toolsets) registerBuildTools(server *gomcp.Server) {
 	}, withToolLogging("get_build_logs", getBuildLogs(t.BuildToolset, t.DefaultOrg)))
 
 	gomcp.AddTool(server, &gomcp.Tool{
-		Name:        "get_build_details",
-		Description: "Get detailed build information for a specific build  including steps, duration, and build parameters. "+
+		Name: "get_build_details",
+		Description: "Get detailed build information for a specific build  including steps, duration, and build parameters. " +
 			"If the build is still in progress, it might take some time to get completed",
 		InputSchema: createSchema(map[string]any{
-			"org_name":     stringProperty("Required. Organization name."),
+			"org_name":     stringProperty("Optional. Organization name."),
 			"project_name": stringProperty("Required. Project name where the agent exists."),
 			"agent_name":   stringProperty("Required. Agent name that owns the build."),
 			"build_name":   stringProperty("Required. Build name to fetch details for."),
@@ -135,6 +138,7 @@ func listBuilds(handler BuildToolsetHandler, defaultOrg string) func(context.Con
 			"total":        total,
 			"limit":        int32(limit),
 			"offset":       int32(offset),
+			"note":         "If a build completes successfully, deployment is triggered automatically. No need to trigger deployment separately.",
 		}
 
 		return handleToolResult(response, nil)
@@ -196,6 +200,10 @@ func getBuildDetails(handler BuildToolsetHandler, defaultOrg string) func(contex
 			"agent_name":   input.AgentName,
 			"build":        utils.ConvertToBuildDetailsResponse(result),
 		}
+		if result != nil && isBuildInProgress(result.Status) {
+			response["retry_after_seconds"] = buildRetryAfterSeconds
+			response["note"] = "Build is still in progress. Wait a couple of minutes before checking again."
+		}
 		return handleToolResult(response, nil)
 	}
 }
@@ -244,7 +252,7 @@ func reduceBuildListResponse(builds []*models.BuildResponse) []map[string]any {
 		if build == nil {
 			continue
 		}
-		out = append(out, map[string]any{
+		item := map[string]any{
 			"buildId":     build.UUID,
 			"buildName":   build.Name,
 			"projectName": build.ProjectName,
@@ -253,7 +261,20 @@ func reduceBuildListResponse(builds []*models.BuildResponse) []map[string]any {
 			"endedAt":     build.EndedAt,
 			"imageId":     build.ImageId,
 			"status":      build.Status,
-		})
+		}
+		if isBuildInProgress(build.Status) {
+			item["retry_after_seconds"] = buildRetryAfterSeconds
+		}
+		out = append(out, item)
 	}
 	return out
+}
+
+func isBuildInProgress(status string) bool {
+	switch status {
+	case "BuildInitiated", "BuildTriggered", "BuildRunning", "BuildCompleted":
+		return true
+	default:
+		return false
+	}
 }

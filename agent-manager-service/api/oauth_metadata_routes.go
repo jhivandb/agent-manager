@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/wso2/agent-manager/agent-manager-service/config"
+	"github.com/wso2/ai-agent-management-platform/agent-manager-service/config"
 )
 
 type protectedResourceMetadata struct {
@@ -57,5 +57,5 @@ func requestBaseURL(r *http.Request) string {
 	if host == "" {
 		host = r.URL.Host
 	}
-	return scheme + "://" + host
+	return scheme + "://" + host	
 }
