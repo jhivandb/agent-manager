@@ -64,7 +64,7 @@ helm_install_if_not_exists "external-secrets" "external-secrets" \
     --set installCRDs=true
 
 echo "⏳ Waiting for External Secrets Operator to be ready..."
-kubectl wait --for=condition=Available deployment --all -n external-secrets --context ${CLUSTER_CONTEXT} --timeout=300s
+kubectl wait --for=condition=Available deployment --all -n external-secrets --context ${CLUSTER_CONTEXT} --timeout=180s
 echo "✅ External Secrets Operator is ready!"
 
 # ============================================================================
