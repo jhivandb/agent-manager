@@ -11,7 +11,7 @@ source "$SCRIPT_DIR/utils.sh"
 # ============================================================================
 PROFILE="${1:-dev}"
 COLIMA_CPU=4
-COLIMA_MEMORY=10
+COLIMA_MEMORY=8
 COLIMA_VM_TYPE="vz"
 
 # Check prerequisites
