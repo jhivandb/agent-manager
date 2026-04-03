@@ -120,7 +120,7 @@ func (t *Toolsets) registerAgentTools(server *gomcp.Server) {
 
 			"repository_url": stringProperty("Required. GitHub root repository URL. Do not enter .git and the end of repo name(eg: https://github.com/user/repo)"),
 			"branch":         stringProperty("Required. Github repository branch name."),
-			"app_path":       stringProperty("Required. Path of the project where agent code lives within the repository (use / for root. specify path if not)."),
+			"app_path":       stringProperty("Required. Path of the project where agent code lives within the repository (use / for root. specify path if not). It must start with /"),
 
 			"language_version": stringProperty("Optional. Python version (default: 3.11)."),
 			"run_command":      stringProperty("Optional. Start command to run the agent (default: python main.py)."),
@@ -289,7 +289,7 @@ func createInternalAgentPython(handler AgentToolsetHandler, defaultOrg string) f
 			"project_name": input.ProjectName,
 			"agent_name":   agentName,
 			"display_name": input.DisplayName,
-			"note":         "agent creation accepted; initial build triggered",
+			"note":         "Agent created and initial build triggered. Use list_builds or get_build_details to check status and get_build_logs to follow build progress.",
 		}
 		return handleToolResult(response, nil)
 	}

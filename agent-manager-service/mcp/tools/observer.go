@@ -35,7 +35,7 @@ type getMetricsInput struct {
 func (t *Toolsets) registerMetricsTools(server *gomcp.Server) {
 	gomcp.AddTool(server, &gomcp.Tool{
 		Name:        "get_metrics",
-		Description: "Fetch CPU/memory resource metrics for an agent in a specific time range.",
+		Description: "Fetch CPU and memory resource metrics for an agent in a specific time range.",
 		InputSchema: createSchema(map[string]any{
 			"org_name":     stringProperty("Optional. Organization name."),
 			"project_name": stringProperty("Required. Project name."),

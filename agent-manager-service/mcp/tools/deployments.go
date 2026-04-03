@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	gomcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -35,21 +36,22 @@ type deployAgentInput struct {
 func (t *Toolsets) registerDeploymentTools(server *gomcp.Server) {
 	gomcp.AddTool(server, &gomcp.Tool{
 		Name:        "list_deployments",
-		Description: "List current deployments for an agent per environment.",
+		Description: "List all deployments for an agent across environments, including the current status for each (active, in-progress, failed, not-deployed, suspended).",
 		InputSchema: createSchema(map[string]any{
-			"org_name":     stringProperty("Required. Organization name."),
+			"org_name":     stringProperty("Optional. Organization name."),
 			"project_name": stringProperty("Required. Project name where the agent exists."),
-			"agent_name":   stringProperty("Required. Agent name to check deployments for."),
+			"agent_name":   stringProperty("Required. Name of the agent to check deployments for."),
 		}, []string{"project_name", "agent_name"}),
 	}, withToolLogging("list_deployments", listDeployments(t.DeploymentToolset, t.DefaultOrg)))
 
 	gomcp.AddTool(server, &gomcp.Tool{
 		Name:        "deploy_agent",
-		Description: "Deploy an existing internal agent. (Deployed to the lowest environment in the deployment pipeline.)",
+		Description: "Deploy an existing agent with a specific build. Will be deployed to the lowest environment in the deployment pipeline."+
+			"Use this to redeploy a selected build, since successful builds are auto deployed by default.",
 		InputSchema: createSchema(map[string]any{
 			"org_name":                    stringProperty("Optional. Organization name."),
 			"project_name":                stringProperty("Required. Project name where the agent exists."),
-			"agent_name":                  stringProperty("Required. Agent name to deploy."),
+			"agent_name":                  stringProperty("Required. Name of the agent to be deployed."),
 			"image_id":                    stringProperty("Required. Image ID to deploy."),
 			"enable_auto_instrumentation": boolProperty("Optional. Enable auto instrumentation for observability."),
 			"env": arrayProperty("Optional. Environment variables for deployment.", createSchema(map[string]any{
@@ -63,13 +65,13 @@ func (t *Toolsets) registerDeploymentTools(server *gomcp.Server) {
 
 	gomcp.AddTool(server, &gomcp.Tool{
 		Name:        "update_deployment_state",
-		Description: "Update deployment state for an agent in a specific environment (Active or Undeploy).",
+		Description: "Update deployment state for an agent in a specific environment.(redeploy or undeploy)",
 		InputSchema: createSchema(map[string]any{
 			"org_name":     stringProperty("Optional. Organization name."),
-			"project_name": stringProperty("Required. Project name."),
-			"agent_name":   stringProperty("Required. Agent name."),
+			"project_name": stringProperty("Required. Project name where the agent is been registered."),
+			"agent_name":   stringProperty("Required. Name of the specific agent."),
 			"environment":  stringProperty("Required. Environment name."),
-			"state":        enumProperty("Required. Deployment state.", []string{"Active", "Undeploy"}),
+			"state":        enumProperty("Required. Desired deployment state for the specific deployment to update.", []string{"redeploy", "undeploy"}),
 		}, []string{"project_name", "agent_name", "environment", "state"}),
 	}, withToolLogging("update_deployment_state", updateDeploymentState(t.DeploymentToolset, t.DefaultOrg)))
 }
@@ -179,16 +181,22 @@ func updateDeploymentState(handler DeploymentToolsetHandler, defaultOrg string) 
 		if input.Environment == "" {
 			return nil, nil, fmt.Errorf("environment is required")
 		}
-		if input.State != "Active" && input.State != "Undeploy" {
-			return nil, nil, fmt.Errorf("state must be Active or Undeploy")
+		state := strings.ToLower(strings.TrimSpace(input.State))
+		switch state {
+		case "redeploy":
+			state = "active"
+		case "undeploy":
+			// keep as is
+		default:
+			return nil, nil, fmt.Errorf("state must be redeploy or undeploy")
 		}
 
 		orgName := resolveOrgName(defaultOrg, input.OrgName)
 		if orgName == "" {
-			return nil, nil, fmt.Errorf("org_name is required")
+			return nil, nil, fmt.Errorf("Organization name is required")
 		}
 
-		if err := handler.UpdateDeploymentState(ctx, orgName, input.ProjectName, input.AgentName, input.Environment, input.State); err != nil {
+		if err := handler.UpdateDeploymentState(ctx, orgName, input.ProjectName, input.AgentName, input.Environment, state); err != nil {
 			return nil, nil, wrapToolError("update_deployment_state", err)
 		}
 
