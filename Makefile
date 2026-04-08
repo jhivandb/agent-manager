@@ -14,7 +14,7 @@ help:
 	@echo "  make setup-console-local-force - Force reinstall console deps"
 	@echo ""
 	@echo "💻 Daily Development:"
-	@echo "make dev-up                    - Start platform services (console, service, db)"
+	@echo "  make dev-up                  - Start platform services (console, service, db)"
 	@echo "  make dev-down                - Stop platform services"
 	@echo "  make dev-restart             - Restart platform services"
 	@echo "  make dev-rebuild             - Rebuild images and restart services"
@@ -129,8 +129,6 @@ dev-rebuild: setup-console-local
 	@docker volume rm deployments_console_node_modules deployments_console_common_temp 2>/dev/null || true
 	@echo "🧹 Cleaning Rush temp directory..."
 	@rm -rf console/common/temp
-	@echo "🧹 Cleaning Vite prebundle cache..."
-	@rm -rf console/apps/webapp/node_modules/.vite
 	@echo "🔨 Rebuilding Docker images..."
 	@cd deployments && docker compose build --no-cache
 	@echo "🔄 Starting services..."
