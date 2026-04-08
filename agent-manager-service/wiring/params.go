@@ -26,6 +26,7 @@ import (
 	observabilitysvc "github.com/wso2/agent-manager/agent-manager-service/clients/observabilitysvc"
 	occlient "github.com/wso2/agent-manager/agent-manager-service/clients/openchoreosvc/client"
 	"github.com/wso2/agent-manager/agent-manager-service/clients/secretmanagersvc"
+	traceobserversvc "github.com/wso2/agent-manager/agent-manager-service/clients/traceobserversvc"
 	"github.com/wso2/agent-manager/agent-manager-service/config"
 	"github.com/wso2/agent-manager/agent-manager-service/controllers"
 	"github.com/wso2/agent-manager/agent-manager-service/middleware/jwtassertion"
@@ -74,7 +75,8 @@ type AppParams struct {
 	LLMTemplateStore *services.LLMTemplateStore
 
 	// Clients
-	OpenChoreoClient occlient.OpenChoreoClient
+	OpenChoreoClient    occlient.OpenChoreoClient
+	TraceObserverClient traceobserversvc.TraceObserverClient
 
 	// WebSocket
 	WebSocketManager *websocket.Manager
@@ -87,6 +89,7 @@ type AppParams struct {
 type TestClients struct {
 	OpenChoreoClient       occlient.OpenChoreoClient
 	ObservabilitySvcClient observabilitysvc.ObservabilitySvcClient
+	TraceObserverClient    traceobserversvc.TraceObserverClient
 	SecretMgmtClient       secretmanagersvc.SecretManagementClient
 }
 

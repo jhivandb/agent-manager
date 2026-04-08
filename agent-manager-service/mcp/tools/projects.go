@@ -30,10 +30,10 @@ type listProjectsOutput struct {
 	Total    int32             `json:"total"`
 }
 
-type listOrganizationsInput struct {
-	Limit  *int `json:"limit,omitempty"`
-	Offset *int `json:"offset,omitempty"`
-}
+// type listOrganizationsInput struct {
+// 	Limit  *int `json:"limit,omitempty"`
+// 	Offset *int `json:"offset,omitempty"`
+// }
 
 type createProjectInput struct {
 	OrgName     string  `json:"org_name"`
@@ -41,14 +41,16 @@ type createProjectInput struct {
 	Description *string `json:"description"`
 }
 
-type listEnvironmentsInput struct {
-	OrgName string `json:"org_name"`
-}
+// type listEnvironmentsInput struct {
+// 	OrgName string `json:"org_name"`
+// }
 
 func (t *Toolsets) registerProjectTools(server *gomcp.Server) {
 	gomcp.AddTool(server, &gomcp.Tool{
 		Name:        "list_project",
-		Description: "List all projects registered within an organization.",
+		Description: "List all projects registered within an organization."+
+		"Projects are logical containers that group agent-related resources."+
+		"Support pagination using 'limit' and 'offset' parameters.",
 		InputSchema: createSchema(map[string]any{
 			"org_name": stringProperty("Optional. Organization name."),
 			"limit":    intProperty(fmt.Sprintf("Optional. Max projects to return (default %d, min %d, max %d).", utils.DefaultLimit, utils.MinLimit, utils.MaxLimit)),
@@ -67,7 +69,8 @@ func (t *Toolsets) registerProjectTools(server *gomcp.Server) {
 
 	gomcp.AddTool(server, &gomcp.Tool{
 		Name:        "create_project",
-		Description: "Create a new project within an organization. The project name is auto-generated from the display name.",
+		Description: "Create a new project within an organization." +
+		" A unique project name is generated automatically from the display name provided.",
 		InputSchema: createSchema(map[string]any{
 			"org_name":     stringProperty("Optional. Organization name."),
 			"display_name": stringProperty("Required. Project display name."),

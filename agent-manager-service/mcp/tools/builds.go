@@ -44,10 +44,9 @@ const buildRetryAfterSeconds = 120
 func (t *Toolsets) registerBuildTools(server *gomcp.Server) {
 	gomcp.AddTool(server, &gomcp.Tool{
 		Name: "list_builds",
-		Description: "List current builds for a specific agent. " +
-			"Builds represent the history of compilation processes for an agent, tied to specific commits and build parameters. " +
-			"If a specific build is still in progress, it might take some time (couple of minutes) to get completed. " +
-			"Once a build is completed successfully, deployment is triggered automatically.",
+		Description: "List builds for a specific agent" +
+			"Builds are versioned execution records tied to source commits and build parameters, and a successful build automatically trigger deployment."+
+			"If the build is still in progress, it might take some time (few minutes) to get completed",
 		InputSchema: createSchema(map[string]any{
 			"org_name":     stringProperty("Optional. Organization name."),
 			"project_name": stringProperty("Required. Project name where the agent exists."),
@@ -85,7 +84,7 @@ func (t *Toolsets) registerBuildTools(server *gomcp.Server) {
 	gomcp.AddTool(server, &gomcp.Tool{
 		Name: "get_build_details",
 		Description: "Get detailed build information for a specific build  including steps, duration, and build parameters. " +
-			"If the build is still in progress, it might take some time to get completed",
+			"If the build is still in progress, it might take some time (few minutes) to get completed",
 		InputSchema: createSchema(map[string]any{
 			"org_name":     stringProperty("Optional. Organization name."),
 			"project_name": stringProperty("Required. Project name where the agent exists."),

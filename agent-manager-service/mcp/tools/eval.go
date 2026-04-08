@@ -94,7 +94,8 @@ type getEvaluatorOutput struct {
 func (t *Toolsets) registerEvaluatorTools(server *gomcp.Server) {
 	gomcp.AddTool(server, &gomcp.Tool{
 		Name:        "list_evaluators",
-		Description: "List available evaluators (both built-in and custom) for an organization.",
+		Description: "List available evaluators (both built-in and custom) for an organization."+
+				"An evaluator is a quality-check component that runs against execution traces to score specific aspects of agent behavior and output",
 		InputSchema: createSchema(map[string]any{
 			"org_name": stringProperty("Optional. Organization name."),
 			"limit":    intProperty(fmt.Sprintf("Optional. Max evaluators to return (default %d, min %d, max %d).", utils.DefaultLimit, utils.MinLimit, utils.MaxLimit)),
@@ -108,7 +109,7 @@ func (t *Toolsets) registerEvaluatorTools(server *gomcp.Server) {
 
 	gomcp.AddTool(server, &gomcp.Tool{
 		Name:        "get_evaluator",
-		Description: "Get more details about a specific evaluator.",
+		Description: "Get more details about a specific evaluator including its type, level, provider, configuration schema, tags etc.",
 		InputSchema: createSchema(map[string]any{
 			"org_name":     stringProperty("Optional. Organization name."),
 			"evaluator_id": stringProperty("Required. Evaluator identifier."),
@@ -136,7 +137,7 @@ func (t *Toolsets) registerEvaluatorTools(server *gomcp.Server) {
 
 	gomcp.AddTool(server, &gomcp.Tool{
 		Name:        "create_custom_evaluator",
-		Description: "Create a custom evaluator (code or llm_judge).",
+		Description: "Create a custom evaluator (code or llm_judge) to define domain-specific quality checks.",
 		InputSchema: createSchema(map[string]any{
 			"org_name":      stringProperty("Optional. Organization name."),
 			"identifier":    stringProperty("Optional. Custom evaluator identifier (slug)."),

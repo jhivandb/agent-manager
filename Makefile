@@ -14,7 +14,7 @@ help:
 	@echo "  make setup-console-local-force - Force reinstall console deps"
 	@echo ""
 	@echo "💻 Daily Development:"
-	@echo "  make dev-up                  - Start platform services (console, service, db)"
+	@echo "make dev-up                    - Start platform services (console, service, db)"
 	@echo "  make dev-down                - Stop platform services"
 	@echo "  make dev-restart             - Restart platform services"
 	@echo "  make dev-rebuild             - Rebuild images and restart services"

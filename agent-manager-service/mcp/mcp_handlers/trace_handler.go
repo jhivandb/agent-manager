@@ -1,58 +1,103 @@
 package mcp_handlers
 
-// import (
-// 	"context"
+import (
+	"context"
+	"fmt"
 
-// 	"github.com/wso2/agent-manager/agent-manager-service/models"
-// 	"github.com/wso2/agent-manager/agent-manager-service/services"
-// )
+	occlient "github.com/wso2/agent-manager/agent-manager-service/clients/openchoreosvc/client"
+	traceobserversvc "github.com/wso2/agent-manager/agent-manager-service/clients/traceobserversvc"
+)
 
-// // TraceHandler bridges MCP trace tools to the observability service layer.
-// type TraceHandler struct {
-// 	observabilitySvc services.ObservabilityManagerService
-// }
+// TraceHandler bridges MCP trace tools to the trace-observer service.
+type TraceHandler struct {
+	ocClient    occlient.OpenChoreoClient
+	traceClient traceobserversvc.TraceObserverClient
+}
 
-// func NewTraceHandler(observabilitySvc services.ObservabilityManagerService) *TraceHandler {
-// 	return &TraceHandler{observabilitySvc: observabilitySvc}
-// }
+func NewTraceHandler(ocClient occlient.OpenChoreoClient, traceClient traceobserversvc.TraceObserverClient) *TraceHandler {
+	return &TraceHandler{ocClient: ocClient, traceClient: traceClient}
+}
 
-// func (h *TraceHandler) ListTraces(ctx context.Context, orgName string, projectName string, agentName string, environment string, startTime string, endTime string, sortOrder string, limit int, offset int) (*models.TraceOverviewResponse, error) {
-// 	req := services.ListTracesRequest{
-// 		OrgName:     orgName,
-// 		ProjectName: projectName,
-// 		AgentName:   agentName,
-// 		Environment: environment,
-// 		StartTime:   startTime,
-// 		EndTime:     endTime,
-// 		Limit:       limit,
-// 		Offset:      offset,
-// 		SortOrder:   sortOrder,
-// 	}
-// 	return h.observabilitySvc.ListTraces(ctx, req)
-// }
+func (h *TraceHandler) ListTraces(ctx context.Context, orgName string, projectName string, agentName string, environment string, startTime string, endTime string, sortOrder string, limit int, offset int) (map[string]any, error) {
+	componentUid, environmentUid, err := h.resolveComponentEnvironment(ctx, orgName, projectName, agentName, environment)
+	if err != nil {
+		return nil, err
+	}
 
-// func (h *TraceHandler) ExportTraces(ctx context.Context, orgName string, projectName string, agentName string, environment string, startTime string, endTime string, sortOrder string, limit int, offset int) (*models.TraceExportResponse, error) {
-// 	req := services.ListTracesRequest{
-// 		OrgName:     orgName,
-// 		ProjectName: projectName,
-// 		AgentName:   agentName,
-// 		Environment: environment,
-// 		StartTime:   startTime,
-// 		EndTime:     endTime,
-// 		Limit:       limit,
-// 		Offset:      offset,
-// 		SortOrder:   sortOrder,
-// 	}
-// 	return h.observabilitySvc.ExportTraces(ctx, req)
-// }
+	params := traceobserversvc.TraceListParams{
+		ComponentUid:   componentUid,
+		EnvironmentUid: environmentUid,
+		StartTime:      startTime,
+		EndTime:        endTime,
+		Limit:          limit,
+		Offset:         offset,
+		SortOrder:      sortOrder,
+	}
 
-// func (h *TraceHandler) GetTraceDetails(ctx context.Context, orgName string, projectName string, agentName string, traceID string, environment string) (*models.TraceResponse, error) {
-// 	req := services.TraceDetailsRequest{
-// 		TraceID:     traceID,
-// 		OrgName:     orgName,
-// 		ProjectName: projectName,
-// 		AgentName:   agentName,
-// 		Environment: environment,
-// 	}
-// 	return h.observabilitySvc.GetTraceDetails(ctx, req)
-// }
+	return h.traceClient.ListTraces(ctx, params)
+}
+
+func (h *TraceHandler) ExportTraces(ctx context.Context, orgName string, projectName string, agentName string, environment string, startTime string, endTime string, sortOrder string, limit int, offset int) (map[string]any, error) {
+	componentUid, environmentUid, err := h.resolveComponentEnvironment(ctx, orgName, projectName, agentName, environment)
+	if err != nil {
+		return nil, err
+	}
+
+	params := traceobserversvc.TraceListParams{
+		ComponentUid:   componentUid,
+		EnvironmentUid: environmentUid,
+		StartTime:      startTime,
+		EndTime:        endTime,
+		Limit:          limit,
+		Offset:         offset,
+		SortOrder:      sortOrder,
+	}
+
+	return h.traceClient.ExportTraces(ctx, params)
+}
+
+func (h *TraceHandler) GetTraceDetails(ctx context.Context, orgName string, projectName string, agentName string, traceID string, environment string) (map[string]any, error) {
+	componentUid, environmentUid, err := h.resolveComponentEnvironment(ctx, orgName, projectName, agentName, environment)
+	if err != nil {
+		return nil, err
+	}
+
+	params := traceobserversvc.TraceDetailsParams{
+		TraceID:        traceID,
+		ComponentUid:   componentUid,
+		EnvironmentUid: environmentUid,
+	}
+
+	return h.traceClient.GetTrace(ctx, params)
+}
+
+func (h *TraceHandler) resolveComponentEnvironment(ctx context.Context, orgName, projectName, agentName, environment string) (string, string, error) {
+	if h == nil || h.ocClient == nil {
+		return "", "", fmt.Errorf("openchoreo client is not configured")
+	}
+	if h.traceClient == nil {
+		return "", "", fmt.Errorf("trace observer client is not configured")
+	}
+
+	// Validate org and project exist
+	if _, err := h.ocClient.GetOrganization(ctx, orgName); err != nil {
+		return "", "", err
+	}
+	if _, err := h.ocClient.GetProject(ctx, orgName, projectName); err != nil {
+		return "", "", err
+	}
+
+	// Resolve component UID
+	agent, err := h.ocClient.GetComponent(ctx, orgName, projectName, agentName)
+	if err != nil {
+		return "", "", err
+	}
+
+	// Resolve environment UID
+	env, err := h.ocClient.GetEnvironment(ctx, orgName, environment)
+	if err != nil {
+		return "", "", err
+	}
+
+	return agent.UUID, env.UUID, nil
+}

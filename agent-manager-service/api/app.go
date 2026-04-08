@@ -36,7 +36,6 @@ func MakeHTTPHandler(params *wiring.AppParams) http.Handler {
 	// Register health check
 	registerHealthCheck(mux)
 
-
 	registerOAuthProtectedResourceMetadata(mux)
 
 	// MCP endpoint (JWT-authenticated)
@@ -44,18 +43,18 @@ func MakeHTTPHandler(params *wiring.AppParams) http.Handler {
 	projectHandler := mcphandlers.NewProjectHandler(params.InfraResourceManager)
 	buildHandler := mcphandlers.NewBuildHandler(params.AgentManagerService)
 	deploymentHandler := mcphandlers.NewDeploymentHandler(params.AgentManagerService)
-	// traceHandler := mcphandlers.NewTraceHandler(params.ObservabilityManagerService)
+	traceHandler := mcphandlers.NewTraceHandler(params.OpenChoreoClient, params.TraceObserverClient)
 	observerHandler := mcphandlers.NewObserverHandler(params.AgentManagerService)
 	evaluatorHandler := mcphandlers.NewEvaluatorHandler(params.EvaluatorManagerService)
 	monitorHandler := mcphandlers.NewMonitorHandler(params.MonitorManagerService)
 	monitorScoresHandler := mcphandlers.NewMonitorScoresHandler(params.MonitorScoresService)
 	toolsets := &mcptools.Toolsets{
-		AgentToolset:         agentHandler,
-		ProjectToolset:       projectHandler,
+		AgentToolset:   agentHandler,
+		ProjectToolset: projectHandler,
 		// RepositoryToolset:    repositoryHandler,
 		BuildToolset:         buildHandler,
 		DeploymentToolset:    deploymentHandler,
-		// TraceToolset:         traceHandler,
+		TraceToolset:         traceHandler,
 		RuntimeLogToolset:    observerHandler,
 		EvaluatorToolset:     evaluatorHandler,
 		MonitorToolset:       monitorHandler,

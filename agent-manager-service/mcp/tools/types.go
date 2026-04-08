@@ -14,7 +14,7 @@ type Toolsets struct {
 	ProjectToolset       ProjectToolsetHandler
 	BuildToolset         BuildToolsetHandler
 	DeploymentToolset    DeploymentToolsetHandler
-	// TraceToolset         TraceToolsetHandler
+	TraceToolset         TraceToolsetHandler
 	RuntimeLogToolset    RuntimeLogToolsetHandler
 	EvaluatorToolset     EvaluatorToolsetHandler
 	MonitorToolset       MonitorToolsetHandler
@@ -52,11 +52,11 @@ type DeploymentToolsetHandler interface {
 	UpdateDeploymentState(ctx context.Context, orgName string, projectName string, agentName string, environment string, state string) error
 }
 
-// type TraceToolsetHandler interface {
-// 	ListTraces(ctx context.Context, orgName string, projectName string, agentName string, environment string, startTime string, endTime string, sortOrder string, limit int, offset int) (*models.TraceOverviewResponse, error)
-// 	ExportTraces(ctx context.Context, orgName string, projectName string, agentName string, environment string, startTime string, endTime string, sortOrder string, limit int, offset int) (*models.TraceExportResponse, error)
-// 	GetTraceDetails(ctx context.Context, orgName string, projectName string, agentName string, traceID string, environment string) (*models.TraceResponse, error)
-// }
+type TraceToolsetHandler interface {
+	ListTraces(ctx context.Context, orgName string, projectName string, agentName string, environment string, startTime string, endTime string, sortOrder string, limit int, offset int) (map[string]any, error)
+	ExportTraces(ctx context.Context, orgName string, projectName string, agentName string, environment string, startTime string, endTime string, sortOrder string, limit int, offset int) (map[string]any, error)
+	GetTraceDetails(ctx context.Context, orgName string, projectName string, agentName string, traceID string, environment string) (map[string]any, error)
+}
 
 type RuntimeLogToolsetHandler interface {
 	GetRuntimeLogs(ctx context.Context, orgName string, projectName string, agentName string, payload spec.LogFilterRequest) (*models.LogsResponse, error)

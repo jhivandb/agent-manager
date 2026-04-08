@@ -122,6 +122,10 @@ func loadEnvs() {
 	config.Observer = ObserverConfig{
 		URL: r.readOptionalString("OBSERVER_URL", "http://localhost:8085"),
 	}
+	// Trace observer service configuration - used for traces APIs
+	config.TraceObserver = TraceObserverConfig{
+		URL: r.readOptionalString("TRACE_OBSERVER_URL", "http://localhost:9098"),
+	}
 
 	config.IsLocalDevEnv = r.readOptionalBool("IS_LOCAL_DEV_ENV", false)
 	config.DefaultGatewayPort = int(r.readOptionalInt64("DEFAULT_GATEWAY_PORT", 19080))

@@ -111,8 +111,9 @@ type listProjectAgentPairsOutput struct {
 func (t *Toolsets) registerAgentTools(server *gomcp.Server) {
 	gomcp.AddTool(server, &gomcp.Tool{
 		Name:        "create_internal_agent_python",
-		Description: "Register an agent as a platform-hosted (internal) Python buildpack agent. This will trigger an initial build automatically and return the created agent details."+
-					"If not sure about the the agent type(internal/external) ask the user and confirm the preference type before calling this tool",
+		Description: "Register an internal python agent."+
+				"Internal agents are platform-hosted units where source code is fetched, built, deployed, and run by the platform, and the first build is started automatically at creation time." +
+				"If not sure about the the agent type (internal/external) ask the user and confirm the preference type before calling the tool",
 
 		InputSchema: createSchema(map[string]any{
 			"org_name":     stringProperty("Optional. Organization name."),
@@ -146,8 +147,9 @@ func (t *Toolsets) registerAgentTools(server *gomcp.Server) {
 
 	gomcp.AddTool(server, &gomcp.Tool{
 		Name:        "create_internal_agent_docker",
-		Description: "Register an agent as platform-hosted (internal) Docker agent. This will trigger an initial build automatically and return the created agent details."+
-					"If not sure about the the agent type(internal/external) ask the user and confirm the preference type before calling this tool",
+		Description: "Register an internal Docker agent."+
+					"Internal agents are platform-hosted units where source code is fetched, built, deployed, and run by the platform, and the first build is started automatically at creation time." +
+					"If not sure about the the agent type(internal/external) ask the user and confirm the preference type before calling the tool",
 
 		InputSchema: createSchema(map[string]any{
 			"org_name":     stringProperty("Optional. Organization name."),
@@ -179,7 +181,8 @@ func (t *Toolsets) registerAgentTools(server *gomcp.Server) {
 
 	gomcp.AddTool(server, &gomcp.Tool{
 		Name:        "create_external_agent",
-		Description: "Register an agent as externally-hosted and return setup steps for enabling instrumentation. This will allow getting observalibity and evaluation for the agents"+
+		Description: "Register an external agent in a project." +
+		    "External agents run outside the platform, and setup steps are returned to enable instrumentation, observability, and evaluation." +
 			"If not sure about the the agent type(internal/external) ask the user and confirm the preference type before calling this tool",
 		InputSchema: createSchema(map[string]any{
 			"org_name":     stringProperty("Optional. Organization name."),
@@ -192,7 +195,8 @@ func (t *Toolsets) registerAgentTools(server *gomcp.Server) {
 
 	gomcp.AddTool(server, &gomcp.Tool{
 		Name:        "list_agents",
-		Description: "List agents within a specific project.",
+		Description: "List agents within a specific project." +
+			"An agent is an AI application unit registered in the platform, either internal (platform-hosted) or external (externally hosted), with provisioning, runtime configuration, and lifecycle metadata.",
 		InputSchema: createSchema(map[string]any{
 			"org_name":     stringProperty("Optional. Organization name."),
 			"project_name": stringProperty("Required. Project name to list agents from."),
@@ -204,7 +208,7 @@ func (t *Toolsets) registerAgentTools(server *gomcp.Server) {
 	if t.ProjectToolset != nil {
 	gomcp.AddTool(server, &gomcp.Tool{
 		Name:        "list_project_agent_pairs",
-		Description: "List (project, agent) pairs registered within an organization.",
+		Description: "List registered project-agent pairs within an organization, with optional project and agent name filters.",
 			InputSchema: createSchema(map[string]any{
 				"org_name":       stringProperty("Optional. Organization name."),
 				"project_search": stringProperty("Optional. Filter project names by substring (case-insensitive)."),
