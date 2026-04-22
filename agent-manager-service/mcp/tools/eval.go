@@ -22,15 +22,15 @@ type listEvaluatorsInput struct {
 }
 
 type listEvaluatorItem struct {
-	Identifier  string   `json:"identifier"`
+	Identifier string `json:"identifier"`
 	// DisplayName string   `json:"display_name"`
-	Description string   `json:"description"`
+	Description string `json:"description"`
 	// Version     string   `json:"version"`
 	// Provider    string   `json:"provider"`
-	Level       string   `json:"level"`
+	Level string `json:"level"`
 	// Tags        []string `json:"tags"`
-	IsBuiltin   bool     `json:"is_builtin"`
-	Type        string   `json:"type,omitempty"`
+	IsBuiltin bool   `json:"is_builtin"`
+	Type      string `json:"type,omitempty"`
 }
 
 type listEvaluatorsOutput struct {
@@ -93,23 +93,23 @@ type getEvaluatorOutput struct {
 
 func (t *Toolsets) registerEvaluatorTools(server *gomcp.Server) {
 	gomcp.AddTool(server, &gomcp.Tool{
-		Name:        "list_evaluators",
-		Description: "List available evaluators (both built-in and custom) for an organization."+
-				"An evaluator is a quality-check component that runs against execution traces to score specific aspects of agent behavior and output",
+		Name: "list_evaluators",
+		Description: "List all available evaluators within an organization (both built-in and custom) with optional filtering by key words, source and tags." +
+			"An evaluator is a quality-check component that runs against execution traces to score specific aspects of agent behavior and output",
 		InputSchema: createSchema(map[string]any{
 			"org_name": stringProperty("Optional. Organization name."),
 			"limit":    intProperty(fmt.Sprintf("Optional. Max evaluators to return (default %d, min %d, max %d).", utils.DefaultLimit, utils.MinLimit, utils.MaxLimit)),
 			"offset":   intProperty(fmt.Sprintf("Optional. Pagination offset (default %d, min %d).", utils.DefaultOffset, utils.MinOffset)),
 			"search":   stringProperty("Optional. Filter evaluators by a search term."),
-			"provider": stringProperty("Optional. Filter by evaluator provider."),
-			"source":   stringProperty("Optional. Filter by source: all, builtin, custom."),
-			"tags":     arrayProperty("Optional. Filter evaluators by tags.", stringProperty("Tag value.")),
+			// "provider": stringProperty("Optional. Filter by evaluator provider: standard, llm_judge, custom_code, custom_llm_judge"),
+			"source": stringProperty("Optional. Filter by source of evaluators: all, builtin, custom."),
+			// "tags":     arrayProperty("Optional. Filter evaluators by tags.", stringProperty("Tag value.")),
 		}, nil),
 	}, withToolLogging("list_evaluators", listEvaluators(t.EvaluatorToolset, t.DefaultOrg)))
 
 	gomcp.AddTool(server, &gomcp.Tool{
 		Name:        "get_evaluator",
-		Description: "Get more details about a specific evaluator including its type, level, provider, configuration schema, tags etc.",
+		Description: "Get  details about a specific evaluator including its type, level, provider, configuration schema, tags and related metadata.",
 		InputSchema: createSchema(map[string]any{
 			"org_name":     stringProperty("Optional. Organization name."),
 			"evaluator_id": stringProperty("Required. Evaluator identifier."),
@@ -118,7 +118,7 @@ func (t *Toolsets) registerEvaluatorTools(server *gomcp.Server) {
 
 	gomcp.AddTool(server, &gomcp.Tool{
 		Name:        "list_evaluator_llm_providers",
-		Description: "List supported LLM providers for evaluator jobs (credentials and available models).",
+		Description: "List evaluator LLM provider catalog, including required configuration fields (env vars/credentials) and available models for each provider.",
 		InputSchema: createSchema(map[string]any{
 			"org_name": stringProperty("Optional. Organization name."),
 		}, nil),
@@ -136,17 +136,20 @@ func (t *Toolsets) registerEvaluatorTools(server *gomcp.Server) {
 	}, []string{"key", "type"})
 
 	gomcp.AddTool(server, &gomcp.Tool{
-		Name:        "create_custom_evaluator",
-		Description: "Create a custom evaluator (code or llm_judge) to define domain-specific quality checks.",
+		Name: "create_custom_evaluator",
+		Description: "Create a custom evaluator. " +
+			"Use type `code` for Python-function evaluators and `llm_judge` for prompt-template evaluators. " +
+			"Use level `trace`, `agent`, or `llm` based on the evaluation scope. " +
+			"`source` must already contain the full evaluator implementation or prompt template.",
 		InputSchema: createSchema(map[string]any{
 			"org_name":      stringProperty("Optional. Organization name."),
 			"identifier":    stringProperty("Optional. Custom evaluator identifier (slug)."),
 			"display_name":  stringProperty("Required. Human-readable display name."),
-			"description":   stringProperty("Optional. Description."),
+			"description":   stringProperty("Optional. Short explanation of what the evaluator does."),
 			"type":          enumProperty("Required. Evaluator type.", []string{"code", "llm_judge"}),
 			"level":         enumProperty("Required. Evaluation level.", []string{"trace", "agent", "llm"}),
-			"source":        stringProperty("Required. Source code or prompt template."),
-			"config_schema": arrayProperty("Optional. Evaluator configuration schema.", configSchemaItem),
+			"source":        stringProperty("Required. Full Python source code or prompt template."),
+			"config_schema": arrayProperty("Optional. Evaluator configuration schema. It must align with the source.", configSchemaItem),
 			"tags":          arrayProperty("Optional. Tags for search and grouping.", stringProperty("Tag value.")),
 		}, []string{"display_name", "type", "level", "source"}),
 	}, withToolLogging("create_custom_evaluator", createCustomEvaluator(t.EvaluatorToolset, t.DefaultOrg)))
@@ -158,8 +161,8 @@ func (t *Toolsets) registerEvaluatorTools(server *gomcp.Server) {
 			"org_name":      stringProperty("Optional. Organization name."),
 			"identifier":    stringProperty("Required. Custom evaluator identifier."),
 			"display_name":  stringProperty("Optional. Human-readable display name."),
-			"description":   stringProperty("Optional. Description."),
-			"source":        stringProperty("Optional. Updated source code or prompt template."),
+			"description":   stringProperty("Optional. Description on what the evaluator does."),
+			"source":        stringProperty("Optional. Updated source code or llm prompt template."),
 			"config_schema": arrayProperty("Optional. Updated evaluator configuration schema.", configSchemaItem),
 			"tags":          arrayProperty("Optional. Updated tags list.", stringProperty("Tag value.")),
 		}, []string{"identifier"}),
@@ -200,15 +203,15 @@ func listEvaluators(handler EvaluatorToolsetHandler, defaultOrg string) func(con
 				continue
 			}
 			formatted = append(formatted, listEvaluatorItem{
-				Identifier:  evaluator.Identifier,
+				Identifier: evaluator.Identifier,
 				// DisplayName: evaluator.DisplayName,
 				Description: evaluator.Description,
 				// Version:     evaluator.Version,
 				// Provider:    evaluator.Provider,
-				Level:       evaluator.Level,
+				Level: evaluator.Level,
 				// Tags:        evaluator.Tags,
-				IsBuiltin:   evaluator.IsBuiltin,
-				Type:        evaluator.Type,
+				IsBuiltin: evaluator.IsBuiltin,
+				Type:      evaluator.Type,
 			})
 		}
 
@@ -275,11 +278,11 @@ func createCustomEvaluator(handler EvaluatorToolsetHandler, defaultOrg string) f
 		if input.Type == "" {
 			return nil, nil, fmt.Errorf("type is required")
 		}
-		if input.Level == "" {
-			return nil, nil, fmt.Errorf("level is required")
-		}
 		if input.Type != "code" && input.Type != "llm_judge" {
 			return nil, nil, fmt.Errorf("type must be one of: code, llm_judge")
+		}
+		if input.Level == "" {
+			return nil, nil, fmt.Errorf("level is required")
 		}
 		if input.Level != "trace" && input.Level != "agent" && input.Level != "llm" {
 			return nil, nil, fmt.Errorf("level must be one of: trace, agent, llm")

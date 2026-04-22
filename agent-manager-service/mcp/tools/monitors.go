@@ -140,8 +140,9 @@ func (t *Toolsets) registerMonitorTools(server *gomcp.Server) {
 	}, []string{"provider_name", "env_var", "value"})
 
 	gomcp.AddTool(server, &gomcp.Tool{
-		Name:        "list_monitors",
-		Description: "List all evaluation monitors for an agent.",
+		Name: "list_monitors",
+		Description: "List all evaluation monitors for an agent." +
+			"Monitor is a configured evaluation job that runs one or more evaluators against agent traces for a specific agent and environment, producing scores tracked over time.",
 		InputSchema: createSchema(map[string]any{
 			"org_name":     stringProperty("Optional. Organization name."),
 			"project_name": stringProperty("Required. Project name."),
@@ -151,7 +152,7 @@ func (t *Toolsets) registerMonitorTools(server *gomcp.Server) {
 
 	gomcp.AddTool(server, &gomcp.Tool{
 		Name:        "get_monitor",
-		Description: "Get details for a specific monitor.",
+		Description: "Get details for a specific monitor including its configurations, status and timestamps.",
 		InputSchema: createSchema(map[string]any{
 			"org_name":     stringProperty("Optional. Organization name."),
 			"project_name": stringProperty("Required. Project name."),
@@ -161,23 +162,25 @@ func (t *Toolsets) registerMonitorTools(server *gomcp.Server) {
 	}, withToolLogging("get_monitor", getMonitor(t.MonitorToolset, t.DefaultOrg)))
 
 	gomcp.AddTool(server, &gomcp.Tool{
-		Name:        "create_monitor",
-		Description: "Create a new evaluation monitor (future or past).",
+		Name: "create_monitor",
+		Description: "Create a new evaluation monitor using one or more evaluators against agent traces. " +
+			"Monitors can be 'future' (continuous, interval-based runs) or 'past' (one-time historical evaluation over a trace time range).",
 		InputSchema: createSchema(map[string]any{
 			"org_name":             stringProperty("Optional. Organization name."),
 			"project_name":         stringProperty("Required. Project name."),
 			"agent_name":           stringProperty("Required. Agent name."),
-			"display_name":         stringProperty("Required. Human-readable display name. A monitor name is auto-generated from this."),
-			"description":          stringProperty("Optional. Description."),
+			"display_name":         stringProperty("Required. display name for the monitor."),
+			"description":          stringProperty("Optional. Description of the monitor."),
 			"evaluators":           arrayProperty("Required. List of evaluators with optional configuration.", evaluatorSchema),
 			"llm_provider_configs": arrayProperty("Optional. LLM provider credentials for LLM-judge evaluators.", llmProviderSchema),
-			"type":                 enumProperty("Required. Monitor type.", []string{"future", "past"}),
+			"type":                 enumProperty("Required. Type of the monitor to be created.", []string{"future", "past"}),
 			"interval_minutes":     intProperty("Optional. Interval in minutes for future monitors."),
 			"trace_start":          stringProperty("Optional. RFC3339 start time for past monitors."),
-			"trace_end":            stringProperty("Optional. RFC3339 end time for past monitors."),
+			"trace_end":            stringProperty("Optional. RFC3339 end time for past monitors. Must be in the past; the latest allowed value is the current time."),
 			"sampling_rate": map[string]any{
 				"type":        "number",
-				"description": "Optional. Sampling rate as a percentage (0 to 100). Defaults to 25.",
+				"description": "Optional. Sampling rate as a percentage (0 to 100). Defaults to 25."+
+				" Sampling rate is the percentage of agent traces selected for evaluation in each monitor run, 100 evaluates all traces and lower values evaluate a subset to reduce cost and load.",
 				"minimum":     0.0,
 				"maximum":     100.0,
 			},
@@ -186,7 +189,7 @@ func (t *Toolsets) registerMonitorTools(server *gomcp.Server) {
 
 	gomcp.AddTool(server, &gomcp.Tool{
 		Name:        "update_monitor",
-		Description: "Update an existing monitor configuration.",
+		Description: "Update an existing monitor configurations.",
 		InputSchema: createSchema(map[string]any{
 			"org_name":             stringProperty("Optional. Organization name."),
 			"project_name":         stringProperty("Required. Project name."),
@@ -202,12 +205,12 @@ func (t *Toolsets) registerMonitorTools(server *gomcp.Server) {
 				"minimum":     0.0,
 				"maximum":     1.0,
 			},
-		}, []string{"project_name", "agent_name", "monitor_name"}),
+		}, []string{"project_name", "agent_n`ame", "monitor_name"}),
 	}, withToolLogging("update_monitor", updateMonitor(t.MonitorToolset, t.DefaultOrg)))
 
 	gomcp.AddTool(server, &gomcp.Tool{
 		Name:        "start_monitor",
-		Description: "Start a stopped future monitor.",
+		Description: "Restart a stopped monitor. Only applicable for future monitors",
 		InputSchema: createSchema(map[string]any{
 			"org_name":     stringProperty("Optional. Organization name."),
 			"project_name": stringProperty("Required. Project name."),
@@ -218,7 +221,7 @@ func (t *Toolsets) registerMonitorTools(server *gomcp.Server) {
 
 	gomcp.AddTool(server, &gomcp.Tool{
 		Name:        "stop_monitor",
-		Description: "Stop a future monitor.",
+		Description: "Stop a currently running monitor. Only applicable for future monitors",
 		InputSchema: createSchema(map[string]any{
 			"org_name":     stringProperty("Optional. Organization name."),
 			"project_name": stringProperty("Required. Project name."),
@@ -229,7 +232,7 @@ func (t *Toolsets) registerMonitorTools(server *gomcp.Server) {
 
 	gomcp.AddTool(server, &gomcp.Tool{
 		Name:        "list_monitor_runs",
-		Description: "List execution runs for a monitor.",
+		Description: "List execution runs for a specific monitor.",
 		InputSchema: createSchema(map[string]any{
 			"org_name":       stringProperty("Optional. Organization name."),
 			"project_name":   stringProperty("Required. Project name."),
@@ -249,7 +252,7 @@ func (t *Toolsets) registerMonitorTools(server *gomcp.Server) {
 			"project_name": stringProperty("Required. Project name."),
 			"agent_name":   stringProperty("Required. Agent name."),
 			"monitor_name": stringProperty("Required. Monitor name."),
-			"run_id":       stringProperty("Required. Run ID to rerun."),
+			"run_id":       stringProperty("Required. Run ID of the specific monitor run to rerun."),
 		}, []string{"project_name", "agent_name", "monitor_name", "run_id"}),
 	}, withToolLogging("rerun_monitor", rerunMonitor(t.MonitorToolset, t.DefaultOrg)))
 
@@ -261,7 +264,7 @@ func (t *Toolsets) registerMonitorTools(server *gomcp.Server) {
 			"project_name": stringProperty("Required. Project name."),
 			"agent_name":   stringProperty("Required. Agent name."),
 			"monitor_name": stringProperty("Required. Monitor name."),
-			"run_id":       stringProperty("Required. Run ID."),
+			"run_id":       stringProperty("Required. Run ID of the specific monitor run."),
 		}, []string{"project_name", "agent_name", "monitor_name", "run_id"}),
 	}, withToolLogging("get_monitor_run_logs", getMonitorRunLogs(t.MonitorToolset, t.DefaultOrg)))
 }
@@ -396,8 +399,6 @@ func createMonitor(handler MonitorToolsetHandler, projectHandler ProjectToolsetH
 		if orgName == "" {
 			return nil, nil, fmt.Errorf("org_name is required")
 		}
-
-		
 
 		monitorName := slugifyMonitorName(input.DisplayName)
 		if len(monitorName) < 3 {

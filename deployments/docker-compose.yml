@@ -60,6 +60,8 @@ services:
       - KEY_MANAGER_AUDIENCE=localhost,amp-publisher-client
       - AMP_VERSION=v0.8.0
       - OPEN_CHOREO_BASE_URL=http://api.openchoreo.localhost:8195
+
+      - TRACE_OBSERVER_URL=http://host.docker.internal:9098
       # OpenBao/Vault Secret Management Configuration
       # NOTE: Run ./deployments/scripts/port-forward.sh to forward OpenBao from k3d cluster
       - SECRET_MANAGER_PROVIDER=openbao
