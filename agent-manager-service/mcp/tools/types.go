@@ -19,7 +19,6 @@ type Toolsets struct {
 	EvaluatorToolset     EvaluatorToolsetHandler
 	MonitorToolset       MonitorToolsetHandler
 	MonitorScoresToolset MonitorScoresToolsetHandler
-	DefaultOrg           string
 }
 
 // AgentToolsetHandler is the minimal surface needed by MCP agent tools.

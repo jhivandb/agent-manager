@@ -6,12 +6,218 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	gomcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/wso2/agent-manager/agent-manager-service/spec"
 )
+
+type runtimeLogsInput struct {
+	OrgName      string   `json:"org_name"`
+	ProjectName  string   `json:"project_name"`
+	AgentName    string   `json:"agent_name"`
+	Environment  string   `json:"environment"`
+	StartTime    string   `json:"start_time"`
+	EndTime      string   `json:"end_time"`
+	Limit        *int     `json:"limit"`
+	SortOrder    string   `json:"sort_order"`
+	LogLevels    []string `json:"log_levels"`
+	SearchPhrase string   `json:"search_phrase"`
+}
+
+type getMetricsInput struct {
+	OrgName     string `json:"org_name"`
+	ProjectName string `json:"project_name"`
+	AgentName   string `json:"agent_name"`
+	Environment string `json:"environment"`
+	TimeRange   string `json:"time_range"`
+}
+
+func (t *Toolsets) registerMetricsTools(server *gomcp.Server) {
+	gomcp.AddTool(server, &gomcp.Tool{
+		Name: "get_metrics",
+		Description: "Return CPU and memory usage metrics for an agent over a selected time range. " +
+			"Metrics describe runtime resource consumption for a deployment in a specific environment.",
+		InputSchema: createSchema(map[string]any{
+			"org_name":     stringProperty("Optional. Organization name."),
+			"project_name": stringProperty("Required. Project name."),
+			"agent_name":   stringProperty("Required. Agent name."),
+			"environment":  stringProperty("Optional. Environment name."),
+			"time_range": map[string]any{
+				"type":        "string",
+				"description": "Optional. Time range preset. One of: 10m, 30m, 1h, 3h, 6h, 12h, 1d, 3d, 7d, 30d. Defaults to 7d.",
+				"enum":        []any{"10m", "30m", "1h", "3h", "6h", "12h", "1d", "3d", "7d", "30d"},
+			},
+		}, []string{"project_name", "agent_name"}),
+	}, withToolLogging("get_metrics", getMetrics(t.AgentToolset)))
+}
+
+func (t *Toolsets) registerRuntimeLogTools(server *gomcp.Server) {
+	gomcp.AddTool(server, &gomcp.Tool{
+		Name: "get_runtime_logs",
+		Description: "Return runtime logs for an agent. " +
+			"Runtime logs are the application logs emitted by a deployed agent, and they can be filtered by time window, log level, sort order, or text search.",
+		InputSchema: createSchema(map[string]any{
+			"org_name":      stringProperty("Optional. Organization name."),
+			"project_name":  stringProperty("Required. Project name where the agent exists."),
+			"agent_name":    stringProperty("Required. Agent name to fetch runtime logs for."),
+			"environment":   stringProperty("Optional. Environment name."),
+			"start_time":    stringProperty("Optional. RFC3339 start time (UTC). Defaults to last 24h if omitted."),
+			"end_time":      stringProperty("Optional. RFC3339 end time (UTC). Defaults to now if omitted."),
+			"limit":         intProperty("Optional. Max number of log entries (1-10000)."),
+			"sort_order":    stringProperty("Optional. Sort order: asc or desc."),
+			"log_levels":    arrayProperty("Optional. Filter by log levels (DEBUG, INFO, WARN, ERROR).", map[string]any{"type": "string"}),
+			"search_phrase": stringProperty("Optional. Search phrase to filter logs by content."),
+		}, []string{"project_name", "agent_name"}),
+	}, withToolLogging("get_runtime_logs", getRuntimeLogs(t.RuntimeLogToolset)))
+}
+
+func getMetrics(handler AgentToolsetHandler) func(context.Context, *gomcp.CallToolRequest, getMetricsInput) (*gomcp.CallToolResult, any, error) {
+	return func(ctx context.Context, _ *gomcp.CallToolRequest, input getMetricsInput) (*gomcp.CallToolResult, any, error) {
+		orgName := resolveOrgName(input.OrgName)
+		if orgName == "" {
+			return nil, nil, fmt.Errorf("org_name is required")
+		}
+		if input.ProjectName == "" {
+			return nil, nil, fmt.Errorf("project_name is required")
+		}
+		if input.AgentName == "" {
+			return nil, nil, fmt.Errorf("agent_name is required")
+		}
+
+		env := resolveEnv(input.Environment)
+		start, end, err := resolveMetricsTimeRange(input.TimeRange)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		payload := spec.MetricsFilterRequest{
+			EnvironmentName: env,
+			StartTime:       start,
+			EndTime:         end,
+		}
+
+		result, err := handler.GetAgentMetrics(ctx, orgName, input.ProjectName, input.AgentName, payload)
+		if err != nil {
+			return nil, nil, wrapToolError("get_metrics", err)
+		}
+		return handleToolResult(result, nil)
+	}
+}
+
+func getRuntimeLogs(handler RuntimeLogToolsetHandler) func(context.Context, *gomcp.CallToolRequest, runtimeLogsInput) (*gomcp.CallToolResult, any, error) {
+	return func(ctx context.Context, _ *gomcp.CallToolRequest, input runtimeLogsInput) (*gomcp.CallToolResult, any, error) {
+		if input.ProjectName == "" {
+			return nil, nil, fmt.Errorf("project_name is required")
+		}
+		if input.AgentName == "" {
+			return nil, nil, fmt.Errorf("agent_name is required")
+		}
+		if input.Limit != nil && (*input.Limit < 1 || *input.Limit > 10000) {
+			return nil, nil, fmt.Errorf("limit must be between 1 and 10000")
+		}
+
+		orgName := resolveOrgName(input.OrgName)
+		if orgName == "" {
+			return nil, nil, fmt.Errorf("org_name is required")
+		}
+
+		env := resolveEnv(input.Environment)
+		start, end, err := resolveTimeWindow(input.StartTime, input.EndTime)
+		if err != nil {
+			return nil, nil, err
+		}
+		sortOrder := defaultSortOrder(input.SortOrder)
+
+		levels, err := normalizeLogLevels(input.LogLevels)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		var limit *int32
+		if input.Limit != nil {
+			value := int32(*input.Limit)
+			limit = &value
+		}
+
+		var search *string
+		if strings.TrimSpace(input.SearchPhrase) != "" {
+			value := strings.TrimSpace(input.SearchPhrase)
+			search = &value
+		}
+
+		req := spec.LogFilterRequest{
+			EnvironmentName: env,
+			StartTime:       start,
+			EndTime:         end,
+			Limit:           limit,
+			SortOrder:       &sortOrder,
+			LogLevels:       levels,
+			SearchPhrase:    search,
+		}
+
+		result, err := handler.GetRuntimeLogs(ctx, orgName, input.ProjectName, input.AgentName, req)
+		if err != nil {
+			return nil, nil, wrapToolError("get_runtime_logs", err)
+		}
+
+		reduced := reduceLogsResponse(result)
+		return handleToolResult(reduced, nil)
+	}
+}
+
+func normalizeLogLevels(levels []string) ([]string, error) {
+	if len(levels) == 0 {
+		return nil, nil
+	}
+	allowed := map[string]bool{
+		"DEBUG": true,
+		"INFO":  true,
+		"WARN":  true,
+		"ERROR": true,
+	}
+	out := make([]string, 0, len(levels))
+	for _, lvl := range levels {
+		value := strings.ToUpper(strings.TrimSpace(lvl))
+		if value == "" {
+			continue
+		}
+		if !allowed[value] {
+			return nil, fmt.Errorf("invalid log level: %s", lvl)
+		}
+		out = append(out, value)
+	}
+	return out, nil
+}
+
+func resolveMetricsTimeRange(timeRange string) (string, string, error) {
+	preset := strings.TrimSpace(strings.ToLower(timeRange))
+	if preset == "" {
+		preset = "7d"
+	}
+
+	duration, ok := map[string]time.Duration{
+		"10m": 10 * time.Minute,
+		"30m": 30 * time.Minute,
+		"1h":  time.Hour,
+		"3h":  3 * time.Hour,
+		"6h":  6 * time.Hour,
+		"12h": 12 * time.Hour,
+		"1d":  24 * time.Hour,
+		"3d":  3 * 24 * time.Hour,
+		"7d":  7 * 24 * time.Hour,
+		"30d": 30 * 24 * time.Hour,
+	}[preset]
+	if !ok {
+		return "", "", fmt.Errorf("invalid time_range: %s", timeRange)
+	}
+
+	endTime := time.Now().UTC()
+	startTime := endTime.Add(-duration)
+	return startTime.Format(time.RFC3339), endTime.Format(time.RFC3339), nil
+}
 
 const (
 	defaultTraceListLimit   = 10
@@ -26,6 +232,7 @@ const (
 	defaultMaxSpanCount = 40
 )
 
+// Input structures for trace tools
 type listTracesInput struct {
 	OrgName     string `json:"org_name"`
 	ProjectName string `json:"project_name"`
@@ -81,18 +288,20 @@ type getTraceDetailsInput struct {
 
 func (t *Toolsets) registerTraceTools(server *gomcp.Server) {
 	gomcp.AddTool(server, &gomcp.Tool{
-		Name:        "list_traces",
-		Description: "List recent traces for an agent in a specific time window (summary view).",
+		Name: "list_traces",
+		Description: "List recent traces for an agent within a time window. " +
+			"A trace is a single end-to-end execution record for an agent request. " +
+			"This summary view returns high-level trace metadata and can optionally include inputs and outputs of the execution.",
 		InputSchema: createSchema(map[string]any{
 			"org_name":     stringProperty("optional. Organization name."),
 			"project_name": stringProperty("Required. Project name where the agent exists."),
 			"agent_name":   stringProperty("Required. Agent name to check traces for."),
 			"environment":  stringProperty("Optional. Environment name."),
-			"start_time":   stringProperty("Optional. RFC3339 start time (UTC). Defaults to last 24h."),
-			"end_time":     stringProperty("Optional. RFC3339 end time (UTC). Defaults to now."),
+			"start_time":   stringProperty("Optional. RFC3339 start time (UTC). Defaults to 24h ago."),
+			"end_time":     stringProperty("Optional. RFC3339 end time (UTC). Defaults to current time."),
 			"limit": map[string]any{
 				"type":        "integer",
-				"description": "Optional. Max number of traces to return (1-100).",
+				"description": "Optional. Max number of traces to return.",
 				"minimum":     1,
 				"maximum":     maxTraceListLimit,
 			},
@@ -101,24 +310,25 @@ func (t *Toolsets) registerTraceTools(server *gomcp.Server) {
 				"description": "Optional. Pagination offset (>= 0).",
 				"minimum":     0,
 			},
-			"sort_order": stringProperty("Optional. Sort order: desc (newest first) or asc."),
+			"sort_order": enumProperty("Optional. Sort order for traces: desc (newest first) or asc (oldest first).", []string{"desc", "asc"}),
 			"include_io": map[string]any{
 				"type":        "boolean",
-				"description": "Optional. Include input/output fields in the trace list.",
+				"description": "Optional. Include input/output fields in the traces.",
 			},
 		}, []string{"project_name", "agent_name"}),
-	}, withToolLogging("list_traces", listTraces(t.TraceToolset, t.DefaultOrg)))
+	}, withToolLogging("list_traces", listTraces(t.TraceToolset)))
 
 	gomcp.AddTool(server, &gomcp.Tool{
-		Name:        "get_traces",
-		Description: "List recent traces for an agent in a specific time window with span details (detailed view)",
+		Name: "get_traces",
+		Description: "List recent traces for an agent in a time window with full span details. " +
+			"A trace is a single end-to-end execution record for an agent which contains spans that record the internal steps of an execution, such as agent, tool, retriever, or LLM activity.",
 		InputSchema: createSchema(map[string]any{
 			"org_name":     stringProperty("Required. Organization name."),
 			"project_name": stringProperty("Required. Project name where the agent exists."),
 			"agent_name":   stringProperty("Required. Agent name to export traces for."),
 			"environment":  stringProperty("Optional. Environment name."),
-			"start_time":   stringProperty("Optional. RFC3339 start time (UTC). Defaults to last 24h."),
-			"end_time":     stringProperty("Optional. RFC3339 end time (UTC). Defaults to now."),
+			"start_time":   stringProperty("Optional. RFC3339 start time (UTC). Defaults to 24h ago."),
+			"end_time":     stringProperty("Optional. RFC3339 end time (UTC). Defaults to current time."),
 			"limit": map[string]any{
 				"type":        "integer",
 				"description": "Optional. Max number of traces to return (1-1000).",
@@ -129,21 +339,23 @@ func (t *Toolsets) registerTraceTools(server *gomcp.Server) {
 				"description": "Optional. Pagination offset (>= 0).",
 				"minimum":     0,
 			},
-			"sort_order": stringProperty("Optional. Sort order: desc (newest first) or asc."),
+			"sort_order": enumProperty("Optional. Sort order for traces: desc (newest first) or asc (oldest first).", []string{"desc", "asc"}),
 		}, []string{"project_name", "agent_name"}),
-	}, withToolLogging("get_traces", getTraces(t.TraceToolset, t.DefaultOrg)))
+	}, withToolLogging("get_traces", getTraces(t.TraceToolset)))
 
 	gomcp.AddTool(server, &gomcp.Tool{
-		Name:        "filter_traces",
-		Description: "Filter traces by a specific condition for a time window. Returns full traces (traces + spans) that match the condition.",
+		Name: "filter_traces",
+		Description: "List traces in a time window that match a specific condition. " +
+			"Conditions identify traces with patterns such as errors, high latency, high token usage, tool call failures, output length violations, or excessive span counts. " +
+			"Returns full trace details and spans for matching traces.",
 		InputSchema: createSchema(map[string]any{
 			"org_name":       stringProperty("Optional. Organization name."),
 			"project_name":   stringProperty("Required. Project name."),
 			"agent_name":     stringProperty("Required. Agent name."),
 			"environment":    stringProperty("Optional. Environment name."),
-			"start_time":     stringProperty("Optional. RFC3339 start time (UTC). Defaults to last 24h."),
-			"end_time":       stringProperty("Optional. RFC3339 end time (UTC). Defaults to now."),
-			"condition":      stringProperty("Required. One of: error_status, length_compliance_violation, high_latency, high_token_usage, tool_call_fails, excessive_steps."),
+			"start_time":     stringProperty("Optional. RFC3339 start time (UTC). Defaults to 24h ago."),
+			"end_time":       stringProperty("Optional. RFC3339 end time (UTC). Defaults to current time."),
+			"condition":      stringProperty("Required. Filter condition: `error_status` for traces with errors, `length_compliance_violation` for outputs outside the configured length range, `high_latency` for slow traces, `high_token_usage` for token-heavy traces, `tool_call_fails` for traces with failed tool calls, or `excessive_steps` for traces with too many spans."),
 			"limit":          intProperty("Optional. Max number of traces to return after filtering."),
 			"max_latency_ms": intProperty("Optional. Max latency in milliseconds for high_latency. Defaults to 30000."),
 			"max_tokens":     intProperty("Optional. Max tokens for high_token_usage. Defaults to 10000."),
@@ -151,11 +363,12 @@ func (t *Toolsets) registerTraceTools(server *gomcp.Server) {
 			"max_length":     intProperty("Optional. Max output length for length_compliance_violation. Defaults to 10000."),
 			"max_span_count": intProperty("Optional. Max span count for excessive_steps. Defaults to 40."),
 		}, []string{"project_name", "agent_name", "condition"}),
-	}, withToolLogging("filter_traces", filterTraces(t.TraceToolset, t.DefaultOrg)))
+	}, withToolLogging("filter_traces", filterTraces(t.TraceToolset)))
 
 	gomcp.AddTool(server, &gomcp.Tool{
-		Name:        "get_trace_details",
-		Description: "Fetch a single trace by trace_id for a specific agent. Returns full trace details and spans.",
+		Name: "get_trace_details",
+		Description: "Return the full details for a single trace. " +
+			"A trace ID identifies one end-to-end execution record, and the response includes trace metadata plus its spans.",
 		InputSchema: createSchema(map[string]any{
 			"org_name":     stringProperty("Required. Organization name."),
 			"project_name": stringProperty("Required. Project name."),
@@ -163,10 +376,10 @@ func (t *Toolsets) registerTraceTools(server *gomcp.Server) {
 			"trace_id":     stringProperty("Required. Trace ID to fetch."),
 			"environment":  stringProperty("Optional. Environment name."),
 		}, []string{"project_name", "agent_name", "trace_id"}),
-	}, withToolLogging("get_trace_details", getTraceDetails(t.TraceToolset, t.DefaultOrg)))
+	}, withToolLogging("get_trace_details", getTraceDetails(t.TraceToolset)))
 }
 
-func listTraces(handler TraceToolsetHandler, defaultOrg string) func(context.Context, *gomcp.CallToolRequest, listTracesInput) (*gomcp.CallToolResult, any, error) {
+func listTraces(handler TraceToolsetHandler) func(context.Context, *gomcp.CallToolRequest, listTracesInput) (*gomcp.CallToolResult, any, error) {
 	return func(ctx context.Context, _ *gomcp.CallToolRequest, input listTracesInput) (*gomcp.CallToolResult, any, error) {
 
 		// Input validation
@@ -183,7 +396,7 @@ func listTraces(handler TraceToolsetHandler, defaultOrg string) func(context.Con
 			return nil, nil, fmt.Errorf("offset must be >= 0")
 		}
 
-		orgName := resolveOrgName(defaultOrg, input.OrgName)
+		orgName := resolveOrgName(input.OrgName)
 		if orgName == "" {
 			return nil, nil, fmt.Errorf("org_name is required")
 		}
@@ -225,7 +438,7 @@ func listTraces(handler TraceToolsetHandler, defaultOrg string) func(context.Con
 	}
 }
 
-func getTraces(handler TraceToolsetHandler, defaultOrg string) func(context.Context, *gomcp.CallToolRequest, getTracesInput) (*gomcp.CallToolResult, any, error) {
+func getTraces(handler TraceToolsetHandler) func(context.Context, *gomcp.CallToolRequest, getTracesInput) (*gomcp.CallToolResult, any, error) {
 	return func(ctx context.Context, _ *gomcp.CallToolRequest, input getTracesInput) (*gomcp.CallToolResult, any, error) {
 		if input.ProjectName == "" {
 			return nil, nil, fmt.Errorf("project_name is required")
@@ -240,12 +453,13 @@ func getTraces(handler TraceToolsetHandler, defaultOrg string) func(context.Cont
 			return nil, nil, fmt.Errorf("offset must be >= 0")
 		}
 
-		orgName := resolveOrgName(defaultOrg, input.OrgName)
+		orgName := resolveOrgName(input.OrgName)
 		if orgName == "" {
 			return nil, nil, fmt.Errorf("org_name is required")
 		}
 
 		env := resolveEnv(input.Environment)
+
 		start, end, err := resolveTimeWindow(input.StartTime, input.EndTime)
 		if err != nil {
 			return nil, nil, err
@@ -279,7 +493,7 @@ func getTraces(handler TraceToolsetHandler, defaultOrg string) func(context.Cont
 	}
 }
 
-func filterTraces(handler TraceToolsetHandler, defaultOrg string) func(context.Context, *gomcp.CallToolRequest, filterTracesInput) (*gomcp.CallToolResult, any, error) {
+func filterTraces(handler TraceToolsetHandler) func(context.Context, *gomcp.CallToolRequest, filterTracesInput) (*gomcp.CallToolResult, any, error) {
 	return func(ctx context.Context, _ *gomcp.CallToolRequest, input filterTracesInput) (*gomcp.CallToolResult, any, error) {
 		if input.ProjectName == "" {
 			return nil, nil, fmt.Errorf("project_name is required")
@@ -295,7 +509,7 @@ func filterTraces(handler TraceToolsetHandler, defaultOrg string) func(context.C
 			return nil, nil, fmt.Errorf("unsupported condition: %s", condition)
 		}
 
-		orgName := resolveOrgName(defaultOrg, input.OrgName)
+		orgName := resolveOrgName(input.OrgName)
 		if orgName == "" {
 			return nil, nil, fmt.Errorf("org_name is required")
 		}
@@ -342,7 +556,7 @@ func filterTraces(handler TraceToolsetHandler, defaultOrg string) func(context.C
 	}
 }
 
-func getTraceDetails(handler TraceToolsetHandler, defaultOrg string) func(context.Context, *gomcp.CallToolRequest, getTraceDetailsInput) (*gomcp.CallToolResult, any, error) {
+func getTraceDetails(handler TraceToolsetHandler) func(context.Context, *gomcp.CallToolRequest, getTraceDetailsInput) (*gomcp.CallToolResult, any, error) {
 	return func(ctx context.Context, _ *gomcp.CallToolRequest, input getTraceDetailsInput) (*gomcp.CallToolResult, any, error) {
 		if input.ProjectName == "" {
 			return nil, nil, fmt.Errorf("project_name is required")
@@ -354,7 +568,7 @@ func getTraceDetails(handler TraceToolsetHandler, defaultOrg string) func(contex
 			return nil, nil, fmt.Errorf("trace_id is required")
 		}
 
-		orgName := resolveOrgName(defaultOrg, input.OrgName)
+		orgName := resolveOrgName(input.OrgName)
 		if orgName == "" {
 			return nil, nil, fmt.Errorf("org_name is required")
 		}

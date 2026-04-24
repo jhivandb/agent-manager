@@ -44,9 +44,9 @@ const buildRetryAfterSeconds = 120
 func (t *Toolsets) registerBuildTools(server *gomcp.Server) {
 	gomcp.AddTool(server, &gomcp.Tool{
 		Name: "list_builds",
-		Description: "List builds for a specific agent" +
-			"Builds are versioned execution records tied to source commits and build parameters, and a successful build automatically trigger deployment."+
-			"If the build is still in progress, it might take some time (few minutes) to get completed",
+		Description: "List builds for an agent. " +
+			"A build is a versioned packaging job that turns agent source into a runnable image using a specific commit and build parameters. " +
+			"Successful builds trigger deployment automatically, and in-progress builds may take a few minutes to complete.",
 		InputSchema: createSchema(map[string]any{
 			"org_name":     stringProperty("Optional. Organization name."),
 			"project_name": stringProperty("Required. Project name where the agent exists."),
@@ -54,47 +54,47 @@ func (t *Toolsets) registerBuildTools(server *gomcp.Server) {
 			"limit":        intProperty(fmt.Sprintf("Optional. Max builds to return (default %d, min %d, max %d).", utils.DefaultLimit, utils.MinLimit, utils.MaxLimit)),
 			"offset":       intProperty(fmt.Sprintf("Optional. Pagination offset (default %d, min %d).", utils.DefaultOffset, utils.MinOffset)),
 		}, []string{"project_name", "agent_name"}),
-	}, withToolLogging("list_builds", listBuilds(t.BuildToolset, t.DefaultOrg)))
+	}, withToolLogging("list_builds", listBuilds(t.BuildToolset)))
 
 	gomcp.AddTool(server, &gomcp.Tool{
 		Name: "build_agent",
-		Description: "Trigger a new build for an existing agent." +
-			" A build compiles the agent source into a runnable image, tied to a specific commit and build parameters." +
-			"Once the build completes and succeeds, deployment is automatically triggered.",
+		Description: "Start a new build for an existing agent. " +
+			"A build packages the agent source into a runnable image from a specific commit and build parameters. " +
+			"Successful builds trigger deployment automatically.",
 		InputSchema: createSchema(map[string]any{
 			"org_name":     stringProperty("Optional. Organization name."),
 			"project_name": stringProperty("Required. Project name where the agent exists."),
 			"agent_name":   stringProperty("Required. Agent name to trigger build for."),
 			"commit_id":    stringProperty("Optional. Commit ID to build. Defaults to latest."),
 		}, []string{"project_name", "agent_name"}),
-	}, withToolLogging("build_agent", buildAgent(t.BuildToolset, t.DefaultOrg)))
+	}, withToolLogging("build_agent", buildAgent(t.BuildToolset)))
 
 	gomcp.AddTool(server, &gomcp.Tool{
 		Name: "get_build_logs",
-		Description: "Fetch build logs for a specific build of an internal agent." +
-			"Use when troubleshooting build failures or monitoring build progress.",
+		Description: "Return logs for a specific build of an internal agent. " +
+			"Build logs are the step-by-step output produced while packaging the agent source into a runnable image.",
 		InputSchema: createSchema(map[string]any{
 			"org_name":     stringProperty("Optional. Organization name."),
 			"project_name": stringProperty("Required. Project name where the agent exists."),
 			"agent_name":   stringProperty("Required. Agent name that owns the build."),
 			"build_name":   stringProperty("Required. Build name to fetch logs for."),
 		}, []string{"project_name", "agent_name", "build_name"}),
-	}, withToolLogging("get_build_logs", getBuildLogs(t.BuildToolset, t.DefaultOrg)))
+	}, withToolLogging("get_build_logs", getBuildLogs(t.BuildToolset)))
 
 	gomcp.AddTool(server, &gomcp.Tool{
 		Name: "get_build_details",
-		Description: "Get detailed build information for a specific build  including steps, duration, and build parameters. " +
-			"If the build is still in progress, it might take some time (few minutes) to get completed",
+		Description: "Return detailed information for a specific build, including status, steps, duration, commit, and build parameters. " +
+			"If the build is still running, completion may take a few minutes.",
 		InputSchema: createSchema(map[string]any{
 			"org_name":     stringProperty("Optional. Organization name."),
 			"project_name": stringProperty("Required. Project name where the agent exists."),
 			"agent_name":   stringProperty("Required. Agent name that owns the build."),
 			"build_name":   stringProperty("Required. Build name to fetch details for."),
 		}, []string{"project_name", "agent_name", "build_name"}),
-	}, withToolLogging("get_build_details", getBuildDetails(t.BuildToolset, t.DefaultOrg)))
+	}, withToolLogging("get_build_details", getBuildDetails(t.BuildToolset)))
 }
 
-func listBuilds(handler BuildToolsetHandler, defaultOrg string) func(context.Context, *gomcp.CallToolRequest, listBuildsInput) (*gomcp.CallToolResult, any, error) {
+func listBuilds(handler BuildToolsetHandler) func(context.Context, *gomcp.CallToolRequest, listBuildsInput) (*gomcp.CallToolResult, any, error) {
 	return func(ctx context.Context, _ *gomcp.CallToolRequest, input listBuildsInput) (*gomcp.CallToolResult, any, error) {
 		if input.ProjectName == "" {
 			return nil, nil, fmt.Errorf("project_name is required")
@@ -103,7 +103,7 @@ func listBuilds(handler BuildToolsetHandler, defaultOrg string) func(context.Con
 			return nil, nil, fmt.Errorf("agent_name is required")
 		}
 
-		orgName := resolveOrgName(defaultOrg, input.OrgName)
+		orgName := resolveOrgName(input.OrgName)
 		if orgName == "" {
 			return nil, nil, fmt.Errorf("org_name is required")
 		}
@@ -144,7 +144,7 @@ func listBuilds(handler BuildToolsetHandler, defaultOrg string) func(context.Con
 	}
 }
 
-func getBuildLogs(handler BuildToolsetHandler, defaultOrg string) func(context.Context, *gomcp.CallToolRequest, getBuildLogsInput) (*gomcp.CallToolResult, any, error) {
+func getBuildLogs(handler BuildToolsetHandler) func(context.Context, *gomcp.CallToolRequest, getBuildLogsInput) (*gomcp.CallToolResult, any, error) {
 	return func(ctx context.Context, _ *gomcp.CallToolRequest, input getBuildLogsInput) (*gomcp.CallToolResult, any, error) {
 		if input.ProjectName == "" {
 			return nil, nil, fmt.Errorf("project_name is required")
@@ -156,7 +156,7 @@ func getBuildLogs(handler BuildToolsetHandler, defaultOrg string) func(context.C
 			return nil, nil, fmt.Errorf("build_name is required")
 		}
 
-		orgName := resolveOrgName(defaultOrg, input.OrgName)
+		orgName := resolveOrgName(input.OrgName)
 		if orgName == "" {
 			return nil, nil, fmt.Errorf("org_name is required")
 		}
@@ -171,7 +171,7 @@ func getBuildLogs(handler BuildToolsetHandler, defaultOrg string) func(context.C
 	}
 }
 
-func getBuildDetails(handler BuildToolsetHandler, defaultOrg string) func(context.Context, *gomcp.CallToolRequest, getBuildDetailsInput) (*gomcp.CallToolResult, any, error) {
+func getBuildDetails(handler BuildToolsetHandler) func(context.Context, *gomcp.CallToolRequest, getBuildDetailsInput) (*gomcp.CallToolResult, any, error) {
 	return func(ctx context.Context, _ *gomcp.CallToolRequest, input getBuildDetailsInput) (*gomcp.CallToolResult, any, error) {
 		if input.ProjectName == "" {
 			return nil, nil, fmt.Errorf("project_name is required")
@@ -183,7 +183,7 @@ func getBuildDetails(handler BuildToolsetHandler, defaultOrg string) func(contex
 			return nil, nil, fmt.Errorf("build_name is required")
 		}
 
-		orgName := resolveOrgName(defaultOrg, input.OrgName)
+		orgName := resolveOrgName(input.OrgName)
 		if orgName == "" {
 			return nil, nil, fmt.Errorf("org_name is required")
 		}
@@ -207,7 +207,7 @@ func getBuildDetails(handler BuildToolsetHandler, defaultOrg string) func(contex
 	}
 }
 
-func buildAgent(handler BuildToolsetHandler, defaultOrg string) func(context.Context, *gomcp.CallToolRequest, buildAgentInput) (*gomcp.CallToolResult, any, error) {
+func buildAgent(handler BuildToolsetHandler) func(context.Context, *gomcp.CallToolRequest, buildAgentInput) (*gomcp.CallToolResult, any, error) {
 	return func(ctx context.Context, _ *gomcp.CallToolRequest, input buildAgentInput) (*gomcp.CallToolResult, any, error) {
 		if input.ProjectName == "" {
 			return nil, nil, fmt.Errorf("project_name is required")
@@ -216,7 +216,7 @@ func buildAgent(handler BuildToolsetHandler, defaultOrg string) func(context.Con
 			return nil, nil, fmt.Errorf("agent_name is required")
 		}
 
-		orgName := resolveOrgName(defaultOrg, input.OrgName)
+		orgName := resolveOrgName(input.OrgName)
 		if orgName == "" {
 			return nil, nil, fmt.Errorf("org_name is required")
 		}

@@ -2,6 +2,15 @@
 
 This MCP server is embedded in the Agent Manager service. It is exposed at `/mcp` and protected by JWT auth.
 
+## Tool Design Principles
+
+MCP tools in Agent Manager should expose a user-facing shape that is close to the console experience.
+
+- Tool descriptions should explain what the tool does, define any important technical terms, and note important defaults, side effects, or constraints.
+- Tool descriptions should not contain workflow advice such as "ask the user first" or references to client-side skill files.
+- MCP inputs and outputs may reshape internal service-layer models into friendlier concepts that are easier for MCP clients to use.
+- Core business rules and invariants should stay in the service layer or shared helpers so MCP behavior does not drift from the rest of the platform.
+
 ## Start the MCP server (local dev)
 
 From the repo root:

@@ -110,10 +110,10 @@ type listProjectAgentPairsOutput struct {
 
 func (t *Toolsets) registerAgentTools(server *gomcp.Server) {
 	gomcp.AddTool(server, &gomcp.Tool{
-		Name:        "create_internal_agent_python",
-		Description: "Register an internal python agent."+
-				"Internal agents are platform-hosted units where source code is fetched, built, deployed, and run by the platform, and the first build is started automatically at creation time." +
-				"If not sure about the the agent type (internal/external) ask the user and confirm the preference type before calling the tool",
+		Name: "create_internal_agent_python",
+		Description: "Create an internal Python agent inside a project. " +
+			"An internal agent is hosted by the platform: Agent Manager fetches the source code, builds it, deploys it, and runs it for you. " +
+			"Creating the agent automatically starts its initial build.",
 
 		InputSchema: createSchema(map[string]any{
 			"org_name":     stringProperty("Optional. Organization name."),
@@ -128,9 +128,9 @@ func (t *Toolsets) registerAgentTools(server *gomcp.Server) {
 			"language_version": stringProperty("Optional. Python version (default: 3.11)."),
 			"run_command":      stringProperty("Optional. Start command to run the agent (default: python main.py)."),
 
-			"interface_type": enumProperty("Optional. API interface type of the agent. DEFAULT (standard chat interface with /chat endpoint on port 8000) or CUSTOM (custom API with user-provided OpenAPI spec). Default: DEFAULT.", []string{"DEFAULT", "CUSTOM"}),
+			"interface_type": enumProperty("Required. API interface type of the agent. Use DEFAULT for the standard chat interface on /chat at port 8000, or CUSTOM for a user-provided OpenAPI interface.", []string{"DEFAULT", "CUSTOM"}),
 			"port":           intProperty("Required when interface_type is CUSTOM. Port number where the agent will be listening."),
-			"base_path":      stringProperty("Optional. API base path (default: /). Required when interface_type is CUSTOM."),
+			"base_path":      stringProperty("Required when interface_type is CUSTOM. API base path for the custom interface."),
 			"openapi_path":   stringProperty("Required when interface_type is CUSTOM. OpenAPI specification file path within the repository (must start with /)."),
 
 			"enable_auto_instrumentation": boolProperty("Automatically enables OTEL tracing instrumentation to your agent for observability."),
@@ -143,13 +143,13 @@ func (t *Toolsets) registerAgentTools(server *gomcp.Server) {
 				"required": []string{"key", "value"},
 			}),
 		}, []string{"project_name", "display_name", "repository_url", "branch", "app_path", "interface_type", "env"}),
-	}, withToolLogging("create_internal_agent_python", createInternalAgentPython(t.AgentToolset, t.DefaultOrg)))
+	}, withToolLogging("create_internal_agent_python", createInternalAgentPython(t.AgentToolset)))
 
 	gomcp.AddTool(server, &gomcp.Tool{
-		Name:        "create_internal_agent_docker",
-		Description: "Register an internal Docker agent."+
-					"Internal agents are platform-hosted units where source code is fetched, built, deployed, and run by the platform, and the first build is started automatically at creation time." +
-					"If not sure about the the agent type(internal/external) ask the user and confirm the preference type before calling the tool",
+		Name: "create_internal_agent_docker",
+		Description: "Create an internal Docker agent in a project. " +
+			"An internal agent is hosted by the platform: Agent Manager fetches the source code, builds it, deploys it, and runs it for you. " +
+			"Creating the agent automatically starts its initial build.",
 
 		InputSchema: createSchema(map[string]any{
 			"org_name":     stringProperty("Optional. Organization name."),
@@ -162,9 +162,9 @@ func (t *Toolsets) registerAgentTools(server *gomcp.Server) {
 			"app_path":        stringProperty("Required. Path within the repository (use / for root)."),
 			"dockerfile_path": stringProperty("Required. Path to Dockerfile in repo (must start with /)."),
 
-			"interface_type": enumProperty("Optional. DEFAULT (chat API on /chat, port 8000) or CUSTOM (user-provided OpenAPI). Default: DEFAULT.", []string{"DEFAULT", "CUSTOM"}),
+			"interface_type": enumProperty("Required. API interface type of the agent. Use DEFAULT for the standard chat interface on /chat at port 8000, or CUSTOM for a user-provided OpenAPI interface.", []string{"DEFAULT", "CUSTOM"}),
 			"port":           intProperty("Required when interface_type is CUSTOM. Port number where the agent listens."),
-			"base_path":      stringProperty("Optional. API base path (default: /). Required when interface_type is CUSTOM."),
+			"base_path":      stringProperty("Required when interface_type is CUSTOM. API base path for the custom interface (must start with /). "),
 			"openapi_path":   stringProperty("Required when interface_type is CUSTOM. OpenAPI spec file path within the repo (must start with /)."),
 
 			"enable_auto_instrumentation": boolProperty("Optional. Enable OTEL auto instrumentation for observability."),
@@ -177,13 +177,12 @@ func (t *Toolsets) registerAgentTools(server *gomcp.Server) {
 				"required": []string{"key", "value"},
 			}),
 		}, []string{"project_name", "display_name", "repository_url", "branch", "app_path", "dockerfile_path", "interface_type", "env"}),
-	}, createInternalAgentDocker(t.AgentToolset, t.DefaultOrg))
+	}, createInternalAgentDocker(t.AgentToolset))
 
 	gomcp.AddTool(server, &gomcp.Tool{
-		Name:        "create_external_agent",
-		Description: "Register an external agent in a project." +
-		    "External agents run outside the platform, and setup steps are returned to enable instrumentation, observability, and evaluation." +
-			"If not sure about the the agent type(internal/external) ask the user and confirm the preference type before calling this tool",
+		Name: "create_external_agent",
+		Description: "Register an external agent in a project. " +
+			"An external agent runs outside the platform; Agent Manager stores its identity and returns setup steps so you can instrument it and send observability data to the platform.",
 		InputSchema: createSchema(map[string]any{
 			"org_name":     stringProperty("Optional. Organization name."),
 			"project_name": stringProperty("Required. Project name where the agent will be registered."),
@@ -191,24 +190,25 @@ func (t *Toolsets) registerAgentTools(server *gomcp.Server) {
 			"description":  stringProperty("Optional. Short description about what the agent does."),
 			"language":     stringProperty("Required. Agent language for setup guide (python or ballerina)."),
 		}, []string{"project_name", "display_name", "language"}),
-	}, createExternalAgent(t.AgentToolset, t.DefaultOrg))
+	}, createExternalAgent(t.AgentToolset))
 
 	gomcp.AddTool(server, &gomcp.Tool{
-		Name:        "list_agents",
-		Description: "List agents within a specific project." +
-			"An agent is an AI application unit registered in the platform, either internal (platform-hosted) or external (externally hosted), with provisioning, runtime configuration, and lifecycle metadata.",
+		Name: "list_agents",
+		Description: "List agents in a project. " +
+			"An agent is an AI application registered in Agent Manager. Provisioning indicates whether the platform hosts the agent internally or the agent runs externally.",
 		InputSchema: createSchema(map[string]any{
 			"org_name":     stringProperty("Optional. Organization name."),
 			"project_name": stringProperty("Required. Project name to list agents from."),
 			"limit":        intProperty(fmt.Sprintf("Optional. Max agents to return (default %d, min %d, max %d).", utils.DefaultLimit, utils.MinLimit, utils.MaxLimit)),
 			"offset":       intProperty(fmt.Sprintf("Optional. Pagination offset (default %d, min %d).", utils.DefaultOffset, utils.MinOffset)),
 		}, []string{"project_name"}),
-	}, listAgents(t.AgentToolset, t.DefaultOrg))
+	}, listAgents(t.AgentToolset))
 
 	if t.ProjectToolset != nil {
-	gomcp.AddTool(server, &gomcp.Tool{
-		Name:        "list_project_agent_pairs",
-		Description: "List registered project-agent pairs within an organization, with optional project and agent name filters.",
+		gomcp.AddTool(server, &gomcp.Tool{
+			Name: "list_project_agent_pairs",
+			Description: "List project-agent name pairs within an organization, with optional project and agent name filters. " +
+				"Each pair shows the project and the registered agent inside that project.",
 			InputSchema: createSchema(map[string]any{
 				"org_name":       stringProperty("Optional. Organization name."),
 				"project_search": stringProperty("Optional. Filter project names by substring (case-insensitive)."),
@@ -218,11 +218,11 @@ func (t *Toolsets) registerAgentTools(server *gomcp.Server) {
 				"agent_limit":    intProperty("Optional. Agent pagination limit (1-50)."),
 				"agent_offset":   intProperty("Optional. Agent pagination offset (>= 0)."),
 			}, nil),
-		}, listProjectAgentPairs(t.AgentToolset, t.ProjectToolset, t.DefaultOrg))
+		}, listProjectAgentPairs(t.AgentToolset, t.ProjectToolset))
 	}
 }
 
-func createInternalAgentPython(handler AgentToolsetHandler, defaultOrg string) func(context.Context, *gomcp.CallToolRequest, createInternalAgentPythonInput) (*gomcp.CallToolResult, any, error) {
+func createInternalAgentPython(handler AgentToolsetHandler) func(context.Context, *gomcp.CallToolRequest, createInternalAgentPythonInput) (*gomcp.CallToolResult, any, error) {
 	return func(ctx context.Context, _ *gomcp.CallToolRequest, input createInternalAgentPythonInput) (*gomcp.CallToolResult, any, error) {
 		if input.ProjectName == "" {
 			return nil, nil, fmt.Errorf("project_name is required")
@@ -252,7 +252,7 @@ func createInternalAgentPython(handler AgentToolsetHandler, defaultOrg string) f
 			return nil, nil, fmt.Errorf("env is required")
 		}
 
-		orgName := resolveOrgName(defaultOrg, input.OrgName)
+		orgName := resolveOrgName(input.OrgName)
 		if orgName == "" {
 			return nil, nil, fmt.Errorf("org_name is required")
 		}
@@ -304,7 +304,7 @@ func createInternalAgentPython(handler AgentToolsetHandler, defaultOrg string) f
 	}
 }
 
-func createInternalAgentDocker(handler AgentToolsetHandler, defaultOrg string) func(context.Context, *gomcp.CallToolRequest, createInternalAgentDockerInput) (*gomcp.CallToolResult, any, error) {
+func createInternalAgentDocker(handler AgentToolsetHandler) func(context.Context, *gomcp.CallToolRequest, createInternalAgentDockerInput) (*gomcp.CallToolResult, any, error) {
 	return func(ctx context.Context, _ *gomcp.CallToolRequest, input createInternalAgentDockerInput) (*gomcp.CallToolResult, any, error) {
 		if input.ProjectName == "" {
 			return nil, nil, fmt.Errorf("project_name is required")
@@ -331,7 +331,7 @@ func createInternalAgentDocker(handler AgentToolsetHandler, defaultOrg string) f
 			return nil, nil, fmt.Errorf("env is required")
 		}
 
-		orgName := resolveOrgName(defaultOrg, input.OrgName)
+		orgName := resolveOrgName(input.OrgName)
 		if orgName == "" {
 			return nil, nil, fmt.Errorf("org_name is required")
 		}
@@ -382,7 +382,7 @@ func createInternalAgentDocker(handler AgentToolsetHandler, defaultOrg string) f
 	}
 }
 
-func createExternalAgent(handler AgentToolsetHandler, defaultOrg string) func(context.Context, *gomcp.CallToolRequest, createExternalAgentInput) (*gomcp.CallToolResult, any, error) {
+func createExternalAgent(handler AgentToolsetHandler) func(context.Context, *gomcp.CallToolRequest, createExternalAgentInput) (*gomcp.CallToolResult, any, error) {
 	return func(ctx context.Context, _ *gomcp.CallToolRequest, input createExternalAgentInput) (*gomcp.CallToolResult, any, error) {
 		if input.ProjectName == "" {
 			return nil, nil, fmt.Errorf("project_name is required")
@@ -394,7 +394,7 @@ func createExternalAgent(handler AgentToolsetHandler, defaultOrg string) func(co
 			return nil, nil, fmt.Errorf("language is required")
 		}
 
-		orgName := resolveOrgName(defaultOrg, input.OrgName)
+		orgName := resolveOrgName(input.OrgName)
 		if orgName == "" {
 			return nil, nil, fmt.Errorf("org_name is required")
 		}
@@ -449,7 +449,7 @@ func createExternalAgent(handler AgentToolsetHandler, defaultOrg string) func(co
 	}
 }
 
-func listProjectAgentPairs(agentHandler AgentToolsetHandler, projectHandler ProjectToolsetHandler, defaultOrg string) func(context.Context, *gomcp.CallToolRequest, listProjectAgentPairsInput) (*gomcp.CallToolResult, any, error) {
+func listProjectAgentPairs(agentHandler AgentToolsetHandler, projectHandler ProjectToolsetHandler) func(context.Context, *gomcp.CallToolRequest, listProjectAgentPairsInput) (*gomcp.CallToolResult, any, error) {
 	return func(ctx context.Context, _ *gomcp.CallToolRequest, input listProjectAgentPairsInput) (*gomcp.CallToolResult, any, error) {
 		if input.ProjectLimit != nil && (*input.ProjectLimit < utils.MinLimit || *input.ProjectLimit > utils.MaxLimit) {
 			return nil, nil, fmt.Errorf("project_limit must be between %d and %d", utils.MinLimit, utils.MaxLimit)
@@ -464,7 +464,7 @@ func listProjectAgentPairs(agentHandler AgentToolsetHandler, projectHandler Proj
 			return nil, nil, fmt.Errorf("agent_offset must be >= %d", utils.MinOffset)
 		}
 
-		orgName := resolveOrgName(defaultOrg, input.OrgName)
+		orgName := resolveOrgName(input.OrgName)
 		if orgName == "" {
 			return nil, nil, fmt.Errorf("org_name is required")
 		}
@@ -524,13 +524,13 @@ func listProjectAgentPairs(agentHandler AgentToolsetHandler, projectHandler Proj
 	}
 }
 
-func listAgents(handler AgentToolsetHandler, defaultOrg string) func(context.Context, *gomcp.CallToolRequest, listAgentsInput) (*gomcp.CallToolResult, any, error) {
+func listAgents(handler AgentToolsetHandler) func(context.Context, *gomcp.CallToolRequest, listAgentsInput) (*gomcp.CallToolResult, any, error) {
 	return func(ctx context.Context, _ *gomcp.CallToolRequest, input listAgentsInput) (*gomcp.CallToolResult, any, error) {
 		if input.ProjectName == "" {
 			return nil, nil, fmt.Errorf("project_name is required")
 		}
 
-		orgName := resolveOrgName(defaultOrg, input.OrgName)
+		orgName := resolveOrgName(input.OrgName)
 		if orgName == "" {
 			return nil, nil, fmt.Errorf("org_name is required")
 		}
@@ -563,7 +563,7 @@ func listAgents(handler AgentToolsetHandler, defaultOrg string) func(context.Con
 				continue
 			}
 			formatted = append(formatted, listAgentItem{
-				Name:        agent.Name,
+				Name: agent.Name,
 				Provisioning: spec.Provisioning{
 					Type: agent.Provisioning.Type,
 				},
@@ -745,9 +745,9 @@ func buildInputInterface(interfaceType string, input internalAgentInput) (*spec.
 		return nil, fmt.Errorf("port is required for CUSTOM interface and must be 1-65535")
 	}
 	basePath := strings.TrimSpace(input.BasePath)
-	if basePath == "" {
-		return nil, fmt.Errorf("base_path is required for CUSTOM interface")
-	}
+	// if basePath == "" {
+	// 	return nil, fmt.Errorf("base_path is required for CUSTOM interface")
+	// }
 	openAPIPath := strings.TrimSpace(input.OpenAPIPath)
 	if openAPIPath == "" {
 		return nil, fmt.Errorf("openapi_path is required for CUSTOM interface")

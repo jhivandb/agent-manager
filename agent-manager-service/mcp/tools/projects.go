@@ -47,16 +47,16 @@ type createProjectInput struct {
 
 func (t *Toolsets) registerProjectTools(server *gomcp.Server) {
 	gomcp.AddTool(server, &gomcp.Tool{
-		Name:        "list_project",
-		Description: "List all projects registered within an organization."+
-		"Projects are logical containers that group agent-related resources."+
-		"Support pagination using 'limit' and 'offset' parameters.",
+		Name: "list_project",
+		Description: "List projects in an organization. " +
+			"A project is a logical container that groups agents and related resources within an organization. " +
+			"Supports pagination with `limit` and `offset`.",
 		InputSchema: createSchema(map[string]any{
 			"org_name": stringProperty("Optional. Organization name."),
 			"limit":    intProperty(fmt.Sprintf("Optional. Max projects to return (default %d, min %d, max %d).", utils.DefaultLimit, utils.MinLimit, utils.MaxLimit)),
 			"offset":   intProperty(fmt.Sprintf("Optional. Pagination offset (default %d, min %d).", utils.DefaultOffset, utils.MinOffset)),
 		}, nil),
-	}, withToolLogging("list_project", listProjects(t.ProjectToolset, t.DefaultOrg)))
+	}, withToolLogging("list_project", listProjects(t.ProjectToolset)))
 
 	// gomcp.AddTool(server, &gomcp.Tool{
 	// 	Name:        "list_organizations",
@@ -68,15 +68,15 @@ func (t *Toolsets) registerProjectTools(server *gomcp.Server) {
 	// }, listOrganizations(t.ProjectToolset))
 
 	gomcp.AddTool(server, &gomcp.Tool{
-		Name:        "create_project",
-		Description: "Create a new project within an organization." +
-		" A unique project name is generated automatically from the display name provided.",
+		Name: "create_project",
+		Description: "Create a new project in an organization. " +
+			"A project is a logical container for agents and related resources, and the project name is generated automatically from the display name.",
 		InputSchema: createSchema(map[string]any{
 			"org_name":     stringProperty("Optional. Organization name."),
 			"display_name": stringProperty("Required. Project display name."),
 			"description":  stringProperty("Optional. Project description."),
 		}, []string{"display_name"}),
-	}, withToolLogging("create_project", createProject(t.ProjectToolset, t.AgentToolset, t.DefaultOrg)))
+	}, withToolLogging("create_project", createProject(t.ProjectToolset, t.AgentToolset)))
 
 	// gomcp.AddTool(server, &gomcp.Tool{
 	// 	Name:        "list_environments",
@@ -84,12 +84,12 @@ func (t *Toolsets) registerProjectTools(server *gomcp.Server) {
 	// 	InputSchema: createSchema(map[string]any{
 	// 		"org_name": stringProperty("Optional. Organization name."),
 	// 	}, nil),
-	// }, listEnvironments(t.ProjectToolset, t.DefaultOrg))
+	// }, listEnvironments(t.ProjectToolset))
 }
 
-func listProjects(handler ProjectToolsetHandler, defaultOrg string) func(context.Context, *gomcp.CallToolRequest, listProjectsInput) (*gomcp.CallToolResult, any, error) {
+func listProjects(handler ProjectToolsetHandler) func(context.Context, *gomcp.CallToolRequest, listProjectsInput) (*gomcp.CallToolResult, any, error) {
 	return func(ctx context.Context, _ *gomcp.CallToolRequest, input listProjectsInput) (*gomcp.CallToolResult, any, error) {
-		orgName := resolveOrgName(defaultOrg, input.OrgName)
+		orgName := resolveOrgName(input.OrgName)
 		if orgName == "" {
 			return nil, nil, fmt.Errorf("org_name is required")
 		}
@@ -125,7 +125,7 @@ func listProjects(handler ProjectToolsetHandler, defaultOrg string) func(context
 				continue
 			}
 			formatted = append(formatted, listProjectItem{
-				Name:      project.Name,
+				Name: project.Name,
 				// OrgName:   project.OrgName,
 				CreatedAt: project.CreatedAt,
 			})
@@ -173,9 +173,9 @@ func listProjects(handler ProjectToolsetHandler, defaultOrg string) func(context
 // 	}
 // }
 
-func createProject(handler ProjectToolsetHandler, agentHandler AgentToolsetHandler, defaultOrg string) func(context.Context, *gomcp.CallToolRequest, createProjectInput) (*gomcp.CallToolResult, any, error) {
+func createProject(handler ProjectToolsetHandler, agentHandler AgentToolsetHandler) func(context.Context, *gomcp.CallToolRequest, createProjectInput) (*gomcp.CallToolResult, any, error) {
 	return func(ctx context.Context, _ *gomcp.CallToolRequest, input createProjectInput) (*gomcp.CallToolResult, any, error) {
-		orgName := resolveOrgName(defaultOrg, input.OrgName)
+		orgName := resolveOrgName(input.OrgName)
 		if orgName == "" {
 			return nil, nil, fmt.Errorf("org_name is required")
 		}
@@ -215,9 +215,9 @@ func createProject(handler ProjectToolsetHandler, agentHandler AgentToolsetHandl
 	}
 }
 
-// func listEnvironments(handler ProjectToolsetHandler, defaultOrg string) func(context.Context, *gomcp.CallToolRequest, listEnvironmentsInput) (*gomcp.CallToolResult, any, error) {
+// func listEnvironments(handler ProjectToolsetHandler) func(context.Context, *gomcp.CallToolRequest, listEnvironmentsInput) (*gomcp.CallToolResult, any, error) {
 // 	return func(ctx context.Context, _ *gomcp.CallToolRequest, input listEnvironmentsInput) (*gomcp.CallToolResult, any, error) {
-// 		orgName := resolveOrgName(defaultOrg, input.OrgName)
+// 		orgName := resolveOrgName(input.OrgName)
 // 		if orgName == "" {
 // 			return nil, nil, fmt.Errorf("org_name is required")
 // 		}

@@ -6,7 +6,36 @@ import (
 
 	occlient "github.com/wso2/agent-manager/agent-manager-service/clients/openchoreosvc/client"
 	traceobserversvc "github.com/wso2/agent-manager/agent-manager-service/clients/traceobserversvc"
+	"github.com/wso2/agent-manager/agent-manager-service/models"
+	"github.com/wso2/agent-manager/agent-manager-service/services"
+	"github.com/wso2/agent-manager/agent-manager-service/spec"
 )
+
+// ObserverHandler bridges MCP observer tools (logs/metrics) to the agent manager service layer.
+type ObserverHandler struct {
+	agentSvc services.AgentManagerService
+}
+
+func NewObserverHandler(agentSvc services.AgentManagerService) *ObserverHandler {
+	return &ObserverHandler{agentSvc: agentSvc}
+}
+
+func (h *ObserverHandler) GetRuntimeLogs(ctx context.Context, orgName string, projectName string, agentName string, payload spec.LogFilterRequest) (*models.LogsResponse, error) {
+	return h.agentSvc.GetAgentRuntimeLogs(ctx, orgName, projectName, agentName, payload)
+}
+
+// RuntimeLogHandler bridges MCP runtime log tools to the agent manager service layer.
+type RuntimeLogHandler struct {
+	agentSvc services.AgentManagerService
+}
+
+func NewRuntimeLogHandler(agentSvc services.AgentManagerService) *RuntimeLogHandler {
+	return &RuntimeLogHandler{agentSvc: agentSvc}
+}
+
+func (h *RuntimeLogHandler) GetRuntimeLogs(ctx context.Context, orgName string, projectName string, agentName string, payload spec.LogFilterRequest) (*models.LogsResponse, error) {
+	return h.agentSvc.GetAgentRuntimeLogs(ctx, orgName, projectName, agentName, payload)
+}
 
 // TraceHandler bridges MCP trace tools to the trace-observer service.
 type TraceHandler struct {

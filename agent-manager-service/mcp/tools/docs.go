@@ -14,9 +14,9 @@ type docsSitemapOutput struct {
 
 func (t *Toolsets) registerDocTools(server *gomcp.Server) {
 	gomcp.AddTool(server, &gomcp.Tool{
-		Name:        "get_docs_sitemap",
-		Description: "Return the Agent Manager documentation sitemap URL. "+
-			"Invoke when further details about the agent manager platform or its capabilities are needed.",
+		Name: "get_docs_sitemap",
+		Description: "Return the Agent Manager documentation sitemap URL. " +
+			"The sitemap points to the product documentation in the format of txt file, reference for Agent Manager capabilities and usage details.",
 		InputSchema: createSchema(map[string]any{}, nil),
 	}, withToolLogging("get_docs_sitemap", getDocsSitemap()))
 }

@@ -35,25 +35,27 @@ type deployAgentInput struct {
 
 func (t *Toolsets) registerDeploymentTools(server *gomcp.Server) {
 	gomcp.AddTool(server, &gomcp.Tool{
-		Name:        "list_deployments",
-		Description: "List all deployments for an agent across environments, including the current status for each (active, in-progress, failed, not-deployed, suspended).",
+		Name: "list_deployments",
+		Description: "List an agent's deployments across environments. " +
+			"A deployment is a released agent image running in a specific environment, and each deployment includes its current state such as active, in-progress, failed, not-deployed, or suspended.",
 		InputSchema: createSchema(map[string]any{
 			"org_name":     stringProperty("Optional. Organization name."),
 			"project_name": stringProperty("Required. Project name where the agent exists."),
 			"agent_name":   stringProperty("Required. Name of the agent to check deployments for."),
 		}, []string{"project_name", "agent_name"}),
-	}, withToolLogging("list_deployments", listDeployments(t.DeploymentToolset, t.DefaultOrg)))
+	}, withToolLogging("list_deployments", listDeployments(t.DeploymentToolset)))
 
 	gomcp.AddTool(server, &gomcp.Tool{
-		Name:        "deploy_agent",
-		Description: "Deploy an existing agent with a specific build. Will be deployed to the lowest environment in the deployment pipeline."+
-			"Use this to redeploy a selected build, since successful builds are auto deployed by default.",
+		Name: "deploy_agent",
+		Description: "Deploy an existing agent image. " +
+			"A deployment releases a built agent image to the lowest environment in the deployment pipeline. " +
+			"This tool accepts a specific image together with optional runtime environment variables and observability settings.",
 		InputSchema: createSchema(map[string]any{
 			"org_name":                    stringProperty("Optional. Organization name."),
 			"project_name":                stringProperty("Required. Project name where the agent exists."),
 			"agent_name":                  stringProperty("Required. Name of the agent to be deployed."),
-			"image_id":                    stringProperty("Required. Image ID to deploy."),
-			"enable_auto_instrumentation": boolProperty("Optional. Enable auto instrumentation for observability."),
+			"image_id":                    stringProperty("Required. Image identifier produced by a build."),
+			"enable_auto_instrumentation": boolProperty("Optional. Enable automatic observability instrumentation for the deployed agent."),
 			"env": arrayProperty("Optional. Environment variables for deployment.", createSchema(map[string]any{
 				"key":          stringProperty("Required. Environment variable key."),
 				"value":        stringProperty("Optional. Environment variable value."),
@@ -61,22 +63,23 @@ func (t *Toolsets) registerDeploymentTools(server *gomcp.Server) {
 				"secret_ref":   stringProperty("Optional. Reference to existing secret."),
 			}, []string{"key"})),
 		}, []string{"project_name", "agent_name", "image_id"}),
-	}, withToolLogging("deploy_agent", deployAgent(t.DeploymentToolset, t.DefaultOrg)))
+	}, withToolLogging("deploy_agent", deployAgent(t.DeploymentToolset)))
 
 	gomcp.AddTool(server, &gomcp.Tool{
-		Name:        "update_deployment_state",
-		Description: "Update deployment state for an agent in a specific environment.(redeploy or undeploy)",
+		Name: "update_deployment_state",
+		Description: "Change the state of an agent deployment in a specific environment. " +
+			"`redeploy` requests a fresh rollout of the current deployment, and `undeploy` removes the deployment from that environment.",
 		InputSchema: createSchema(map[string]any{
 			"org_name":     stringProperty("Optional. Organization name."),
 			"project_name": stringProperty("Required. Project name where the agent is been registered."),
 			"agent_name":   stringProperty("Required. Name of the specific agent."),
 			"environment":  stringProperty("Required. Environment name."),
-			"state":        enumProperty("Required. Desired deployment state for the specific deployment to update.", []string{"redeploy", "undeploy"}),
+			"state":        enumProperty("Required. Desired deployment action for the selected environment.", []string{"redeploy", "undeploy"}),
 		}, []string{"project_name", "agent_name", "environment", "state"}),
-	}, withToolLogging("update_deployment_state", updateDeploymentState(t.DeploymentToolset, t.DefaultOrg)))
+	}, withToolLogging("update_deployment_state", updateDeploymentState(t.DeploymentToolset)))
 }
 
-func listDeployments(handler DeploymentToolsetHandler, defaultOrg string) func(context.Context, *gomcp.CallToolRequest, listDeploymentsInput) (*gomcp.CallToolResult, any, error) {
+func listDeployments(handler DeploymentToolsetHandler) func(context.Context, *gomcp.CallToolRequest, listDeploymentsInput) (*gomcp.CallToolResult, any, error) {
 	return func(ctx context.Context, _ *gomcp.CallToolRequest, input listDeploymentsInput) (*gomcp.CallToolResult, any, error) {
 		if input.ProjectName == "" {
 			return nil, nil, fmt.Errorf("project_name is required")
@@ -85,7 +88,7 @@ func listDeployments(handler DeploymentToolsetHandler, defaultOrg string) func(c
 			return nil, nil, fmt.Errorf("agent_name is required")
 		}
 
-		orgName := resolveOrgName(defaultOrg, input.OrgName)
+		orgName := resolveOrgName(input.OrgName)
 		if orgName == "" {
 			return nil, nil, fmt.Errorf("org_name is required")
 		}
@@ -106,7 +109,7 @@ func listDeployments(handler DeploymentToolsetHandler, defaultOrg string) func(c
 	}
 }
 
-func deployAgent(handler DeploymentToolsetHandler, defaultOrg string) func(context.Context, *gomcp.CallToolRequest, deployAgentInput) (*gomcp.CallToolResult, any, error) {
+func deployAgent(handler DeploymentToolsetHandler) func(context.Context, *gomcp.CallToolRequest, deployAgentInput) (*gomcp.CallToolResult, any, error) {
 	return func(ctx context.Context, _ *gomcp.CallToolRequest, input deployAgentInput) (*gomcp.CallToolResult, any, error) {
 		if input.ProjectName == "" {
 			return nil, nil, fmt.Errorf("project_name is required")
@@ -118,7 +121,7 @@ func deployAgent(handler DeploymentToolsetHandler, defaultOrg string) func(conte
 			return nil, nil, fmt.Errorf("image_id is required")
 		}
 
-		orgName := resolveOrgName(defaultOrg, input.OrgName)
+		orgName := resolveOrgName(input.OrgName)
 		if orgName == "" {
 			return nil, nil, fmt.Errorf("org_name is required")
 		}
@@ -170,7 +173,7 @@ type updateDeploymentStateInput struct {
 	State       string `json:"state"`
 }
 
-func updateDeploymentState(handler DeploymentToolsetHandler, defaultOrg string) func(context.Context, *gomcp.CallToolRequest, updateDeploymentStateInput) (*gomcp.CallToolResult, any, error) {
+func updateDeploymentState(handler DeploymentToolsetHandler) func(context.Context, *gomcp.CallToolRequest, updateDeploymentStateInput) (*gomcp.CallToolResult, any, error) {
 	return func(ctx context.Context, _ *gomcp.CallToolRequest, input updateDeploymentStateInput) (*gomcp.CallToolResult, any, error) {
 		if input.ProjectName == "" {
 			return nil, nil, fmt.Errorf("project_name is required")
@@ -191,7 +194,7 @@ func updateDeploymentState(handler DeploymentToolsetHandler, defaultOrg string) 
 			return nil, nil, fmt.Errorf("state must be redeploy or undeploy")
 		}
 
-		orgName := resolveOrgName(defaultOrg, input.OrgName)
+		orgName := resolveOrgName(input.OrgName)
 		if orgName == "" {
 			return nil, nil, fmt.Errorf("Organization name is required")
 		}

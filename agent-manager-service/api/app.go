@@ -59,7 +59,6 @@ func MakeHTTPHandler(params *wiring.AppParams) http.Handler {
 		EvaluatorToolset:     evaluatorHandler,
 		MonitorToolset:       monitorHandler,
 		MonitorScoresToolset: monitorScoresHandler,
-		DefaultOrg:           "default",
 	}
 	mcpHandler := mcp.NewHTTPServer(toolsets)
 	mcpHandler = params.AuthMiddleware(mcpHandler)

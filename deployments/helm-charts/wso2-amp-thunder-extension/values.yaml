@@ -220,6 +220,8 @@ thunder:
       description: "AMP Console Application"
       redirectUris:
         - "http://localhost:3000/login"
+        # - "http://127.0.0.1:19876/mcp/oauth/callback"
+
       grantTypes:
         - "authorization_code"
         - "refresh_token"
