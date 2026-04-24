@@ -20,8 +20,12 @@ import (
 	"net/http"
 
 	"github.com/wso2/agent-manager/agent-manager-service/config"
+	"github.com/wso2/agent-manager/agent-manager-service/mcp"
+	mcphandlers "github.com/wso2/agent-manager/agent-manager-service/mcp/mcp_handlers"
+	mcptools "github.com/wso2/agent-manager/agent-manager-service/mcp/tools"
 	"github.com/wso2/agent-manager/agent-manager-service/middleware"
 	"github.com/wso2/agent-manager/agent-manager-service/middleware/logger"
+	mcpmiddleware "github.com/wso2/agent-manager/agent-manager-service/middleware/mcp"
 	"github.com/wso2/agent-manager/agent-manager-service/wiring"
 )
 
@@ -31,6 +35,36 @@ func MakeHTTPHandler(params *wiring.AppParams) http.Handler {
 
 	// Register health check
 	registerHealthCheck(mux)
+
+	registerOAuthProtectedResourceMetadata(mux)
+
+	// MCP endpoint (JWT-authenticated)
+	agentHandler := mcphandlers.NewAgentHandler(params.AgentManagerService, params.AgentTokenManagerService)
+	projectHandler := mcphandlers.NewProjectHandler(params.InfraResourceManager)
+	buildHandler := mcphandlers.NewBuildHandler(params.AgentManagerService)
+	deploymentHandler := mcphandlers.NewDeploymentHandler(params.AgentManagerService)
+	traceHandler := mcphandlers.NewTraceHandler(params.OpenChoreoClient, params.TraceObserverClient)
+	observerHandler := mcphandlers.NewObserverHandler(params.AgentManagerService)
+	evaluatorHandler := mcphandlers.NewEvaluatorHandler(params.EvaluatorManagerService)
+	monitorHandler := mcphandlers.NewMonitorHandler(params.MonitorManagerService)
+	monitorScoresHandler := mcphandlers.NewMonitorScoresHandler(params.MonitorScoresService)
+	toolsets := &mcptools.Toolsets{
+		AgentToolset:   agentHandler,
+		ProjectToolset: projectHandler,
+		// RepositoryToolset:    repositoryHandler,
+		BuildToolset:         buildHandler,
+		DeploymentToolset:    deploymentHandler,
+		TraceToolset:         traceHandler,
+		RuntimeLogToolset:    observerHandler,
+		EvaluatorToolset:     evaluatorHandler,
+		MonitorToolset:       monitorHandler,
+		MonitorScoresToolset: monitorScoresHandler,
+	}
+	mcpHandler := mcp.NewHTTPServer(toolsets)
+	mcpHandler = params.AuthMiddleware(mcpHandler)
+	mcpHandler = mcpmiddleware.Auth401Interceptor()(mcpHandler)
+	mcpHandler = logger.RequestLogger()(mcpHandler)
+	mux.Handle("/mcp", mcpHandler)
 
 	// Register JWKS endpoint at root level (no authentication required)
 	registerJWKSRoute(mux, params.AgentTokenController)

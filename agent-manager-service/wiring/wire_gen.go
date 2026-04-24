@@ -14,6 +14,7 @@ import (
 	"github.com/wso2/agent-manager/agent-manager-service/clients/observabilitysvc"
 	"github.com/wso2/agent-manager/agent-manager-service/clients/openchoreosvc/client"
 	"github.com/wso2/agent-manager/agent-manager-service/clients/secretmanagersvc"
+	"github.com/wso2/agent-manager/agent-manager-service/clients/traceobserversvc"
 	"github.com/wso2/agent-manager/agent-manager-service/config"
 	"github.com/wso2/agent-manager/agent-manager-service/controllers"
 	"github.com/wso2/agent-manager/agent-manager-service/middleware/jwtassertion"
@@ -38,7 +39,11 @@ func InitializeAppParams(cfg *config.Config, db *gorm.DB, authProvider client.Au
 	if err != nil {
 		return nil, err
 	}
-	secretManagementClient, err := ProvideSecretManagementClient(configConfig, secretProvider, openChoreoClient)
+	traceObserverClient, err := ProvideTraceObserverClient(configConfig, authProvider)
+	if err != nil {
+		return nil, err
+	}
+	secretManagementClient, err := ProvideSecretManagementClient(configConfig, secretProvider)
 	if err != nil {
 		return nil, err
 	}
@@ -139,8 +144,15 @@ func InitializeAppParams(cfg *config.Config, db *gorm.DB, authProvider client.Au
 		AgentConfigurationController:     agentConfigurationController,
 		GitSecretController:              gitSecretController,
 		MonitorScheduler:                 monitorSchedulerService,
+		AgentManagerService:              agentManagerService,
+		AgentTokenManagerService:         agentTokenManagerService,
+		InfraResourceManager:             infraResourceManager,
+		EvaluatorManagerService:          evaluatorManagerService,
+		MonitorManagerService:            monitorManagerService,
+		MonitorScoresService:             monitorScoresService,
 		LLMTemplateStore:                 llmTemplateStore,
 		OpenChoreoClient:                 openChoreoClient,
+		TraceObserverClient:              traceObserverClient,
 		WebSocketManager:                 manager,
 		DB:                               db,
 	}
@@ -152,6 +164,7 @@ func InitializeTestAppParamsWithClientMocks(cfg *config.Config, db *gorm.DB, aut
 	logger := ProvideLogger()
 	openChoreoClient := ProvideTestOpenChoreoClient(testClients)
 	observabilitySvcClient := ProvideTestObservabilitySvcClient(testClients)
+	traceObserverClient := ProvideTestTraceObserverClient(testClients)
 	secretManagementClient := ProvideTestSecretManagementClient(testClients)
 	configConfig := ProvideConfigFromPtr(cfg)
 	gitCredentialsService, err := ProvideGitCredentialsService(openChoreoClient, configConfig)
@@ -251,8 +264,15 @@ func InitializeTestAppParamsWithClientMocks(cfg *config.Config, db *gorm.DB, aut
 		AgentConfigurationController:     agentConfigurationController,
 		GitSecretController:              gitSecretController,
 		MonitorScheduler:                 monitorSchedulerService,
+		AgentManagerService:              agentManagerService,
+		AgentTokenManagerService:         agentTokenManagerService,
+		InfraResourceManager:             infraResourceManager,
+		EvaluatorManagerService:          evaluatorManagerService,
+		MonitorManagerService:            monitorManagerService,
+		MonitorScoresService:             monitorScoresService,
 		LLMTemplateStore:                 llmTemplateStore,
 		OpenChoreoClient:                 openChoreoClient,
+		TraceObserverClient:              traceObserverClient,
 		WebSocketManager:                 manager,
 		DB:                               db,
 	}
@@ -269,6 +289,7 @@ var configProviderSet = wire.NewSet(
 
 var clientProviderSet = wire.NewSet(
 	ProvideObservabilitySvcClient,
+	ProvideTraceObserverClient,
 	ProvideOCClient,
 	ProvideSecretManagementClient,
 )
@@ -280,6 +301,7 @@ var controllerProviderSet = wire.NewSet(controllers.NewAgentController, controll
 var testClientProviderSet = wire.NewSet(
 	ProvideTestOpenChoreoClient,
 	ProvideTestObservabilitySvcClient,
+	ProvideTestTraceObserverClient,
 	ProvideTestSecretManagementClient,
 )
 
@@ -304,31 +326,26 @@ func ProvideObservabilitySvcClient(cfg config.Config, authProvider client.AuthPr
 	})
 }
 
-// ProvideSecretManagementClient creates the secret management service client.
-// If the provider implements secretmanagersvc.SecretReferenceManager and
-// reports that it manages SecretReferences itself, the OpenChoreo client is
-// not forwarded — preventing the high-level client from making redundant
-// SecretReference CRUD calls.
-func ProvideSecretManagementClient(cfg config.Config, secretProvider secretmanagersvc.Provider, ocClient client.OpenChoreoClient) (secretmanagersvc.SecretManagementClient, error) {
-	ocClientForSecretMgmt := ocClient
-	if mgr, ok := secretProvider.(secretmanagersvc.SecretReferenceManager); ok && mgr.ManagesSecretReferences() {
-		ocClientForSecretMgmt = nil
-	}
-	return secretmanagersvc.NewSecretManagementClientWithConfig(secretmanagersvc.SecretManagementClientConfig{
-		StoreConfig: &secretmanagersvc.StoreConfig{
-			Provider: cfg.SecretManager.Provider,
-			OpenBao: &secretmanagersvc.OpenBaoConfig{
-				Server: cfg.OpenBao.URL,
-				Path:   cfg.OpenBao.Path,
-				Auth: &secretmanagersvc.OpenBaoAuth{
-					Token: cfg.OpenBao.Token,
-				},
+// ProvideTraceObserverClient creates the trace observer service client
+func ProvideTraceObserverClient(cfg config.Config, authProvider client.AuthProvider) (traceobserversvc.TraceObserverClient, error) {
+	return traceobserversvc.NewTraceObserverClient(&traceobserversvc.Config{
+		BaseURL:      cfg.TraceObserver.URL,
+		AuthProvider: authProvider,
+	})
+}
+
+// ProvideSecretManagementClient creates the secret management service client
+func ProvideSecretManagementClient(cfg config.Config, secretProvider secretmanagersvc.Provider) (secretmanagersvc.SecretManagementClient, error) {
+	return secretmanagersvc.NewSecretManagementClient(&secretmanagersvc.StoreConfig{
+		Provider: cfg.SecretManager.Provider,
+		OpenBao: &secretmanagersvc.OpenBaoConfig{
+			Server: cfg.OpenBao.URL,
+			Path:   cfg.OpenBao.Path,
+			Auth: &secretmanagersvc.OpenBaoAuth{
+				Token: cfg.OpenBao.Token,
 			},
 		},
-		Provider:        secretProvider,
-		OCClient:        ocClientForSecretMgmt,
-		RefreshInterval: cfg.SecretManager.RefreshInterval,
-	})
+	}, secretProvider)
 }
 
 // ProvideGitCredentialsService creates the git credentials service for fetching
@@ -367,6 +384,10 @@ func ProvideTestOpenChoreoClient(testClients TestClients) client.OpenChoreoClien
 
 func ProvideTestObservabilitySvcClient(testClients TestClients) observabilitysvc.ObservabilitySvcClient {
 	return testClients.ObservabilitySvcClient
+}
+
+func ProvideTestTraceObserverClient(testClients TestClients) traceobserversvc.TraceObserverClient {
+	return testClients.TraceObserverClient
 }
 
 func ProvideTestSecretManagementClient(testClients TestClients) secretmanagersvc.SecretManagementClient {

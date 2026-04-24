@@ -42,6 +42,8 @@ type Config struct {
 
 	// Observer service configuration (for build logs, etc.)
 	Observer ObserverConfig
+	// Trace observer service configuration (for traces)
+	TraceObserver TraceObserverConfig
 
 	IsLocalDevEnv bool
 
@@ -164,6 +166,11 @@ type CORSConfig struct {
 
 type ObserverConfig struct {
 	// Observer service URL
+	URL string
+}
+
+type TraceObserverConfig struct {
+	// Trace observer service URL
 	URL string
 }
 

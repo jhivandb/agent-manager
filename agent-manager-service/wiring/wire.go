@@ -29,6 +29,7 @@ import (
 	observabilitysvc "github.com/wso2/agent-manager/agent-manager-service/clients/observabilitysvc"
 	occlient "github.com/wso2/agent-manager/agent-manager-service/clients/openchoreosvc/client"
 	"github.com/wso2/agent-manager/agent-manager-service/clients/secretmanagersvc"
+	traceobserversvc "github.com/wso2/agent-manager/agent-manager-service/clients/traceobserversvc"
 	"github.com/wso2/agent-manager/agent-manager-service/config"
 	"github.com/wso2/agent-manager/agent-manager-service/controllers"
 	"github.com/wso2/agent-manager/agent-manager-service/middleware/jwtassertion"
@@ -45,6 +46,7 @@ var configProviderSet = wire.NewSet(
 
 var clientProviderSet = wire.NewSet(
 	ProvideObservabilitySvcClient,
+	ProvideTraceObserverClient,
 	ProvideOCClient,
 	ProvideSecretManagementClient,
 )
@@ -102,6 +104,7 @@ var controllerProviderSet = wire.NewSet(
 var testClientProviderSet = wire.NewSet(
 	ProvideTestOpenChoreoClient,
 	ProvideTestObservabilitySvcClient,
+	ProvideTestTraceObserverClient,
 	ProvideTestSecretManagementClient,
 )
 
@@ -126,31 +129,26 @@ func ProvideObservabilitySvcClient(cfg config.Config, authProvider occlient.Auth
 	})
 }
 
-// ProvideSecretManagementClient creates the secret management service client.
-// If the provider implements secretmanagersvc.SecretReferenceManager and
-// reports that it manages SecretReferences itself, the OpenChoreo client is
-// not forwarded — preventing the high-level client from making redundant
-// SecretReference CRUD calls.
-func ProvideSecretManagementClient(cfg config.Config, secretProvider secretmanagersvc.Provider, ocClient occlient.OpenChoreoClient) (secretmanagersvc.SecretManagementClient, error) {
-	ocClientForSecretMgmt := ocClient
-	if mgr, ok := secretProvider.(secretmanagersvc.SecretReferenceManager); ok && mgr.ManagesSecretReferences() {
-		ocClientForSecretMgmt = nil
-	}
-	return secretmanagersvc.NewSecretManagementClientWithConfig(secretmanagersvc.SecretManagementClientConfig{
-		StoreConfig: &secretmanagersvc.StoreConfig{
-			Provider: cfg.SecretManager.Provider,
-			OpenBao: &secretmanagersvc.OpenBaoConfig{
-				Server: cfg.OpenBao.URL,
-				Path:   cfg.OpenBao.Path,
-				Auth: &secretmanagersvc.OpenBaoAuth{
-					Token: cfg.OpenBao.Token,
-				},
+// ProvideTraceObserverClient creates the trace observer service client
+func ProvideTraceObserverClient(cfg config.Config, authProvider occlient.AuthProvider) (traceobserversvc.TraceObserverClient, error) {
+	return traceobserversvc.NewTraceObserverClient(&traceobserversvc.Config{
+		BaseURL:      cfg.TraceObserver.URL,
+		AuthProvider: authProvider,
+	})
+}
+
+// ProvideSecretManagementClient creates the secret management service client
+func ProvideSecretManagementClient(cfg config.Config, secretProvider secretmanagersvc.Provider) (secretmanagersvc.SecretManagementClient, error) {
+	return secretmanagersvc.NewSecretManagementClient(&secretmanagersvc.StoreConfig{
+		Provider: cfg.SecretManager.Provider,
+		OpenBao: &secretmanagersvc.OpenBaoConfig{
+			Server: cfg.OpenBao.URL,
+			Path:   cfg.OpenBao.Path,
+			Auth: &secretmanagersvc.OpenBaoAuth{
+				Token: cfg.OpenBao.Token,
 			},
 		},
-		Provider:        secretProvider,
-		OCClient:        ocClientForSecretMgmt,
-		RefreshInterval: cfg.SecretManager.RefreshInterval,
-	})
+	}, secretProvider)
 }
 
 // ProvideGitCredentialsService creates the git credentials service for fetching
@@ -194,6 +192,10 @@ func ProvideTestOpenChoreoClient(testClients TestClients) occlient.OpenChoreoCli
 
 func ProvideTestObservabilitySvcClient(testClients TestClients) observabilitysvc.ObservabilitySvcClient {
 	return testClients.ObservabilitySvcClient
+}
+
+func ProvideTestTraceObserverClient(testClients TestClients) traceobserversvc.TraceObserverClient {
+	return testClients.TraceObserverClient
 }
 
 func ProvideTestSecretManagementClient(testClients TestClients) secretmanagersvc.SecretManagementClient {
