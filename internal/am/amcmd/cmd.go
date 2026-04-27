@@ -1,6 +1,7 @@
 package amcmd
 
 import (
+	"github.com/wso2/agent-manager/internal/am/clierr"
 	"github.com/wso2/agent-manager/internal/am/cmd"
 	"github.com/wso2/agent-manager/internal/am/cmdutil"
 	"github.com/wso2/agent-manager/internal/am/config"
@@ -15,12 +16,12 @@ func Main() int {
 
 	path, err := config.DefaultPath()
 	if err != nil {
-		_ = render.Emit(io, render.Scope{}, render.NewErrorf(render.CodeConfigNotLoaded, "%v", err))
+		_ = render.Error(io, render.Scope{}, clierr.Newf(clierr.ConfigNotLoaded, "%v", err))
 		return 1
 	}
 	cfg, err := config.Load(path)
 	if err != nil {
-		_ = render.Emit(io, render.Scope{}, render.NewErrorf(render.CodeConfigNotLoaded, "%v", err))
+		_ = render.Error(io, render.Scope{}, clierr.Newf(clierr.ConfigNotLoaded, "%v", err))
 		return 1
 	}
 
