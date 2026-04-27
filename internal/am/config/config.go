@@ -1,9 +1,12 @@
 package config
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -27,7 +30,7 @@ type AuthConfig struct {
 	ClientSecret string `yaml:"client_secret,omitempty"`
 	AccessToken  string `yaml:"access_token,omitempty"`
 	RefreshToken string `yaml:"refresh_token,omitempty"`
-	ExpiresAt    string `yaml:"expires_at,omitempty"`
+	ExpiresAt    time.Time `yaml:"expires_at,omitempty"`
 }
 
 func (c *Config) Current() (*Instance, error) {
@@ -52,20 +55,23 @@ func (c *Config) AddInstance(name string, inst Instance) {
 	c.CurrentInstance = name
 }
 
-func (c *Config) Load(path string) (*Config, error) {
+func Load(path string) (*Config, error) {
 	f, err := os.Open(path)
-
 	if err != nil {
-		return nil, fmt.Errorf("Failed to open config file")
+		if errors.Is(err, fs.ErrNotExist) {
+			return &Config{Path: path}, nil
+		}
+		return nil, fmt.Errorf("open config %s: %w", path, err)
 	}
 	defer f.Close()
-	var cfg Config
 
+	var cfg Config
 	dec := yaml.NewDecoder(f)
 	dec.KnownFields(true)
-	if err = dec.Decode(&cfg); err != nil {
-		return nil, fmt.Errorf("Unable to decode Config file")
+	if err := dec.Decode(&cfg); err != nil {
+		return nil, fmt.Errorf("decode config %s: %w", path, err)
 	}
+	cfg.Path = path
 	return &cfg, nil
 }
 
@@ -78,4 +84,23 @@ func DefaultPath() (string, error) {
 	return filepath.Join(home, ".am", "config"), nil
 }
 
-func Save(path string, cfg Config)
+func Save(path string, cfg Config) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		return fmt.Errorf("create config dir: %w", err)
+	}
+
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		return fmt.Errorf("marshal config: %w", err)
+	}
+
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0600); err != nil {
+		return fmt.Errorf("write config: %w", err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("commit config: %w", err)
+	}
+	return nil
+}
