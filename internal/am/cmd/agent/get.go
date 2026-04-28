@@ -15,7 +15,7 @@ import (
 type GetOptions struct {
 	IO        *iostreams.IOStreams
 	Client    func(context.Context) (*amsvc.ClientWithResponses, error)
-	BaseRepo  func(*cobra.Command) (string, string, error)
+	ResolveScope  func(*cobra.Command) (string, string, error)
 	MakeScope func(org, proj string) render.Scope
 
 	Org       string
@@ -28,7 +28,7 @@ func NewGetCmd(f *cmdutil.Factory) *cobra.Command {
 	opts := &GetOptions{
 		IO:        f.IOStreams,
 		Client:    f.AgentManager,
-		BaseRepo:  func(cmd *cobra.Command) (string, string, error) { return f.ResolveOrgProject(cmd, true, true) },
+		ResolveScope:  func(cmd *cobra.Command) (string, string, error) { return f.ResolveOrgProject(cmd, true, true) },
 		MakeScope: f.Scope,
 	}
 	cmd := &cobra.Command{
@@ -36,7 +36,7 @@ func NewGetCmd(f *cmdutil.Factory) *cobra.Command {
 		Short: "Show details of an agent",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			org, proj, err := opts.BaseRepo(cmd)
+			org, proj, err := opts.ResolveScope(cmd)
 			scope := opts.MakeScope(org, proj)
 			if err != nil {
 				return render.Error(opts.IO, scope, err)

@@ -15,7 +15,7 @@ import (
 type ListOptions struct {
 	IO        *iostreams.IOStreams
 	Client    func(context.Context) (*amsvc.ClientWithResponses, error)
-	BaseRepo  func(*cobra.Command) (string, string, error)
+	ResolveScope  func(*cobra.Command) (string, string, error)
 	MakeScope func(org, proj string) render.Scope
 
 	Org    string
@@ -29,7 +29,7 @@ func NewListCmd(f *cmdutil.Factory) *cobra.Command {
 	opts := &ListOptions{
 		IO:        f.IOStreams,
 		Client:    f.AgentManager,
-		BaseRepo:  func(cmd *cobra.Command) (string, string, error) { return f.ResolveOrgProject(cmd, true, true) },
+		ResolveScope:  func(cmd *cobra.Command) (string, string, error) { return f.ResolveOrgProject(cmd, true, true) },
 		MakeScope: f.Scope,
 	}
 	var limit, offset int
@@ -40,16 +40,16 @@ func NewListCmd(f *cmdutil.Factory) *cobra.Command {
 		Short: "List agents in a project",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			org, proj, err := opts.BaseRepo(cmd)
+			org, proj, err := opts.ResolveScope(cmd)
 			scope := opts.MakeScope(org, proj)
 			if err != nil {
 				return render.Error(opts.IO, scope, err)
 			}
 			if limitSet && limit < 1 {
-				return render.Error(opts.IO, scope, clierr.New(clierr.InvalidFlag, "--limit must be >= 1"))
+				return render.Error(opts.IO, scope, cmdutil.FlagErrorf("--limit must be >= 1"))
 			}
 			if offsetSet && offset < 0 {
-				return render.Error(opts.IO, scope, clierr.New(clierr.InvalidFlag, "--offset must be >= 0"))
+				return render.Error(opts.IO, scope, cmdutil.FlagErrorf("--offset must be >= 0"))
 			}
 			opts.Org, opts.Proj, opts.Scope = org, proj, scope
 			if limitSet {

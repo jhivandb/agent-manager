@@ -18,7 +18,7 @@ type DeleteOptions struct {
 	IO        *iostreams.IOStreams
 	Prompter  prompter.Prompter
 	Client    func(context.Context) (*amsvc.ClientWithResponses, error)
-	BaseRepo  func(*cobra.Command) (string, string, error)
+	ResolveScope  func(*cobra.Command) (string, string, error)
 	MakeScope func(org, proj string) render.Scope
 
 	Org       string
@@ -38,7 +38,7 @@ func NewDeleteCmd(f *cmdutil.Factory) *cobra.Command {
 		IO:        f.IOStreams,
 		Prompter:  f.Prompter,
 		Client:    f.AgentManager,
-		BaseRepo:  func(cmd *cobra.Command) (string, string, error) { return f.ResolveOrgProject(cmd, true, true) },
+		ResolveScope:  func(cmd *cobra.Command) (string, string, error) { return f.ResolveOrgProject(cmd, true, true) },
 		MakeScope: f.Scope,
 	}
 	cmd := &cobra.Command{
@@ -46,7 +46,7 @@ func NewDeleteCmd(f *cmdutil.Factory) *cobra.Command {
 		Short: "Delete an agent",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			org, proj, err := opts.BaseRepo(cmd)
+			org, proj, err := opts.ResolveScope(cmd)
 			scope := opts.MakeScope(org, proj)
 			if err != nil {
 				return render.Error(opts.IO, scope, err)
