@@ -533,6 +533,17 @@ func (s *agentManagerService) GetAgent(ctx context.Context, orgName string, proj
 		return nil, translateAgentError(err)
 	}
 
+	// Defense-in-depth: the underlying OpenChoreo GetComponent endpoint accepts no project
+	// filter, so verify the returned agent belongs to the requested project even if the
+	// client wrapper did not validate it. Treat a mismatch as not-found to avoid leaking
+	// the existence of agents in other projects.
+	if agent.ProjectName != projectName {
+		s.logger.Warn("Agent project mismatch on GetAgent; treating as not found",
+			"agentName", agentName, "orgName", orgName,
+			"requestedProject", projectName, "actualProject", agent.ProjectName)
+		return nil, utils.ErrAgentNotFound
+	}
+
 	// Populate enableAutoInstrumentation from database
 	// Get the first/lowest environment to read the config
 	pipeline, pipelineErr := s.ocClient.GetProjectDeploymentPipeline(ctx, orgName, projectName)
@@ -1352,6 +1363,23 @@ func (s *agentManagerService) DeleteAgent(ctx context.Context, orgName string, p
 		return translateProjectError(err)
 	}
 
+	// Verify the agent exists in the requested project before mutating any state. The
+	// underlying OpenChoreo DELETE /components/{name} endpoint does not filter by project, so
+	// without this check a delete on /projects/A/agents/X could remove a component that lives
+	// in /projects/B. Treating a project mismatch as not-found also stops DELETE from silently
+	// returning 204 for typos or stale names.
+	existing, err := s.ocClient.GetComponent(ctx, orgName, projectName, agentName)
+	if err != nil {
+		s.logger.Error("Failed to fetch agent for deletion", "agentName", agentName, "orgName", orgName, "projectName", projectName, "error", err)
+		return translateAgentError(err)
+	}
+	if existing.ProjectName != projectName {
+		s.logger.Warn("Agent project mismatch on DeleteAgent; treating as not found",
+			"agentName", agentName, "orgName", orgName,
+			"requestedProject", projectName, "actualProject", existing.ProjectName)
+		return utils.ErrAgentNotFound
+	}
+
 	// Step 1: Fetch workload and check for secret references in env vars
 	secretRefNames, err := s.ocClient.GetWorkloadSecretRefNames(ctx, orgName, projectName, agentName)
 	if err != nil {
@@ -1368,17 +1396,8 @@ func (s *agentManagerService) DeleteAgent(ctx context.Context, orgName string, p
 	s.logger.Debug("Deleting oc agent", "agentName", agentName, "orgName", orgName, "projectName", projectName)
 	err = s.ocClient.DeleteComponent(ctx, orgName, projectName, agentName)
 	if err != nil {
-		translatedErr := translateAgentError(err)
-		if errors.Is(translatedErr, utils.ErrAgentNotFound) {
-			s.logger.Warn("Agent not found during deletion, delete is idempotent", "agentName", agentName, "orgName", orgName, "projectName", projectName)
-			s.deleteAgentLLMConfigurations(ctx, orgName, projectName, agentName)
-			if configErr := s.agentConfigRepo.DeleteAllByAgent(orgName, projectName, agentName); configErr != nil {
-				s.logger.Warn("Failed to delete agent configs from database", "agentName", agentName, "error", configErr)
-			}
-			return nil
-		}
 		s.logger.Error("Failed to delete oc agent", "agentName", agentName, "error", err)
-		return translatedErr
+		return translateAgentError(err)
 	}
 
 	// Delete agent-level LLM configurations (proxies, API keys, secret references, DB rows).
