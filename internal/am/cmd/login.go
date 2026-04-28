@@ -67,10 +67,10 @@ func NewLoginCmd(f *cmdutil.Factory) *cobra.Command {
 
 func runLogin(ctx context.Context, opts *LoginOptions) error {
 	if opts.URL == "" {
-		return render.Error(opts.IO, render.Scope{}, clierr.New(clierr.InvalidFlag, "--url is required"))
+		return render.Error(opts.IO, render.Scope{}, cmdutil.FlagErrorf("--url is required"))
 	}
 	if opts.ClientID == "" || opts.ClientSecret == "" {
-		return render.Error(opts.IO, render.Scope{}, clierr.New(clierr.InvalidFlag, "--client-id and --client-secret are required"))
+		return render.Error(opts.IO, render.Scope{}, cmdutil.FlagErrorf("--client-id and --client-secret are required"))
 	}
 	if opts.Name == "" {
 		opts.Name = "default"
