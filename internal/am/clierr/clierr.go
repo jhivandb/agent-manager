@@ -30,6 +30,7 @@ const (
 	NoProject            = "NO_PROJECT"
 	ConfirmationRequired = "CONFIRMATION_REQUIRED"
 	InvalidFlag          = "INVALID_FLAG"
+	Unauthorized         = "UNAUTHORIZED"
 	ServerInvalid        = "SERVER_RESPONSE_INVALID"
 )
 

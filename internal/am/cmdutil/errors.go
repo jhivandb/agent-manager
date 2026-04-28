@@ -44,6 +44,14 @@ func ErrorFromServer(httpResp *http.Response, body *amsvc.ErrorResponse) clierr.
 		status = httpResp.StatusCode
 	}
 	if body == nil {
+		if status == http.StatusUnauthorized {
+			return clierr.CLIError{
+				Status:         status,
+				Code:           clierr.Unauthorized,
+				Message:        "authentication required, try: am login",
+				AdditionalData: map[string]any{},
+			}
+		}
 		return clierr.CLIError{
 			Status:         status,
 			Code:           clierr.ServerInvalid,
