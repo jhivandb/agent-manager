@@ -6,22 +6,18 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/wso2/agent-manager/internal/am/clierr"
 	amsvc "github.com/wso2/agent-manager/internal/am/clients/amsvc/gen"
+	"github.com/wso2/agent-manager/internal/am/clierr"
 	"github.com/wso2/agent-manager/internal/am/cmdutil"
 	"github.com/wso2/agent-manager/internal/am/iostreams"
 	"github.com/wso2/agent-manager/internal/am/prompter"
 	"github.com/wso2/agent-manager/internal/am/render"
 )
 
-type agentDeleter interface {
-	DeleteAgentWithResponse(ctx context.Context, orgName, projName, agentName string, reqEditors ...amsvc.RequestEditorFn) (*amsvc.DeleteAgentResp, error)
-}
-
 type DeleteOptions struct {
 	IO        *iostreams.IOStreams
 	Prompter  prompter.Prompter
-	Client    func(context.Context) (agentDeleter, error)
+	Client    func(context.Context) (*amsvc.ClientWithResponses, error)
 	BaseRepo  func(*cobra.Command) (string, string, error)
 	MakeScope func(org, proj string) render.Scope
 
@@ -41,7 +37,7 @@ func NewDeleteCmd(f *cmdutil.Factory) *cobra.Command {
 	opts := &DeleteOptions{
 		IO:        f.IOStreams,
 		Prompter:  f.Prompter,
-		Client:    func(ctx context.Context) (agentDeleter, error) { return f.AgentManager(ctx) },
+		Client:    f.AgentManager,
 		BaseRepo:  func(cmd *cobra.Command) (string, string, error) { return f.ResolveOrgProject(cmd, true, true) },
 		MakeScope: f.Scope,
 	}

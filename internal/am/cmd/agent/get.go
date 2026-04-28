@@ -5,20 +5,16 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/wso2/agent-manager/internal/am/clierr"
 	amsvc "github.com/wso2/agent-manager/internal/am/clients/amsvc/gen"
+	"github.com/wso2/agent-manager/internal/am/clierr"
 	"github.com/wso2/agent-manager/internal/am/cmdutil"
 	"github.com/wso2/agent-manager/internal/am/iostreams"
 	"github.com/wso2/agent-manager/internal/am/render"
 )
 
-type agentGetter interface {
-	GetAgentWithResponse(ctx context.Context, orgName, projName, agentName string, reqEditors ...amsvc.RequestEditorFn) (*amsvc.GetAgentResp, error)
-}
-
 type GetOptions struct {
 	IO        *iostreams.IOStreams
-	Client    func(context.Context) (agentGetter, error)
+	Client    func(context.Context) (*amsvc.ClientWithResponses, error)
 	BaseRepo  func(*cobra.Command) (string, string, error)
 	MakeScope func(org, proj string) render.Scope
 
@@ -31,7 +27,7 @@ type GetOptions struct {
 func NewGetCmd(f *cmdutil.Factory) *cobra.Command {
 	opts := &GetOptions{
 		IO:        f.IOStreams,
-		Client:    func(ctx context.Context) (agentGetter, error) { return f.AgentManager(ctx) },
+		Client:    f.AgentManager,
 		BaseRepo:  func(cmd *cobra.Command) (string, string, error) { return f.ResolveOrgProject(cmd, true, true) },
 		MakeScope: f.Scope,
 	}

@@ -12,13 +12,9 @@ import (
 	"github.com/wso2/agent-manager/internal/am/render"
 )
 
-type agentLister interface {
-	ListAgentsWithResponse(ctx context.Context, orgName, projName string, params *amsvc.ListAgentsParams, reqEditors ...amsvc.RequestEditorFn) (*amsvc.ListAgentsResp, error)
-}
-
 type ListOptions struct {
 	IO        *iostreams.IOStreams
-	Client    func(context.Context) (agentLister, error)
+	Client    func(context.Context) (*amsvc.ClientWithResponses, error)
 	BaseRepo  func(*cobra.Command) (string, string, error)
 	MakeScope func(org, proj string) render.Scope
 
@@ -32,7 +28,7 @@ type ListOptions struct {
 func NewListCmd(f *cmdutil.Factory) *cobra.Command {
 	opts := &ListOptions{
 		IO:        f.IOStreams,
-		Client:    func(ctx context.Context) (agentLister, error) { return f.AgentManager(ctx) },
+		Client:    f.AgentManager,
 		BaseRepo:  func(cmd *cobra.Command) (string, string, error) { return f.ResolveOrgProject(cmd, true, true) },
 		MakeScope: f.Scope,
 	}
