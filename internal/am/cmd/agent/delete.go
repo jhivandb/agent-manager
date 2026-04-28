@@ -61,6 +61,9 @@ func NewDeleteCmd(f *cmdutil.Factory) *cobra.Command {
 }
 
 func runDelete(ctx context.Context, o *DeleteOptions) error {
+	if err := cmdutil.ValidatePathParam("agent name", o.AgentName); err != nil {
+		return render.Error(o.IO, o.Scope, err)
+	}
 	if !o.Yes {
 		if !o.IO.CanPrompt() {
 			return render.Error(o.IO, o.Scope, clierr.New(clierr.ConfirmationRequired, "deletion requires --yes when stdin is not a terminal"))

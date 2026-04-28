@@ -191,6 +191,46 @@ func TestDelete_Server404(t *testing.T) {
 	}
 }
 
+func TestDelete_RejectsEmptyName(t *testing.T) {
+	io, out, _ := newTestIO(true)
+
+	err := runDelete(context.Background(), &DeleteOptions{
+		IO: io, Prompter: &fakePrompter{}, Client: unreachableClient, Scope: baseScope(),
+		Org: "acme", Proj: "triage", AgentName: "", Yes: true,
+	})
+	if err == nil {
+		t.Fatal("expected error for empty agent name")
+	}
+	env := decodeEnvelope(t, out.String())
+	errBody, ok := env["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("missing error key, got %v", env)
+	}
+	if errBody["code"] != clierr.InvalidFlag {
+		t.Errorf("code = %v, want %s", errBody["code"], clierr.InvalidFlag)
+	}
+}
+
+func TestDelete_RejectsSlashInName(t *testing.T) {
+	io, out, _ := newTestIO(true)
+
+	err := runDelete(context.Background(), &DeleteOptions{
+		IO: io, Prompter: &fakePrompter{}, Client: unreachableClient, Scope: baseScope(),
+		Org: "acme", Proj: "triage", AgentName: "foo/bar", Yes: true,
+	})
+	if err == nil {
+		t.Fatal("expected error for slash in agent name")
+	}
+	env := decodeEnvelope(t, out.String())
+	errBody, ok := env["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("missing error key, got %v", env)
+	}
+	if errBody["code"] != clierr.InvalidFlag {
+		t.Errorf("code = %v, want %s", errBody["code"], clierr.InvalidFlag)
+	}
+}
+
 func TestDelete_YesSkipsPrompt(t *testing.T) {
 	io, _, _ := newTestIO(false)
 	client, captured, closeFn := newTestClient(t, http.StatusNoContent, nil)

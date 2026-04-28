@@ -50,6 +50,9 @@ func NewGetCmd(f *cmdutil.Factory) *cobra.Command {
 }
 
 func runGet(ctx context.Context, o *GetOptions) error {
+	if err := cmdutil.ValidatePathParam("agent name", o.AgentName); err != nil {
+		return render.Error(o.IO, o.Scope, err)
+	}
 	client, err := o.Client(ctx)
 	if err != nil {
 		return render.Error(o.IO, o.Scope, err)
