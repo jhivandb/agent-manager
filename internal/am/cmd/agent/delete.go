@@ -81,5 +81,5 @@ func runDelete(ctx context.Context, o *DeleteOptions) error {
 	if resp.HTTPResponse != nil && resp.HTTPResponse.StatusCode == http.StatusNoContent {
 		return render.Success(o.IO, o.Scope, DeleteResult{Name: o.AgentName, Deleted: true})
 	}
-	return render.Error(o.IO, o.Scope, cmdutil.ErrorFromServer(resp.HTTPResponse, firstNonNil(resp.JSON404, resp.JSON500)))
+	return render.Error(o.IO, o.Scope, cmdutil.ErrorFromServer(resp.HTTPResponse, cmdutil.FirstNonNil(resp.JSON404, resp.JSON500)))
 }

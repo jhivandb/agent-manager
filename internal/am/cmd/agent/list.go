@@ -88,5 +88,5 @@ func runList(ctx context.Context, o *ListOptions) error {
 	if resp.JSON200 != nil {
 		return render.Success(o.IO, o.Scope, resp.JSON200)
 	}
-	return render.Error(o.IO, o.Scope, cmdutil.ErrorFromServer(resp.HTTPResponse, firstNonNil(resp.JSON400, resp.JSON500)))
+	return render.Error(o.IO, o.Scope, cmdutil.ErrorFromServer(resp.HTTPResponse, cmdutil.FirstNonNil(resp.JSON400, resp.JSON500)))
 }

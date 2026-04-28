@@ -61,5 +61,5 @@ func runGet(ctx context.Context, o *GetOptions) error {
 	if resp.JSON200 != nil {
 		return render.Success(o.IO, o.Scope, resp.JSON200)
 	}
-	return render.Error(o.IO, o.Scope, cmdutil.ErrorFromServer(resp.HTTPResponse, firstNonNil(resp.JSON404, resp.JSON500)))
+	return render.Error(o.IO, o.Scope, cmdutil.ErrorFromServer(resp.HTTPResponse, cmdutil.FirstNonNil(resp.JSON404, resp.JSON500)))
 }
