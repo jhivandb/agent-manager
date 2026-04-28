@@ -139,12 +139,5 @@ func fetchOrgs(ctx context.Context, opts *LoginOptions) ([]amsvc.OrganizationLis
 	if resp.JSON200 != nil {
 		return resp.JSON200.Organizations, nil
 	}
-	switch {
-	case resp.JSON400 != nil:
-		return nil, fmt.Errorf("400 %s: %s", resp.JSON400.Code, resp.JSON400.Message)
-	case resp.JSON500 != nil:
-		return nil, fmt.Errorf("500 %s: %s", resp.JSON500.Code, resp.JSON500.Message)
-	default:
-		return nil, fmt.Errorf("unexpected status %d", resp.StatusCode())
-	}
+	return nil, cmdutil.ErrorFromServer(resp.HTTPResponse, cmdutil.FirstNonNil(resp.JSON400, resp.JSON500))
 }
