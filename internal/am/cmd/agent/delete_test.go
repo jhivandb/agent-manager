@@ -54,7 +54,6 @@ type fakePrompter struct {
 	calls              int
 }
 
-func (p *fakePrompter) Confirm(string, bool) (bool, error) { return false, nil }
 func (p *fakePrompter) ConfirmDeletion(required string) error {
 	p.calls++
 	p.confirmDeletionArg = required

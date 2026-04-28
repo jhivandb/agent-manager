@@ -8,8 +8,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/wso2/agent-manager/internal/am/auth"
-	"github.com/wso2/agent-manager/internal/am/clierr"
 	amsvc "github.com/wso2/agent-manager/internal/am/clients/amsvc/gen"
+	"github.com/wso2/agent-manager/internal/am/clierr"
 	"github.com/wso2/agent-manager/internal/am/cmdutil"
 	"github.com/wso2/agent-manager/internal/am/config"
 	"github.com/wso2/agent-manager/internal/am/iostreams"
