@@ -79,4 +79,4 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GORELEASER_CURRENT_TAG: amctl/v${{ inputs.target_version }}
+          GORELEASER_CURRENT_TAG: v${{ inputs.target_version }}
