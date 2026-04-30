@@ -41,8 +41,5 @@ snapshot:
   version_template: "{{ incpatch .Version }}-snapshot"
 
 release:
-  github:
-    owner: wso2
-    name: agent-manager
   draft: true
   prerelease: auto
