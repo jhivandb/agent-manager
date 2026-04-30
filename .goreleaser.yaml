@@ -4,9 +4,6 @@ before:
   hooks:
     - go mod tidy
 
-monorepo:
-  tag_prefix: amctl/v
-
 builds:
   - main: ./cmd/amctl
     binary: amctl
