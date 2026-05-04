@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 
 	"github.com/google/uuid"
@@ -28,6 +29,7 @@ import (
 
 	"github.com/wso2/agent-manager/agent-manager-service/clients/clientmocks"
 	"github.com/wso2/agent-manager/agent-manager-service/middleware/jwtassertion"
+	"github.com/wso2/agent-manager/agent-manager-service/models"
 	"github.com/wso2/agent-manager/agent-manager-service/tests/apitestutils"
 	"github.com/wso2/agent-manager/agent-manager-service/utils"
 	"github.com/wso2/agent-manager/agent-manager-service/wiring"
@@ -192,11 +194,12 @@ func TestDeleteAgent(t *testing.T) {
 	}
 }
 
-func TestDeleteAgentIdempotency(t *testing.T) {
+func TestDeleteAgentNotFound(t *testing.T) {
 	authMiddleware := jwtassertion.NewMockMiddleware(t)
 
-	t.Run("Multiple deletes of same agent should be handled gracefully", func(t *testing.T) {
+	t.Run("Deleting a non-existent agent should return 404", func(t *testing.T) {
 		openChoreoClient := apitestutils.CreateMockOpenChoreoClient()
+		// Default GetComponentFunc returns ErrAgentNotFound for names containing "nonexistent-agent".
 		secretMgmtClient := apitestutils.CreateMockSecretManagementClient()
 		testClients := wiring.TestClients{
 			OpenChoreoClient: openChoreoClient,
@@ -205,28 +208,115 @@ func TestDeleteAgentIdempotency(t *testing.T) {
 
 		app := apitestutils.MakeAppClientWithDeps(t, testClients, authMiddleware)
 
-		// Create an agent to delete
+		url := fmt.Sprintf("/api/v1/orgs/%s/projects/%s/agents/nonexistent-agent-%s",
+			testDeleteOrgName, testDeleteProjName, uuid.New().String()[:5])
+		req := httptest.NewRequest(http.MethodDelete, url, nil)
+
+		rr := httptest.NewRecorder()
+		app.ServeHTTP(rr, req)
+
+		// Idempotent semantics have been removed: a delete on a missing agent must return 404
+		// so clients can distinguish a real deletion from a typo or stale name.
+		require.Equal(t, http.StatusNotFound, rr.Code)
+		require.Contains(t, rr.Body.String(), "Agent not found")
+
+		// Component should never be deleted in OpenChoreo for a missing agent.
+		require.Empty(t, openChoreoClient.DeleteComponentCalls())
+	})
+
+	t.Run("Second delete of the same agent should return 404", func(t *testing.T) {
+		openChoreoClient := apitestutils.CreateMockOpenChoreoClient()
+		secretMgmtClient := apitestutils.CreateMockSecretManagementClient()
+
+		// Track deletion state so the mock simulates a real backend: GetComponent returns the
+		// agent before the first DELETE and ErrAgentNotFound afterwards.
+		var (
+			mu      sync.Mutex
+			deleted bool
+		)
+		openChoreoClient.GetComponentFunc = func(ctx context.Context, namespaceName, projectName, componentName string) (*models.AgentResponse, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			if deleted {
+				return nil, utils.ErrAgentNotFound
+			}
+			return &models.AgentResponse{
+				UUID:        "component-uid-123",
+				Name:        componentName,
+				ProjectName: projectName,
+				Provisioning: models.Provisioning{
+					Type: "internal",
+				},
+			}, nil
+		}
+		openChoreoClient.DeleteComponentFunc = func(ctx context.Context, namespaceName, projectName, componentName string) error {
+			mu.Lock()
+			defer mu.Unlock()
+			if deleted {
+				return utils.ErrAgentNotFound
+			}
+			deleted = true
+			return nil
+		}
+
+		testClients := wiring.TestClients{
+			OpenChoreoClient: openChoreoClient,
+			SecretMgmtClient: secretMgmtClient,
+		}
+		app := apitestutils.MakeAppClientWithDeps(t, testClients, authMiddleware)
+
 		agentName := fmt.Sprintf("new-agent-%s", uuid.New().String()[:7])
+		url := fmt.Sprintf("/api/v1/orgs/%s/projects/%s/agents/%s", testDeleteOrgName, testDeleteProjName, agentName)
 
-		// Make multiple delete requests
-		numRequests := 2
-		responses := make([]*httptest.ResponseRecorder, numRequests)
+		first := httptest.NewRecorder()
+		app.ServeHTTP(first, httptest.NewRequest(http.MethodDelete, url, nil))
+		require.Equal(t, http.StatusNoContent, first.Code, "first delete should succeed")
 
-		for i := 0; i < numRequests; i++ {
-			responses[i] = httptest.NewRecorder()
-			url := fmt.Sprintf("/api/v1/orgs/%s/projects/%s/agents/%s", testDeleteOrgName, testDeleteProjName, agentName)
-			req := httptest.NewRequest(http.MethodDelete, url, nil)
+		second := httptest.NewRecorder()
+		app.ServeHTTP(second, httptest.NewRequest(http.MethodDelete, url, nil))
+		require.Equal(t, http.StatusNotFound, second.Code, "second delete should return 404")
+		require.Contains(t, second.Body.String(), "Agent not found")
 
-			// Execute request
-			app.ServeHTTP(responses[i], req)
+		require.Len(t, openChoreoClient.DeleteComponentCalls(), 1,
+			"OpenChoreo DeleteComponent should only be invoked while the agent still exists")
+	})
+
+	t.Run("Deleting an agent that lives in another project should return 404", func(t *testing.T) {
+		openChoreoClient := apitestutils.CreateMockOpenChoreoClient()
+		secretMgmtClient := apitestutils.CreateMockSecretManagementClient()
+
+		// Simulate the OpenChoreo API behaviour where GET /components/{name} returns the
+		// component regardless of the requested project. The agent-manager wrapper / service
+		// must catch the project mismatch and refuse to delete it.
+		const actualProject = "project-a"
+		openChoreoClient.GetComponentFunc = func(ctx context.Context, namespaceName, projectName, componentName string) (*models.AgentResponse, error) {
+			return &models.AgentResponse{
+				UUID:        "component-uid-123",
+				Name:        componentName,
+				ProjectName: actualProject,
+				Provisioning: models.Provisioning{
+					Type: "internal",
+				},
+			}, nil
 		}
 
-		// All responses should be successful (204 No Content) due to idempotent nature
-		for i, rr := range responses {
-			require.Equal(t, http.StatusNoContent, rr.Code, "Request %d should succeed", i)
+		testClients := wiring.TestClients{
+			OpenChoreoClient: openChoreoClient,
+			SecretMgmtClient: secretMgmtClient,
 		}
+		app := apitestutils.MakeAppClientWithDeps(t, testClients, authMiddleware)
 
-		// OpenChoreo delete should be called at least once (but may be called multiple times due to race conditions)
-		require.GreaterOrEqual(t, len(openChoreoClient.DeleteComponentCalls()), 1)
+		agentName := fmt.Sprintf("agent-%s", uuid.New().String()[:7])
+		// Delete via a different project than the one the component actually belongs to.
+		url := fmt.Sprintf("/api/v1/orgs/%s/projects/project-b/agents/%s", testDeleteOrgName, agentName)
+		req := httptest.NewRequest(http.MethodDelete, url, nil)
+
+		rr := httptest.NewRecorder()
+		app.ServeHTTP(rr, req)
+
+		require.Equal(t, http.StatusNotFound, rr.Code)
+		require.Contains(t, rr.Body.String(), "Agent not found")
+		require.Empty(t, openChoreoClient.DeleteComponentCalls(),
+			"DeleteComponent must not be invoked when the requested project does not own the agent")
 	})
 }

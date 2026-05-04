@@ -403,7 +403,20 @@ func (c *openChoreoClient) GetComponent(ctx context.Context, namespaceName, proj
 		return nil, fmt.Errorf("empty response from get component")
 	}
 
-	return convertComponentFromTyped(resp.JSON200)
+	agent, err := convertComponentFromTyped(resp.JSON200)
+	if err != nil {
+		return nil, err
+	}
+
+	// The OpenChoreo GET /components/{name} endpoint identifies components by name within a
+	// namespace and accepts no project filter, so the API can return a component owned by a
+	// different project. Enforce project ownership client-side and surface a not-found error on
+	// mismatch so we don't leak the existence of components in other projects.
+	if projectName != "" && agent.ProjectName != projectName {
+		return nil, fmt.Errorf("%w: component %q does not belong to project %q", utils.ErrNotFound, componentName, projectName)
+	}
+
+	return agent, nil
 }
 
 func (c *openChoreoClient) UpdateComponentBasicInfo(ctx context.Context, namespaceName, projectName, componentName string, req UpdateComponentBasicInfoRequest) error {
@@ -911,6 +924,16 @@ func toInt32(v interface{}) (int32, bool) {
 }
 
 func (c *openChoreoClient) DeleteComponent(ctx context.Context, namespaceName, projectName, componentName string) error {
+	// The OpenChoreo DELETE /components/{name} endpoint identifies components by name within a
+	// namespace and accepts no project filter. Verify ownership first via GetComponent (which
+	// performs post-fetch project validation) so we don't delete a component owned by another
+	// project just because the caller passed its name.
+	if projectName != "" {
+		if _, err := c.GetComponent(ctx, namespaceName, projectName, componentName); err != nil {
+			return err
+		}
+	}
+
 	resp, err := c.ocClient.DeleteComponentWithResponse(ctx, namespaceName, componentName)
 	if err != nil {
 		return fmt.Errorf("failed to delete component: %w", err)
