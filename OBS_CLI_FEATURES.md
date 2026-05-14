@@ -1,27 +1,95 @@
-# OBS CLI Commands Branch — Feature Report
+# `amctl` CLI & MCP — Feature Report
 
-**Branch:** `cli-obs-commands` (commits ahead of `main`)
+**Branch:** `cli-obs-commands`
 
-## CLI Features (`amctl agent ...`)
+## 1. Full CLI Surface
 
-Observability subcommands added under `cli/pkg/cmd/agent/`:
+Global flags (root): `--json` (JSON envelope output), `--org` (override active organization).
 
-| Command | Purpose | Key flags |
-|---|---|---|
-| `agent logs <agent>` | Runtime logs for a deployed agent | `--since`, `--level` (DEBUG/INFO/WARN/ERROR), `--grep`, `--limit` (1–10000), `--sort` (asc/desc), `--env` |
-| `agent metrics <agent>` | CPU & memory usage (current/request/limit) | `--since`, `--env` |
-| `agent traces <agent>` | List recent traces, optionally filtered | `--since`, `--limit` (1–100), `--sort`, `--condition` (`error_status`, `high_latency`, `high_token_usage`, `tool_call_fails`, `excessive_steps`), `--max-latency`, `--max-tokens`, `--max-spans`, `--env` |
-| `agent traces export <agent>` | Export traces with full span data as JSON | `--since`, `--limit`, `--sort`, `--env` |
-| `agent trace <agent> <traceId>` | Span tree for one trace, or single-span detail view | `--span <id>`, `--since`, `--limit` (default 1000), `--env` |
+```
+amctl
+├── login                              Sign in to an instance
+│       --url, --name, --client-id, --client-secret, --auth-server
+├── version                            Print the amctl version
+│
+├── agent                              Manage agents in a project
+│       persistent: --project
+│   ├── list                           List agents in a project
+│   │       --limit, --offset
+│   ├── get <agent>                    Show details of an agent
+│   ├── create <name>                  Create an agent
+│   │       --display-name (req), --type, --subtype, --description,
+│   │       --provisioning, --repo-url, --repo-branch, --repo-path, --repo-secret,
+│   │       --build-type, --language, --language-version, --run-command,
+│   │       --dockerfile, --port, --base-path, --openapi-spec,
+│   │       --no-auto-instrumentation,
+│   │       --env (rep), --env-secret (rep), --env-from-secret (rep),
+│   │       --model-config-file
+│   ├── delete <agent>                 Delete an agent (--yes/-y)
+│   ├── deploy <agent>                 Deploy a built image
+│   │       --build-name, --env (rep), --yes/-y
+│   ├── build                          Manage agent builds
+│   │   ├── create <agent>             Trigger a build (--commit)
+│   │   ├── list <agent>               List builds (--limit, --offset)
+│   │   ├── get <agent> <build>        Show build details
+│   │   └── logs <agent> [build]       Stream build logs
+│   │
+│   ├── logs <agent>                   Runtime logs for a deployed agent
+│   │       --since, --level (DEBUG/INFO/WARN/ERROR), --grep,
+│   │       --limit (1–10000), --sort (asc/desc), --env
+│   ├── metrics <agent>                CPU & memory (current / request / limit)
+│   │       --since, --env
+│   ├── traces <agent>                 List recent traces (with optional filter)
+│   │       --since, --limit (1–100), --sort,
+│   │       --condition (error_status | high_latency | high_token_usage |
+│   │                   tool_call_fails | excessive_steps),
+│   │       --max-latency, --max-tokens, --max-spans, --env
+│   │   └── export <agent>             Export traces with full spans as JSON
+│   │           --since, --limit, --sort, --env
+│   └── trace <agent> <traceId>        Span tree for one trace, or single-span view
+│           --span <id>, --since, --limit (default 1000), --env
+│
+├── project                            Manage projects in an organization
+│   ├── list                           List projects
+│   ├── get <project>                  Show project details
+│   ├── create <name>                  Create a project
+│   │       --display-name (req), --description
+│   └── delete <project>               Delete a project (--yes/-y)
+│
+├── context                            View / manage CLI context
+│   ├── show                           Show current context
+│   ├── link                           Link CWD to org / project / agent
+│   │       --project, --agent
+│   ├── unlink                         Remove the project link for CWD
+│   ├── instance                       Manage configured instances
+│   │   ├── list
+│   │   ├── use <name>                 Switch active instance
+│   │   └── remove <name>              (--yes/-y)
+│   └── org                            Manage active organization
+│       ├── list
+│       └── use <name>
+│
+└── (hidden top-level aliases)         link  →  context link
+                                       unlink → context unlink
+```
 
-### Supporting plumbing
+### Cross-cutting CLI behaviour
+- **Context resolution:** every command resolves `org` / `project` / `agent` from flags → CWD-link → active context, in that order.
+- **Output modes:** every command honours `--json`; tabular output via the shared `tableprinter`.
+- **Shell completion:** `ValidArgsFunction` wired for agent/project/build names; `disableFileCompletion` removes file completion for non-file flags.
+- **Auth:** OAuth/PKCE login (`cli/pkg/auth`) with token cache per instance.
+- **Discovery:** CLI calls `GET /api/v1/config` on the agent-manager service to discover the trace-observer URL (rewrites `host.docker.internal` → `localhost` for local dev).
+- **Guards:** runtime obs commands (`logs`, `metrics`, `traces`, `trace`) reject non-runtime-managed (external) agents client-side via `ValidateRuntimeManaged`.
+- **Validation:** path-param sanitization (`ValidatePathParam`), duration parsing (`ParseDuration`), trace-IDs lower-cased.
+
+### New supporting plumbing on this branch
 - Handwritten `traceobssvc` client (`cli/pkg/clients/traceobssvc/`).
-- `Factory.TraceObserver` with URL discovery via the new `GET /api/v1/config` endpoint; rewrites `host.docker.internal` → `localhost` for local dev.
-- New factory helpers: `ResolveEnvironment`, `EnvScope`, `AddEnvFlag` — standardise the `--env` flag and scope formatting across obs commands.
-- Client-side guard: runtime obs commands (`logs`, `metrics`, `traces`, `trace`) reject external (non-runtime-managed) agents before hitting the API.
-- Validation: time-window parsing, agent-name/trace-id path-param validation, lower-cased trace IDs.
+- `Factory.TraceObserver` with URL discovery.
+- Factory helpers `ResolveEnvironment`, `EnvScope`, `AddEnvFlag` standardise the `--env` flag and scope formatting.
+- Regenerated `amsvc` client adds the `getConfig` endpoint.
+- `pflag` promoted to a direct dependency.
 
-## MCP Tools (Observability)
+## 2. MCP Tools (Observability set)
 
 Registered in `agent-manager-service/mcp/tools/observability.go` (handler: `ObservabilityToolset`):
 
@@ -34,12 +102,14 @@ Registered in `agent-manager-service/mcp/tools/observability.go` (handler: `Obse
 | `get_trace_details` | One trace's metadata + span list | `project_name`, `agent_name`, `trace_id` | `limit` (default 1000) |
 | `get_span_details` | Execution detail for one span | `project_name`, `agent_name`, `trace_id`, `span_id` | — |
 
-### Shared behaviour
-- Defaults: org from env, environment from env, 24h window if omitted.
-- Trace filtering conditions implemented in `matchesCondition` (errorCount > 0, latency in ms, total token usage, tool-span error flag, span count).
+The MCP server also exposes non-observability toolsets (project, agent, build, deployment) registered alongside in `agent-manager-service/mcp/tools/register.go` — they predate this branch and mirror the corresponding `amctl` resource commands.
+
+### Shared MCP behaviour
+- Defaults: org / environment from env, 24h window if omitted.
+- Trace filtering implemented in `matchesCondition` (errorCount > 0, latency in ms, total token usage, tool-span error flag, span count).
 - Response reducers (`extractTraceOverviews`, `extractTracesWithSpans`, `extractTraceDetails`) trim payloads before returning to the model.
 
-## CLI ↔ MCP Parity
+## 3. CLI ↔ MCP Parity (observability)
 
 | Capability | CLI | MCP |
 |---|---|---|
@@ -47,6 +117,6 @@ Registered in `agent-manager-service/mcp/tools/observability.go` (handler: `Obse
 | Metrics | `agent metrics` | `get_metrics` |
 | Trace list (summary) | `agent traces` (no `--condition`) | `list_traces` |
 | Trace list w/ filters | `agent traces --condition ...` | `get_traces` (same 5 conditions) |
-| Trace export (full spans) | `agent traces export` | `get_traces` (same endpoint) |
+| Trace export (full spans) | `agent traces export` | `get_traces` |
 | Single trace spans | `agent trace <id>` | `get_trace_details` |
 | Single span detail | `agent trace <id> --span <id>` | `get_span_details` |
