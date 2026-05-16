@@ -22,6 +22,7 @@ const (
 	ansiFgRed    = "\033[31m"
 	ansiFgGreen  = "\033[32m"
 	ansiFgYellow = "\033[33m"
+	ansiFgBlue   = "\033[34m"
 	ansiFgCyan   = "\033[36m"
 	ansiFgGray   = "\033[90m"
 )
@@ -41,6 +42,7 @@ func (cs *ColorScheme) Bold(t string) string   { return cs.apply(ansiBold, t) }
 func (cs *ColorScheme) Red(t string) string    { return cs.apply(ansiFgRed, t) }
 func (cs *ColorScheme) Green(t string) string  { return cs.apply(ansiFgGreen, t) }
 func (cs *ColorScheme) Yellow(t string) string { return cs.apply(ansiFgYellow, t) }
+func (cs *ColorScheme) Blue(t string) string   { return cs.apply(ansiFgBlue, t) }
 func (cs *ColorScheme) Cyan(t string) string   { return cs.apply(ansiFgCyan, t) }
 func (cs *ColorScheme) Gray(t string) string   { return cs.apply(ansiFgGray, t) }
 

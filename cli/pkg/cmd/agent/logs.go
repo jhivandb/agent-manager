@@ -19,7 +19,7 @@ package agent
 import (
 	"context"
 	"fmt"
-	"time"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -166,12 +166,33 @@ func runLogs(ctx context.Context, o *LogsOptions) error {
 		return render.JSONSuccess(o.IO, o.Scope, resp.JSON200)
 	}
 
+	cs := o.IO.ColorScheme()
 	for _, entry := range resp.JSON200.Logs {
-		fmt.Fprintf(o.IO.Out, "%s  %-5s  %s\n",
-			entry.Timestamp.Format(time.RFC3339),
-			entry.LogLevel,
-			entry.Log,
+		fmt.Fprintf(o.IO.Out, "%s  %s\n",
+			colorizeLevel(cs, string(entry.LogLevel)),
+			flattenMessage(entry.Log),
 		)
 	}
 	return nil
+}
+
+func colorizeLevel(cs *iostreams.ColorScheme, level string) string {
+	token := fmt.Sprintf("%-7s", "["+level+"]")
+	switch level {
+	case string(amsvc.LogEntryLogLevelERROR):
+		return cs.Red(token)
+	case string(amsvc.LogEntryLogLevelWARN):
+		return cs.Yellow(token)
+	case string(amsvc.LogEntryLogLevelINFO):
+		return cs.Blue(token)
+	case string(amsvc.LogEntryLogLevelDEBUG):
+		return cs.Gray(token)
+	default:
+		return token
+	}
+}
+
+func flattenMessage(s string) string {
+	r := strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ")
+	return r.Replace(s)
 }
