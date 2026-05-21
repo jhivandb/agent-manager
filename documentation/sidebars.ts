@@ -43,20 +43,6 @@ const sidebars: SidebarsConfig = {
     },
     {
       type: 'category',
-      label: 'CLI',
-      collapsed: false,
-      items: [
-        'cli/overview',
-        'cli/login',
-        'cli/context',
-        'cli/project',
-        'cli/agent',
-        'cli/skills',
-        'cli/version',
-      ],
-    },
-    {
-      type: 'category',
       label: 'Concepts',
       collapsed: false,
       items: [
@@ -78,6 +64,20 @@ const sidebars: SidebarsConfig = {
       collapsed: false,
       items: [
         'reference/mcp-server',
+        {
+          type: 'category',
+          label: 'CLI',
+          collapsed: true,
+          items: [
+            'reference/cli/overview',
+            'reference/cli/login',
+            'reference/cli/context',
+            'reference/cli/project',
+            'reference/cli/agent',
+            'reference/cli/skills',
+            'reference/cli/version',
+          ],
+        },
       ],
     },
     {
