@@ -28,6 +28,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/huh"
 	"github.com/spf13/cobra"
 
 	amsvc "github.com/wso2/agent-manager/cli/pkg/clients/amsvc/gen"
@@ -36,7 +37,17 @@ import (
 	"github.com/wso2/agent-manager/cli/pkg/cmdutil"
 	"github.com/wso2/agent-manager/cli/pkg/config"
 	"github.com/wso2/agent-manager/cli/pkg/iostreams"
+	"github.com/wso2/agent-manager/cli/pkg/tui"
 )
+
+// stubForm replaces runAgentCreateForm for the duration of t and restores
+// the original on cleanup.
+func stubForm(t *testing.T, fn func(tui.AgentCreateInput) (tui.AgentCreateInput, error)) {
+	t.Helper()
+	prev := runAgentCreateForm
+	runAgentCreateForm = fn
+	t.Cleanup(func() { runAgentCreateForm = prev })
+}
 
 // --- test helpers ---
 
@@ -754,5 +765,106 @@ func TestCreate_External_TokenFailure_TextMode(t *testing.T) {
 	}
 	if strings.Contains(stderr, "amp-instrument") {
 		t.Errorf("stderr should not contain instrumentation block when token mint failed: %q", stderr)
+	}
+}
+
+func TestCreate_FormInvoked_OnTTYWithMissingFlags(t *testing.T) {
+	called := false
+	stubForm(t, func(in tui.AgentCreateInput) (tui.AgentCreateInput, error) {
+		called = true
+		// Fill the rest of the required fields so validate() passes downstream.
+		in.DisplayName = "Form Agent"
+		in.SubType = subTypeChatAPI
+		in.RepoURL = "https://example.com/repo"
+		in.RepoBranch = "main"
+		in.RepoPath = "."
+		in.BuildType = buildTypeBuildpack
+		in.Language = "go"
+		in.LanguageVersion = "1.22"
+		in.RunCommand = "go run ."
+		return in, nil
+	})
+
+	ios, _, _ := newTestIO(true)
+	ios.SetTerminal(true, true, true) // enable CanPrompt()
+
+	clientFn, captured, cleanup := newTestClient(t, http.StatusAccepted, agentResponse())
+	t.Cleanup(cleanup)
+
+	cmd := testCreateCmd(t, ios, clientFn, "")
+	cmd.SetArgs([]string{
+		"agent", "create", "my-agent",
+		"--project", "triage",
+		// intentionally omit --display-name and most internal flags
+	})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if !called {
+		t.Fatalf("expected runAgentCreateForm to be invoked when CanPrompt && missing fields")
+	}
+	if captured.method != http.MethodPost {
+		t.Errorf("expected POST after successful form; got %s", captured.method)
+	}
+}
+
+func TestCreate_FormSkipped_WhenNoTTY(t *testing.T) {
+	stubForm(t, func(tui.AgentCreateInput) (tui.AgentCreateInput, error) {
+		t.Fatalf("form must not be invoked when CanPrompt() is false")
+		return tui.AgentCreateInput{}, nil
+	})
+
+	ios, _, errOut := newTestIO(false)
+	// newTestIO leaves SetTerminal false (no TTY). Confirm:
+	if ios.CanPrompt() {
+		t.Fatalf("test precondition: expected CanPrompt()=false")
+	}
+
+	cmd := testCreateCmd(t, ios, nil, "")
+	cmd.SetArgs([]string{
+		"agent", "create", "my-agent",
+		"--project", "triage",
+		// missing --display-name etc; expect flag-error today
+	})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatalf("expected validation error when non-TTY and required flags missing")
+	}
+	if !strings.Contains(errOut.String(), "--display-name is required") {
+		t.Errorf("expected display-name validation error in output, got:\n%s", errOut.String())
+	}
+}
+
+func TestCreate_FormCancel_ReturnsConfirmationRequired_NoAPICall(t *testing.T) {
+	stubForm(t, func(tui.AgentCreateInput) (tui.AgentCreateInput, error) {
+		return tui.AgentCreateInput{}, huh.ErrUserAborted
+	})
+
+	ios, out, errOut := newTestIO(true)
+	ios.SetTerminal(true, true, true)
+
+	apiCalled := false
+	clientFn, _, cleanup := newTestClient(t, http.StatusAccepted, agentResponse())
+	t.Cleanup(cleanup)
+	wrappedClient := func(ctx context.Context) (*amsvc.ClientWithResponses, error) {
+		apiCalled = true
+		return clientFn(ctx)
+	}
+
+	cmd := testCreateCmd(t, ios, wrappedClient, "")
+	cmd.SetArgs([]string{
+		"agent", "create", "my-agent",
+		"--project", "triage",
+	})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatalf("expected non-nil error on form cancel")
+	}
+	if apiCalled {
+		t.Errorf("expected no API call on cancel")
+	}
+	// JSON envelope carries the code; errOut is empty in JSON mode, out gets the envelope.
+	if !strings.Contains(out.String()+errOut.String(), "CONFIRMATION_REQUIRED") {
+		t.Errorf("expected CONFIRMATION_REQUIRED code in output, got out=%q errOut=%q", out.String(), errOut.String())
 	}
 }
