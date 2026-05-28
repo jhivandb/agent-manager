@@ -18,8 +18,10 @@ package create
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
+	"github.com/charmbracelet/huh"
 	"github.com/spf13/cobra"
 
 	amsvc "github.com/wso2/agent-manager/cli/pkg/clients/amsvc/gen"
@@ -92,6 +94,20 @@ func NewCreateCmd(f *cmdutil.Factory) *cobra.Command {
 				opts.Name = args[0]
 			}
 			opts.PortSet = cmd.Flags().Changed("port")
+
+			if shouldRunForm(opts) {
+				in := agentCreateInputFromOpts(opts)
+				out, err := runAgentCreateForm(in)
+				if err != nil {
+					if errors.Is(err, huh.ErrUserAborted) {
+						return render.Error(opts.IO, render.Scope{},
+							clierr.New(clierr.ConfirmationRequired, "create cancelled"))
+					}
+					return render.Error(opts.IO, render.Scope{},
+						clierr.Newf(clierr.Internal, "%v", err))
+				}
+				applyAgentCreateInput(opts, out)
+			}
 
 			if err := validate(opts); err != nil {
 				return render.Error(opts.IO, render.Scope{}, err)

@@ -6,10 +6,6 @@
 package tui
 
 import (
-	// Pin the huh dependency in go.mod for the real form implementation in
-	// later tasks. Task 8 replaces this with a regular import.
-	_ "github.com/charmbracelet/huh"
-
 	amsvc "github.com/wso2/agent-manager/cli/pkg/clients/amsvc/gen"
 )
 
