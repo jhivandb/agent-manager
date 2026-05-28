@@ -81,6 +81,8 @@ func RunAgentCreateForm(in AgentCreateInput) (AgentCreateInput, error) {
 		subTypeGroup(&out),
 		repositoryGroup(&out),
 		buildTypeGroup(&out),
+		buildpackDetailsGroup(&out),
+		dockerDetailsGroup(&out),
 	)
 
 	if err := form.Run(); err != nil {
@@ -201,4 +203,37 @@ func buildTypeGroup(out *AgentCreateInput) *huh.Group {
 			).
 			Value(&out.BuildType),
 	).WithHideFunc(func() bool { return out.Provisioning != provisioningInternal })
+}
+
+func buildpackDetailsGroup(out *AgentCreateInput) *huh.Group {
+	return huh.NewGroup(
+		huh.NewInput().
+			Title("Language").
+			Description("e.g. go, python, nodejs, java").
+			Value(&out.Language).
+			Validate(requireNonEmpty("language")),
+		huh.NewInput().
+			Title("Language version").
+			Value(&out.LanguageVersion).
+			Validate(requireNonEmpty("language version")),
+		huh.NewInput().
+			Title("Run command").
+			Description("Command used to start the agent in the built image.").
+			Value(&out.RunCommand).
+			Validate(requireNonEmpty("run command")),
+	).WithHideFunc(func() bool {
+		return out.Provisioning != provisioningInternal || out.BuildType != buildTypeBuildpack
+	})
+}
+
+func dockerDetailsGroup(out *AgentCreateInput) *huh.Group {
+	// out.Dockerfile pre-seeded to "Dockerfile" in RunAgentCreateForm.
+	return huh.NewGroup(
+		huh.NewInput().
+			Title("Dockerfile path").
+			Value(&out.Dockerfile).
+			Validate(requireNonEmpty("Dockerfile path")),
+	).WithHideFunc(func() bool {
+		return out.Provisioning != provisioningInternal || out.BuildType != buildTypeDocker
+	})
 }
