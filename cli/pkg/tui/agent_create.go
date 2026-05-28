@@ -78,6 +78,9 @@ func RunAgentCreateForm(in AgentCreateInput) (AgentCreateInput, error) {
 	form := huh.NewForm(
 		identityGroup(&out),
 		provisioningGroup(&out),
+		subTypeGroup(&out),
+		repositoryGroup(&out),
+		buildTypeGroup(&out),
 	)
 
 	if err := form.Run(); err != nil {
@@ -148,4 +151,54 @@ func requireNonEmpty(name string) func(string) error {
 		}
 		return nil
 	}
+}
+
+func subTypeGroup(out *AgentCreateInput) *huh.Group {
+	return huh.NewGroup(
+		huh.NewSelect[string]().
+			Title("Agent sub-type").
+			Description("chat-api exposes a fixed chat endpoint; custom-api lets you define your own HTTP surface.").
+			Options(
+				huh.NewOption("chat-api", subTypeChatAPI),
+				huh.NewOption("custom-api", subTypeCustomAPI),
+			).
+			Value(&out.SubType),
+	).WithHideFunc(func() bool { return out.Provisioning != provisioningInternal })
+}
+
+func repositoryGroup(out *AgentCreateInput) *huh.Group {
+	// RepoBranch / RepoPath were pre-seeded with "main" / "." in
+	// RunAgentCreateForm so the bound values are populated; the form merely
+	// presents and validates them.
+	return huh.NewGroup(
+		huh.NewInput().
+			Title("Repository URL").
+			Description("HTTPS or SSH URL of the source repository.").
+			Value(&out.RepoURL).
+			Validate(requireNonEmpty("repository URL")),
+		huh.NewInput().
+			Title("Branch").
+			Value(&out.RepoBranch).
+			Validate(requireNonEmpty("branch")),
+		huh.NewInput().
+			Title("Path within the repository").
+			Value(&out.RepoPath).
+			Validate(requireNonEmpty("repository path")),
+		huh.NewInput().
+			Title("Secret reference (optional)").
+			Description("Name of a previously-created secret for private repositories. Leave blank for public repos.").
+			Value(&out.RepoSecret),
+	).WithHideFunc(func() bool { return out.Provisioning != provisioningInternal })
+}
+
+func buildTypeGroup(out *AgentCreateInput) *huh.Group {
+	return huh.NewGroup(
+		huh.NewSelect[string]().
+			Title("Build type").
+			Options(
+				huh.NewOption("buildpack — language-based detection", buildTypeBuildpack),
+				huh.NewOption("docker — your own Dockerfile", buildTypeDocker),
+			).
+			Value(&out.BuildType),
+	).WithHideFunc(func() bool { return out.Provisioning != provisioningInternal })
 }
