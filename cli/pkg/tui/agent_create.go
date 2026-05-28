@@ -6,6 +6,10 @@
 package tui
 
 import (
+	"strings"
+
+	"github.com/charmbracelet/huh"
+
 	amsvc "github.com/wso2/agent-manager/cli/pkg/clients/amsvc/gen"
 )
 
@@ -57,9 +61,91 @@ type AgentCreateInput struct {
 // RunAgentCreateForm renders the agent-create wizard and returns the user's
 // final selections. Cancellation surfaces as huh.ErrUserAborted, which the
 // caller in package create maps to clierr.ConfirmationRequired.
-//
-// This is a stub that returns the input unchanged. The real form body is
-// implemented in subsequent tasks.
 func RunAgentCreateForm(in AgentCreateInput) (AgentCreateInput, error) {
-	return in, nil
+	out := in
+
+	// Pre-populate defaults *into the bound values* — huh.Input.Placeholder()
+	// only paints grey hint text and does NOT seed Value(&x). Without this,
+	// users would see "main" / "." / "Dockerfile" in the field, accept them,
+	// and then fail validation because the underlying string is still empty.
+	out.RepoBranch = defaultString(out.RepoBranch, "main")
+	out.RepoPath = defaultString(out.RepoPath, ".")
+	out.Dockerfile = defaultString(out.Dockerfile, "Dockerfile")
+	if out.Port == 0 {
+		out.Port = 8000
+	}
+
+	form := huh.NewForm(
+		identityGroup(&out),
+		provisioningGroup(&out),
+	)
+
+	if err := form.Run(); err != nil {
+		return out, err
+	}
+	return out, nil
+}
+
+func defaultString(current, fallback string) string {
+	if strings.TrimSpace(current) == "" {
+		return fallback
+	}
+	return current
+}
+
+func identityGroup(out *AgentCreateInput) *huh.Group {
+	return huh.NewGroup(
+		huh.NewInput().
+			Title("Agent name").
+			Description("Lowercase, no '/'. Used as the resource identifier.").
+			Value(&out.Name).
+			Validate(func(s string) error {
+				s = strings.TrimSpace(s)
+				if s == "" {
+					return errRequired("agent name")
+				}
+				if strings.Contains(s, "/") {
+					return errInvalid("agent name must not contain '/'")
+				}
+				return nil
+			}),
+		huh.NewInput().
+			Title("Display name").
+			Value(&out.DisplayName).
+			Validate(requireNonEmpty("display name")),
+		huh.NewText().
+			Title("Description").
+			Description("Optional. Free text shown in listings.").
+			Value(&out.Description),
+	)
+}
+
+func provisioningGroup(out *AgentCreateInput) *huh.Group {
+	return huh.NewGroup(
+		huh.NewSelect[string]().
+			Title("Provisioning mode").
+			Options(
+				huh.NewOption("internal — managed build & deploy", provisioningInternal),
+				huh.NewOption("external — bring your own runtime", provisioningExternal),
+			).
+			Value(&out.Provisioning),
+	)
+}
+
+// --- validator helpers ---
+
+type formError struct{ msg string }
+
+func (e formError) Error() string { return e.msg }
+
+func errRequired(name string) error { return formError{msg: name + " is required"} }
+func errInvalid(msg string) error   { return formError{msg: msg} }
+
+func requireNonEmpty(name string) func(string) error {
+	return func(s string) error {
+		if strings.TrimSpace(s) == "" {
+			return errRequired(name)
+		}
+		return nil
+	}
 }
