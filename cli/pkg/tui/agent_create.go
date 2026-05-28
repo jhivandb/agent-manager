@@ -6,6 +6,7 @@
 package tui
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/huh"
@@ -83,6 +84,7 @@ func RunAgentCreateForm(in AgentCreateInput) (AgentCreateInput, error) {
 		buildTypeGroup(&out),
 		buildpackDetailsGroup(&out),
 		dockerDetailsGroup(&out),
+		serviceShapeGroup(&out),
 	)
 
 	if err := form.Run(); err != nil {
@@ -235,5 +237,36 @@ func dockerDetailsGroup(out *AgentCreateInput) *huh.Group {
 			Validate(requireNonEmpty("Dockerfile path")),
 	).WithHideFunc(func() bool {
 		return out.Provisioning != provisioningInternal || out.BuildType != buildTypeDocker
+	})
+}
+
+func serviceShapeGroup(out *AgentCreateInput) *huh.Group {
+	// out.Port was pre-seeded to 8000 in RunAgentCreateForm. huh.Input binds
+	// to *string, so we surface the port through a local string and parse
+	// on Validate, writing back to out.Port on success.
+	portStr := strconv.Itoa(out.Port)
+	return huh.NewGroup(
+		huh.NewInput().
+			Title("Port").
+			Description("Service port (1..65535). Default 8000.").
+			Value(&portStr).
+			Validate(func(s string) error {
+				n, err := strconv.Atoi(strings.TrimSpace(s))
+				if err != nil {
+					return errInvalid("port must be an integer")
+				}
+				if n < 1 || n > 65535 {
+					return errInvalid("port must be 1..65535")
+				}
+				out.Port = n
+				return nil
+			}),
+		huh.NewInput().
+			Title("Base path").
+			Description("Mount path for the service, e.g. /api.").
+			Value(&out.BasePath).
+			Validate(requireNonEmpty("base path")),
+	).WithHideFunc(func() bool {
+		return out.Provisioning != provisioningInternal || out.SubType != subTypeCustomAPI
 	})
 }
