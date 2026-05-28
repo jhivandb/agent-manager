@@ -64,3 +64,80 @@ func hasMissingRequired(opts *CreateOptions) bool {
 
 // runAgentCreateForm is the form-runner seam. Tests swap this with a stub.
 var runAgentCreateForm = tui.RunAgentCreateForm
+
+func agentCreateInputFromOpts(opts *CreateOptions) tui.AgentCreateInput {
+	return tui.AgentCreateInput{
+		Name:            opts.Name,
+		DisplayName:     opts.DisplayName,
+		Description:     opts.Description,
+		Provisioning:    opts.Provisioning,
+		SubType:         opts.SubType,
+		RepoURL:         opts.RepoURL,
+		RepoBranch:      opts.RepoBranch,
+		RepoPath:        opts.RepoPath,
+		RepoSecret:      opts.RepoSecret,
+		BuildType:       opts.BuildType,
+		Language:        opts.Language,
+		LanguageVersion: opts.LanguageVersion,
+		RunCommand:      opts.RunCommand,
+		Dockerfile:      opts.Dockerfile,
+		Port:            opts.Port,
+		PortSet:         opts.PortSet,
+		BasePath:        opts.BasePath,
+	}
+}
+
+// applyAgentCreateInput writes the form's "core" output back onto opts.
+// Fields outside the core set (env vars, OpenAPISpec, ModelConfigFile,
+// DisableAutoInstrumentation) are intentionally untouched.
+//
+// Two clamps are required for the result to pass validate():
+//   - PortSet must be false for chat-api (validation.go:109-111).
+//   - When the user lands on external provisioning, internal-only fields
+//     must be cleared (validation.go:184-197 rejects any of them).
+func applyAgentCreateInput(opts *CreateOptions, in tui.AgentCreateInput) {
+	opts.Name = in.Name
+	opts.DisplayName = in.DisplayName
+	opts.Description = in.Description
+	opts.Provisioning = in.Provisioning
+
+	if in.Provisioning == provisioningExternal {
+		opts.SubType = ""
+		opts.RepoURL = ""
+		opts.RepoBranch = ""
+		opts.RepoPath = ""
+		opts.RepoSecret = ""
+		opts.BuildType = ""
+		opts.Language = ""
+		opts.LanguageVersion = ""
+		opts.RunCommand = ""
+		opts.Dockerfile = ""
+		opts.BasePath = ""
+		opts.PortSet = false
+		// Leave opts.Port at whatever value it had — it has no effect when
+		// PortSet=false and external provisioning explicitly disallows --port.
+		return
+	}
+
+	opts.SubType = in.SubType
+	opts.RepoURL = in.RepoURL
+	opts.RepoBranch = in.RepoBranch
+	opts.RepoPath = in.RepoPath
+	opts.RepoSecret = in.RepoSecret
+	opts.BuildType = in.BuildType
+	opts.Language = in.Language
+	opts.LanguageVersion = in.LanguageVersion
+	opts.RunCommand = in.RunCommand
+	opts.Dockerfile = in.Dockerfile
+	opts.Port = in.Port
+	opts.BasePath = in.BasePath
+
+	switch in.SubType {
+	case subTypeCustomAPI:
+		opts.PortSet = true
+	case subTypeChatAPI:
+		opts.PortSet = false
+	default:
+		opts.PortSet = in.PortSet
+	}
+}

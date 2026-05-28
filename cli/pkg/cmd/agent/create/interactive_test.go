@@ -169,5 +169,144 @@ func TestShouldRunForm_ExternalOnlyChecksIdentity(t *testing.T) {
 	}
 }
 
+func TestAgentCreateInputFromOpts_RoundTrip(t *testing.T) {
+	opts := fullyPopulatedInternalOpts()
+	opts.PortSet = true
+	opts.Description = "desc"
+	opts.RepoSecret = "secret-ref"
+	opts.Dockerfile = "Dockerfile.prod" // ignored: BuildType is buildpack
+	in := agentCreateInputFromOpts(opts)
+
+	if in.Name != "my-agent" || in.DisplayName != "My Agent" || in.Description != "desc" {
+		t.Errorf("identity fields lost: %+v", in)
+	}
+	if in.Provisioning != provisioningInternal || in.SubType != subTypeCustomAPI {
+		t.Errorf("agent shape lost: %+v", in)
+	}
+	if in.RepoURL == "" || in.RepoBranch == "" || in.RepoPath == "" || in.RepoSecret != "secret-ref" {
+		t.Errorf("repo fields lost: %+v", in)
+	}
+	if in.BuildType != buildTypeBuildpack || in.Language != "go" || in.LanguageVersion != "1.22" || in.RunCommand != "go run ." {
+		t.Errorf("build fields lost: %+v", in)
+	}
+	if in.Port != 8000 || !in.PortSet || in.BasePath != "/api" {
+		t.Errorf("service-shape fields lost: %+v", in)
+	}
+}
+
+func TestApplyAgentCreateInput_OverwritesCoreFieldsOnly(t *testing.T) {
+	opts := &CreateOptions{
+		Name:                       "stale",
+		DisplayName:                "Stale",
+		Description:                "stale-desc",
+		Provisioning:               provisioningInternal,
+		SubType:                    subTypeChatAPI,
+		Env:                        []string{"KEEP=1"},
+		EnvSecret:                  []string{"KEEPSEC=1"},
+		EnvFromSecret:              []string{"KEEPFS=ref"},
+		OpenAPISpec:                "/keep/openapi.yaml",
+		ModelConfigFile:            "/keep/model.yaml",
+		DisableAutoInstrumentation: true,
+	}
+	out := tui.AgentCreateInput{
+		Name:            "new-agent",
+		DisplayName:     "New",
+		Description:     "new-desc",
+		Provisioning:    provisioningInternal,
+		SubType:         subTypeCustomAPI,
+		RepoURL:         "https://example.com/r",
+		RepoBranch:      "main",
+		RepoPath:        ".",
+		BuildType:       buildTypeBuildpack,
+		Language:        "go",
+		LanguageVersion: "1.22",
+		RunCommand:      "go run .",
+		Port:            8080,
+		BasePath:        "/api",
+	}
+	applyAgentCreateInput(opts, out)
+
+	if opts.Name != "new-agent" || opts.DisplayName != "New" || opts.SubType != subTypeCustomAPI {
+		t.Errorf("core fields not overwritten: %+v", opts)
+	}
+	if len(opts.Env) != 1 || opts.Env[0] != "KEEP=1" {
+		t.Errorf("Env outside-of-scope was mutated: %+v", opts.Env)
+	}
+	if opts.OpenAPISpec != "/keep/openapi.yaml" || opts.ModelConfigFile != "/keep/model.yaml" {
+		t.Errorf("path fields outside scope mutated: %+v", opts)
+	}
+	if !opts.DisableAutoInstrumentation {
+		t.Errorf("DisableAutoInstrumentation outside scope was mutated")
+	}
+}
+
+func TestApplyAgentCreateInput_PortSetCustomAPI(t *testing.T) {
+	opts := &CreateOptions{}
+	applyAgentCreateInput(opts, tui.AgentCreateInput{
+		Provisioning: provisioningInternal,
+		SubType:      subTypeCustomAPI,
+		Port:         8080,
+	})
+	if !opts.PortSet {
+		t.Errorf("expected PortSet=true for custom-api")
+	}
+	if opts.Port != 8080 {
+		t.Errorf("expected Port=8080, got %d", opts.Port)
+	}
+}
+
+func TestApplyAgentCreateInput_PortSetClampedForChatAPI(t *testing.T) {
+	opts := &CreateOptions{PortSet: true, Port: 8000}
+	applyAgentCreateInput(opts, tui.AgentCreateInput{
+		Provisioning: provisioningInternal,
+		SubType:      subTypeChatAPI,
+		Port:         8000,
+		PortSet:      true, // user toggled custom-api then switched back; form may leave this set
+	})
+	if opts.PortSet {
+		t.Errorf("expected PortSet=false for chat-api regardless of input")
+	}
+}
+
+func TestApplyAgentCreateInput_ExternalClearsInternalFields(t *testing.T) {
+	// If the user filled internal-mode groups and then switched provisioning
+	// back to "external", the hidden internal values must be cleared.
+	// validateExternal at validation.go:184-197 rejects every internal-only
+	// field, so leaving leftover values causes a validation failure even
+	// though the form did not surface them.
+	opts := &CreateOptions{
+		SubType:         subTypeChatAPI,
+		RepoURL:         "https://leftover/repo",
+		RepoBranch:      "main",
+		RepoPath:        ".",
+		RepoSecret:      "secret",
+		BuildType:       buildTypeBuildpack,
+		Language:        "go",
+		LanguageVersion: "1.22",
+		RunCommand:      "go run .",
+		Dockerfile:      "Dockerfile",
+		Port:            8080,
+		PortSet:         true,
+		BasePath:        "/api",
+	}
+	applyAgentCreateInput(opts, tui.AgentCreateInput{
+		Name:         "new",
+		DisplayName:  "New",
+		Provisioning: provisioningExternal,
+	})
+	if opts.Provisioning != provisioningExternal {
+		t.Fatalf("expected external provisioning, got %q", opts.Provisioning)
+	}
+	if opts.SubType != "" || opts.RepoURL != "" || opts.RepoBranch != "" || opts.RepoPath != "" ||
+		opts.RepoSecret != "" || opts.BuildType != "" || opts.Language != "" ||
+		opts.LanguageVersion != "" || opts.RunCommand != "" || opts.Dockerfile != "" ||
+		opts.BasePath != "" {
+		t.Errorf("internal-only fields not cleared for external: %+v", opts)
+	}
+	if opts.PortSet {
+		t.Errorf("PortSet must be cleared for external")
+	}
+}
+
 // Note: tui import is used by later tests in this file.
 var _ = tui.AgentCreateInput{}
