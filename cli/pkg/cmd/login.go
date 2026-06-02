@@ -32,10 +32,16 @@ import (
 	"github.com/wso2/agent-manager/cli/pkg/render"
 )
 
-// orgPeekLimit is the page size used when probing organizations after login.
-// Two is enough to distinguish "exactly one" from "more than one" without
-// fetching the full list.
-const orgPeekLimit = 2
+const (
+	// defaultAgentPlatformURL is the SaaS Agent Platform URL used when login does
+	// not receive an explicit URL.
+	defaultAgentPlatformURL = "https://production-wso2cloud.gateway.cloud.wso2.com/agent-manager-service-agent-manager-api"
+
+	// orgPeekLimit is the page size used when probing organizations after login.
+	// Two is enough to distinguish "exactly one" from "more than one" without
+	// fetching the full list.
+	orgPeekLimit = 2
+)
 
 type loginData struct {
 	URL           string                       `json:"url"`
@@ -74,7 +80,7 @@ func NewLoginCmd(f *cmdutil.Factory) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&opts.URL, "url", "", "Agent Manager instance URL")
+	cmd.Flags().StringVar(&opts.URL, "url", defaultAgentPlatformURL, "Agent Platform or Agent Manager instance URL")
 	cmd.Flags().StringVar(&opts.Name, "name", "", "Agent Manager instance name")
 	cmd.Flags().StringVar(&opts.ClientID, "client-id", "", "OAuth client ID (default \"amctl\" for interactive login)")
 	cmd.Flags().StringVar(&opts.ClientSecret, "client-secret", "", "OAuth client secret; when set, uses client_credentials grant instead of browser login")
@@ -85,7 +91,7 @@ func NewLoginCmd(f *cmdutil.Factory) *cobra.Command {
 
 func runLogin(ctx context.Context, opts *LoginOptions) error {
 	if opts.URL == "" {
-		return render.Error(opts.IO, render.Scope{}, cmdutil.FlagErrorf("--url is required"))
+		opts.URL = defaultAgentPlatformURL
 	}
 	if opts.ClientSecret != "" && opts.ClientID == "" {
 		return render.Error(opts.IO, render.Scope{}, cmdutil.FlagErrorf("--client-id is required when --client-secret is set"))

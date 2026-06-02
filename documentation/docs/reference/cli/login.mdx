@@ -5,18 +5,11 @@ sidebar_label: Login
 
 # amctl login
 
-Authenticate against an Agent Manager instance.
+Authenticate against Agent Platform or an Agent Manager instance.
 
 ## Synopsis
 
-Log in to an Agent Manager instance. By default, the command opens a browser to complete an OAuth Authorization Code flow against the instance's identity provider. Pass `--client-id` and `--client-secret` to use the OAuth client-credentials grant instead — suitable for CI.
-
-On a fresh local install, sign in with the default credentials:
-
-| Field | Value |
-|-------|-------|
-| Username | `admin` |
-| Password | `admin` |
+Log in with `amctl`. By default, the command connects to Agent Platform, the SaaS offering, and opens a browser to complete an OAuth Authorization Code flow. Pass `--url` to connect to an Agent Manager instance, such as a local open-source install. Pass `--client-id` and `--client-secret` to use the OAuth client-credentials grant instead — suitable for CI.
 
 The resulting session is stored in `~/.amctl/config.yaml`. If only one organization is available, it is auto-selected as the current org. Otherwise, set one with `amctl context org use <name>` or pass `--org` per command.
 
@@ -27,7 +20,10 @@ amctl login [flags]
 ## Examples
 
 ```bash
-# Interactive browser login against a local install
+# Interactive browser login to Agent Platform
+amctl login
+
+# Interactive browser login to a local Agent Manager install
 amctl login --url http://localhost:9000
 
 # Name the instance so it can be switched to later
@@ -44,7 +40,7 @@ amctl login \
 
 | Name | Type | Default | Description |
 |------|------|---------|-------------|
-| `--url` | string | _required_ | Agent Manager instance URL (for example `http://localhost:9000`). |
+| `--url` | string | Agent Platform URL | Agent Platform or Agent Manager instance URL. Override it to connect to an Agent Manager instance, such as `http://localhost:9000` for a local install. |
 | `--name` | string | `default` | Local name for the instance. Use to distinguish multiple instances. |
 | `--client-id` | string | `amctl` | OAuth client ID. Defaults to `amctl` for the interactive browser flow. |
 | `--client-secret` | string | (none) | OAuth client secret. When set, uses the client-credentials grant instead of the browser flow. |

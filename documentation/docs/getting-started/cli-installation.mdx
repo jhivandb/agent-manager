@@ -6,10 +6,10 @@ sidebar_position: 3
 
 `amctl` is the command-line interface for Agent Manager. Use it to manage organizations, projects, agents, runtime observability, and AI assistant skills from your terminal.
 
-This guide installs `amctl`, logs into a running Agent Manager instance, and verifies the setup.
+This guide installs `amctl`, logs into Agent Platform or an Agent Manager instance, and verifies the setup.
 
 :::info Prerequisites
-You need a reachable Agent Manager instance before logging in. Follow the [Quick Start](./quick-start.mdx) or [On k3d](./on-k3d.mdx) guide first if you have not installed one. The local install exposes the Agent Manager API at `http://localhost:9000`.
+By default, `amctl login` connects to Agent Platform, the SaaS offering. To log in to your own Agent Manager instance, you need its API URL. Follow the [Quick Start](./quick-start.mdx) or [On k3d](./on-k3d.mdx) guide first if you have not installed one. The local install exposes the Agent Manager API at `http://localhost:9000`.
 :::
 
 ## Step 1: Install amctl
@@ -83,13 +83,19 @@ amctl version
 
 ## Step 2: Log in to Agent Manager
 
-Run `amctl login` with the URL of your Agent Manager API. For a local install this is `http://localhost:9000`.
+Run `amctl login` to connect to Agent Platform:
+
+```bash
+amctl login
+```
+
+To connect to an Agent Manager instance, pass `--url`. For example, a local install exposes the Agent Manager API at `http://localhost:9000`:
 
 ```bash
 amctl login --url http://localhost:9000
 ```
 
-`amctl` opens a browser window for sign-in. Enter the default Agent Manager credentials:
+`amctl` opens a browser window for sign-in. On a fresh local install, enter the default Agent Manager credentials:
 
 | Field | Value |
 |-------|-------|
@@ -156,4 +162,4 @@ If `amctl` cannot open a browser (for example over SSH), it prints the login URL
 
 ### Re-authenticating
 
-Re-run `amctl login --url <url>` to refresh credentials. If you switch to a different Agent Manager instance, `amctl` clears any project links that pointed at the old instance and prompts you to re-link.
+Re-run `amctl login` to refresh credentials for Agent Platform. Pass `--url <url>` to log in to an Agent Manager instance. If you switch instances, `amctl` clears any project links that pointed at the old instance and prompts you to re-link.
