@@ -78,7 +78,7 @@ apikey = os.environ.get('OPENAI_API_KEY')
 client = OpenAI(
     base_url=url,
     api_key="",
-    default_headers={"API-Key": apikey, "Authorization": ""}
+    default_headers={"X-API-Key": apikey, "Authorization": ""}
 )
 ```
 
@@ -181,7 +181,7 @@ Immediately after saving, the **Connect to LLM Provider** panel opens automatica
 | Field | Description |
 |---|---|
 | **Endpoint URL** | The gateway URL for this provider — use this as the base URL in your LLM client |
-| **Header Name** | The HTTP header to pass the API key (`API-Key`) |
+| **Header Name** | The HTTP header to pass the API key (`X-API-Key`) |
 | **API Key** | The generated client key — **copy it now**, it will not be shown again |
 | **Example cURL** | A ready-to-use cURL command showing the Endpoint URL, Header Name, and API Key together |
 
@@ -189,11 +189,11 @@ Example cURL:
 
 ```bash
 curl -X POST <endpoint-url> \
-  --header "API-Key: <your-api-key>" \
+  --header "X-API-Key: <your-api-key>" \
   -d '{"model": "", "messages": [{"role": "user", "content": "Hi..."}]}'
 ```
 
-Configure your agent's LLM client using the Endpoint URL as the base URL and pass the API Key in the `API-Key` header on every request.
+Configure your agent's LLM client using the Endpoint URL as the base URL and pass the API Key in the `X-API-Key` header on every request.
 
 You can reopen the connection details panel at any time from the LLM configuration detail page by clicking **Connect to LLM Provider** in the top-right corner. However, the API Key is only displayed once at creation time — if lost, delete the configuration and re-add it to generate a new key.
 
