@@ -4,7 +4,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-07-02-agent-identity-mcp-tool-authz-design.md`
 
-> **Amendments (2026-07-02 adversarial review):** where this plan conflicts with the spec, this plan wins. The review changed four design points: (1) identities are provisioned when the agent *reaches* an environment (deploy/promote), not eagerly at binding create; (2) Thunder agent lookup/recovery is by `component_uid`+`environment_uid` attributes, never by name; (3) `allowed_tools` is stored **per environment mapping**, not per config; (4) secret rotation triggers a pod rollout for internal agents.
+> **Amendments (2026-07-02 adversarial review):** where this plan conflicts with the spec, this plan wins. The review changed five design points: (1) identities are provisioned when the agent *reaches* an environment (deploy/promote), not eagerly at binding create; (2) Thunder agent lookup/recovery is by `component_uid`+`environment_uid` attributes, never by name; (3) `allowed_tools` is stored **per environment mapping**, not per config; (4) secret rotation triggers a pod rollout for internal agents; (5) agents live in a single `workload-identities` child OU under the org OU, keeping the org root OU (which hosts console-user RBAC) human-only.
 
 **Goal:** Give each deployed agent a verifiable Thunder-backed identity (per component × environment) and enforce per-tool MCP restrictions by rendering `mcp-auth` + `mcp-authz` policies into the agent's own `McpProxyMapping` deployment.
 
@@ -19,6 +19,7 @@
 - Auth-mode strings exactly: `apiKey`, `agentIdentity`. Sentinel scope exactly: `amp:never-issued`. Policy names exactly: `mcp-auth`, `mcp-authz`, version `v1`. New permission scope exactly: `amp:agent:manage-identity`.
 - `allowed_tools` semantics (stored **per environment mapping** on `env_agent_mcp_mapping`): `null` = allow all (default), `[]` = deny all, list = allow exactly these. Never render an unenforced allowlist: if enforcement is impossible, fail the request — never silently degrade. An `agentIdentity` mapping whose environment has no provisioned identity yet renders **deny-all** (wildcard sentinel rule) until deploy/promote provisions it.
 - Thunder agents are looked up by attributes (`component_uid` + `environment_uid`), never by name — names embed the environment name and break on rename. The name is display-only.
+- Thunder agent placement: child OU under the org OU, handle exactly `workload-identities`, display name exactly `Workload Identities`. Never create agents in the org root OU (it hosts console-user RBAC).
 - New env vars injected into agent pods (identity-level, once per agent): `AMP_AGENT_CLIENT_ID`, `AMP_AGENT_CLIENT_SECRET`, `AMP_AGENT_TOKEN_URL`.
 - Copy each file's license header from a sibling file (goheader lint fails otherwise).
 - Commit after every task. Git conventions come from the `am-ship` skill at execution time.
@@ -36,7 +37,7 @@ These resolve the open points in the design doc against the actual codebase; the
    - **No regenerate-secret endpoint for agents.** Rotation = `GET /agents/{id}` then `PUT /agents/{id}` full replacement with a CP-generated `clientSecret` (crypto/rand, 32 bytes, base64url) supplied in `inboundAuthConfig[].config.clientSecret`.
    - **Lookup is attribute-based.** Idempotency/conflict recovery finds existing Thunder agents by `attributes.component_uid` + `attributes.environment_uid` (filter grammar if Thunder's `filterParam` supports attribute paths; otherwise paginated list + client-side attribute match, mirroring `findApp` in `client.go:395`). Never by name: the name embeds the environment name and silently breaks on env rename, creating duplicates.
    - `attributes` are validated against the `default` agent-type schema (required fields enforced). The provisioner therefore has an `ensureAgentType` step: `GET /agent-types`; if none exists, `POST /agent-types` with `name: "default"`, root `ouId`, and a schema declaring our audit fields (`component_uid`, `environment_uid`, `project_uid`, `organization`) as optional strings. If a schema exists with required fields we don't supply, `PUT /agent-types/{id}` to make them optional (this Thunder instance is owned by the AMP deployment). **Implementation-time check:** inspect what `wso2-amp-thunder-extension` bootstraps and adjust.
-   - OU resolution: existing `GetOUIDByHandle(ctx, handle)` (`clients/thundersvc/identity_client.go:1146`), handle = org name.
+   - OU placement: agents do **not** go in the org root OU — the same Thunder hosts console-user RBAC (users/groups/roles per org OU), and `agents × envs` machine entries would flood that per-org surface. Instead: resolve the org OU via existing `GetOUIDByHandle(ctx, handle)` (`clients/thundersvc/identity_client.go:1146`, handle = org name), then ensure a child OU with handle `workload-identities` (new `EnsureChildOU`; find via `ListChildOUs`, `identity_client.go:1127`, create via `POST /organization-units` if absent — pin the request shape against the Thunder OU API the way the agent API was pinned). All `POST /agents` calls use the child OU's ID. Bonus: tokens carry `ouHandle`, so workload tokens are claim-distinguishable from user tokens. (Env-level sub-OUs and a separate workload Thunder considered and deferred — attribute lookup is placement-agnostic and `PUT /agents` re-homes entries, so both stay cheap migrations.)
 5. **Thunder client shape:** new interface `ThunderAgentClient` in a new file `clients/thundersvc/agent_client.go`, implemented on the existing `thunderClient` struct via the shared `doRequest` helper. This adds the **first moq mock in `thundersvc`** — follow `clients/secretmanagersvc/client.go:246` convention (`-out ../clientmocks/... -pkg clientmocks`).
 6. **Identity lifecycle follows the deployment pipeline** (agents start in the lowest environment and are promoted upward; environments can be added and removed):
    - **Binding create/update (`createMCPConfig`/`updateMCPConfig`), internal agents:** `EnsureIdentity` only for environments where the agent is *currently deployed* — a ReleaseBinding exists (new exported OC-client check wrapping `findReleaseBindingForEnv`, `clients/openchoreosvc/client/deployments.go:289`) — or the pipeline's first environment (its env vars bootstrap via `UpdateComponentEnvVars`, so they survive first deploy). Other mapped environments get **no** identity and their mappings render deny-all (fail closed; nothing is running there anyway). Rationale: `UpdateReleaseBindingEnvVars` is warn-only against a missing ReleaseBinding (`agent_configuration_service.go:1054-1056`), so eager provisioning would strand credentials that never reach the pod.
@@ -226,6 +227,10 @@ type AgentIdentityRepository interface {
 // ThunderAgentClient manages Thunder first-class agent identities (/agents).
 type ThunderAgentClient interface {
 	EnsureAgentType(ctx context.Context, rootOUID string) error
+	// EnsureChildOU returns the ID of the child OU with the given handle under
+	// parentOUID, creating it (POST /organization-units) if absent. Used to keep
+	// agent entries in <org>/workload-identities instead of the org root OU.
+	EnsureChildOU(ctx context.Context, parentOUID, handle, displayName string) (string, error)
 	CreateAgent(ctx context.Context, req CreateThunderAgentRequest) (*ThunderAgentComplete, error)
 	GetAgent(ctx context.Context, id string) (*ThunderAgent, error)
 	// FindAgentByAttributes locates an agent by component_uid + environment_uid
@@ -312,7 +317,7 @@ Run: `go test ./clients/thundersvc/ -run TestAgentClient -v` — expect FAIL (un
    "organization":    {"type": "string", "required": false}}}
 ```
 
-`FindAgentByAttributes` returns `(nil, nil)` when no match. `DeleteAgent` treats 404 as success (`IsNotFound`).
+`FindAgentByAttributes` returns `(nil, nil)` when no match. `DeleteAgent` treats 404 as success (`IsNotFound`). `EnsureChildOU`: `ListChildOUs(parentOUID)` (already on `thunderClient`, `identity_client.go:1127`) and match on handle; if absent, `POST /organization-units` with `{"handle": handle, "name": displayName, "parent": parentOUID}` — **pin the exact request field names against the Thunder OU API spec** (`thunder-id/thunderid` `api/ou.yaml` or equivalent, same procedure as the agent API pinning above) and treat a 409 conflict as "someone else created it": re-list and return the existing ID. Add an httptest case for both branches (found / created) and the 409 race.
 
 - [ ] **Step 3: Run tests.** `go test ./clients/thundersvc/ -v` — expect PASS.
 - [ ] **Step 4: Generate mock + build.** `make codegen && go build ./...` — expect `clientmocks/thunder_agent_client_fake.go` created.
@@ -371,7 +376,7 @@ Follow `publisher_credential_provisioner.go` patterns exactly: dual impl (`disab
 
 - [ ] **Step 1: Write failing unit tests** (`add-service-unit-test` skill: no build tags, moq mocks). Cover:
   - `EnsureIdentity` idempotency: repo hit → returns existing, zero Thunder calls.
-  - Fresh provision: OU lookup → `EnsureAgentType` → `CreateAgent` → `CreateSecret` → `Upsert`; assert the Thunder request has `Type == "default"`, `GrantTypes == ["client_credentials"]`, attributes carrying the four audit fields; returned info has non-empty `ClientSecret` and `SecretRefName`.
+  - Fresh provision: org OU lookup → `EnsureChildOU(orgOUID, "workload-identities", "Workload Identities")` → `EnsureAgentType` → `CreateAgent` → `CreateSecret` → `Upsert`; assert `CreateAgent`'s `OUID` is the **child** OU's ID (not the org root's), `Type == "default"`, `GrantTypes == ["client_credentials"]`, attributes carrying the four audit fields; returned info has non-empty `ClientSecret` and `SecretRefName`.
   - Partial-failure recovery: repo miss + `CreateAgent` conflict → `FindAgentByAttributes(component_uid, environment_uid)` → `UpdateAgent` (secret reset) → proceeds. Include a case where the recovered Thunder agent has a *different name* than the generator would produce (post-rename) — recovery still succeeds.
   - `RotateSecret`: `GetAgent` → `UpdateAgent` with new CP-generated secret → `PatchSecret`; returns new secret.
   - `DeleteIdentity`: Thunder delete + secret delete + `MarkRevoked`; Thunder 404 tolerated.
@@ -383,6 +388,7 @@ Run: `go test ./services/ -run TestAgentIdentityProvisioner -v` — expect FAIL.
 
 - [ ] **Step 2: Implement.** Key details:
   - Thunder agent name: `fmt.Sprintf("amp-agent-%s-%s-%s", req.AgentName, req.EnvironmentName, req.ComponentUUID.String()[:8])` — **display-only**; uniqueness and idempotency come from `FindAgentByAttributes` recovery on `component_uid`+`environment_uid`, never from the name.
+  - OU: resolve org OU by handle, then `EnsureChildOU(orgOUID, "workload-identities", "Workload Identities")`; cache the child OU ID per org for the process lifetime (map + mutex, same as any org-scoped cache in the file's model) — it never changes once created. All agent creation uses the child OU ID.
   - Secret storage: `secretmanagersvc.SecretLocation{OrgName, ProjectName, AgentName, EnvironmentName, EntityName: "agent-identity"}`; data map keys `"client-id"` and `"client-secret"`; `CreateSecret` returns the `SecretRefName` stored in `agent_identities.secret_ref`.
   - Secret generation for rotate: `crypto/rand` 32 bytes → `base64.RawURLEncoding`.
   - `TokenURL` = `cfg.IDP.TokenURL`.
@@ -939,7 +945,7 @@ No new product code; this validates the whole chain. Use the `verify` skill mind
 - [ ] **Step 1:** Bring up the local environment with the thunder extension (see memory notes `local-env-container-networking.md` + `amctl-sample-deploy-config.md` for local quirks; `deployments/` + Makefile targets).
 - [ ] **Step 2:** Deploy a sample agent (`samples/`, via `amctl` per the `am-ops` skill) into the **lowest environment only** of a two-env pipeline, and bind an MCP proxy mapping **both** environments with `--auth-mode agentIdentity --env <lowest-env> --allowed-tools <one-tool>`.
 - [ ] **Step 3:** Assert, in order:
-  1. Exactly **one** `agent_identities` row exists (lowest env); Thunder has that agent (find by `component_uid`/`environment_uid` attributes); OpenBao secret present. **No** identity exists for the higher env.
+  1. Exactly **one** `agent_identities` row exists (lowest env); Thunder has that agent (find by `component_uid`/`environment_uid` attributes) **inside the org's `workload-identities` child OU — the org root OU contains no agent entries**; OpenBao secret present. **No** identity exists for the higher env.
   2. Agent pod env (lowest env) has `AMP_AGENT_CLIENT_ID/TOKEN_URL` and mounted `AMP_AGENT_CLIENT_SECRET`.
   3. Deployed mapping YAML (from `deployments` table `content`): lowest env contains `mcp-auth` + `mcp-authz` with the wildcard sub rule and one sentinel rule per restricted tool; **higher env contains the deny-all wildcard sentinel rule** (identity not provisioned yet). **This is also the moment to confirm the gateway's actual `mcp-auth`/`mcp-authz` param names accept our rendering** — if the gateway rejects the artifact or ignores rules, fix the param names in Task 5 and its tests.
   4. With a client-credentials token from the injected creds: allowed tool call succeeds; restricted tool call → 403; token from a different agent/env → 403 on everything; any call against the higher env's mapping → 403 (deny-all).
@@ -956,4 +962,4 @@ No new product code; this validates the whole chain. Use the `verify` skill mind
 
 - Spec §Data model → Task 1 (amended: `allowed_tools` per env mapping); §Services provisioner → Tasks 2-4 (amended: attribute-based lookup, `DeleteIdentity`/`DeleteAllForEnvironment`); §policy rendering → Task 5 (amended: deny-all placeholder for unprovisioned envs); issuer verification (amended: no auto-registration) → Task 6; §credential delivery + env-var injection → Task 7 (amended: deployment-gated provisioning) + Task 7b (promotion hook, environment-delete revocation, restart plumbing); §API surface → Tasks 8-10 (amended: rotate triggers restart); §Console/CLI → Tasks 11-15 (amended: per-env allowlists, nav-state warnings/credentials, Security page restructure); §Testing unit/rendering/integration → embedded per task + Task 16; §Error handling rows → Task 4 (provision failure/idempotency), Task 6 (gateway-lacks-policies fallback), Task 7b (promote fails loudly when identity provisioning fails), Task 9 (refresh failure keeps snapshot), Tasks 4+10 (rotation semantics), Task 16.4 (denied-call 403).
 - Deliberately out of scope (per spec): LLM-provider extension, SDK token-refresh helper, gateway `defaultAction: deny` + `tools/list` filtering feature requests, automated capability polling.
-- Known open items flagged inline: gateway `mcp-auth`/`mcp-authz` param names (verify against a live gateway manifest — Task 5 note, Task 16.3), thunder-extension's bootstrapped agent-type schema (Task 3), Thunder `filter` grammar for attribute-based find (Task 3 — fall back to list + client-side match if unsupported).
+- Known open items flagged inline: gateway `mcp-auth`/`mcp-authz` param names (verify against a live gateway manifest — Task 5 note, Task 16.3), thunder-extension's bootstrapped agent-type schema (Task 3), Thunder `filter` grammar for attribute-based find (Task 3 — fall back to list + client-side match if unsupported), Thunder OU-create request shape for `EnsureChildOU` (Task 3 — pin against the Thunder OU API spec).

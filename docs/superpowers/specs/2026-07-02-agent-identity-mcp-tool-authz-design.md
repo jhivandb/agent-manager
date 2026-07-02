@@ -34,6 +34,8 @@ Thunder (deployed via `wso2-amp-thunder-extension`) supports first-class agent i
 
 The control plane provisions **one Thunder agent per (agent component × environment)**, so a dev-environment token cannot be replayed against a prod mapping (different `sub`). Thunder `attributes` record `component_uid`, `environment_uid`, `project_uid`, and org for audit. This replaces the homegrown `agent_token_manager` JWTs as the agent's runtime credential; Thunder's token-exchange/OBO grants become available later for on-behalf-of-user flows.
 
+**Placement:** the same Thunder deployment hosts console-user RBAC (users, groups, roles) in each org's OU. To keep machine identities from flooding that per-org surface, all agent entries live in a single child OU under the org: handle `workload-identities` (display "Workload Identities"), created idempotently by the provisioner on first use. The org root OU stays human-only. A useful side effect: agent tokens carry `ouHandle` (`tokenservice/utils.go:464`), so workload tokens are distinguishable from user tokens by claim. Env-level sub-OUs and a separate workload-identity Thunder (full issuer separation) were considered and deferred — attribute-based lookup is placement-agnostic and `PUT /agents` can re-home entries, so both remain cheap migrations later.
+
 ### Credential delivery: inject client credentials
 
 The agent pod receives the Thunder client credentials and performs the standard OAuth2 client-credentials call itself:
@@ -48,7 +50,8 @@ The agent pod receives the Thunder client credentials and performs the standard 
 
 ```
 CP provisions (at first deploy to an environment):
-  Thunder POST /agents → agent identity in org OU, client_credentials OAuth profile
+  Thunder POST /agents → agent identity in the org's `workload-identities` child OU,
+                         client_credentials OAuth profile
   creds → OpenBao; env vars injected into agent
 
 Agent pod:  client_credentials → Thunder token  {sub: <thunder-agent-id>, ou claims}
