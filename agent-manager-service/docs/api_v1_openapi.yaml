@@ -9398,8 +9398,205 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /orgs/{orgName}/scopes:
+    parameters:
+      - name: orgName
+        in: path
+        required: true
+        description: Organization name/handle
+        schema:
+          type: string
+          pattern: "^[a-z0-9-]+$"
+          minLength: 1
+          maxLength: 64
+    get:
+      tags:
+        - Scopes
+      summary: List scopes
+      description: Lists the organization's scope catalog (org-global, resource-agnostic).
+      operationId: listScopes
+      responses:
+        "200":
+          description: Scope list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScopeListResponse"
+        "401":
+          description: Unauthorized - invalid or missing authentication
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      tags:
+        - Scopes
+      summary: Create scope
+      operationId: createScope
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ScopeRequest"
+      responses:
+        "201":
+          description: Scope created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScopeResponse"
+        "400":
+          description: Invalid scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: A scope with this name already exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /orgs/{orgName}/scopes/{scopeName}:
+    parameters:
+      - name: orgName
+        in: path
+        required: true
+        description: Organization name/handle
+        schema:
+          type: string
+          pattern: "^[a-z0-9-]+$"
+          minLength: 1
+          maxLength: 64
+      - name: scopeName
+        in: path
+        required: true
+        description: Scope name
+        schema:
+          type: string
+    put:
+      tags:
+        - Scopes
+      summary: Update scope description
+      operationId: updateScope
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ScopeUpdateRequest"
+      responses:
+        "200":
+          description: Scope updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScopeResponse"
+        "404":
+          description: Scope not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      tags:
+        - Scopes
+      summary: Delete scope
+      description: Fails with 409 while the scope is referenced by any MCP proxy environment tool binding.
+      operationId: deleteScope
+      responses:
+        "204":
+          description: Scope deleted
+        "404":
+          description: Scope not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Scope is still referenced by one or more tool bindings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
 components:
   schemas:
+    ScopeRequest:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+          pattern: '^[A-Za-z0-9:._\-]{1,256}$'
+          description: Scope name (org-global, resource-agnostic)
+          example: "repo:read.all"
+        description:
+          type: string
+          description: Human-readable description of the scope
+    ScopeUpdateRequest:
+      type: object
+      properties:
+        description:
+          type: string
+          description: Human-readable description of the scope
+    ScopeResponse:
+      type: object
+      required:
+        - name
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          example: "repo:read.all"
+        description:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        bindingCount:
+          type: integer
+          description: Number of MCP proxy environment tool bindings referencing this scope
+    ScopeListResponse:
+      type: object
+      required:
+        - scopes
+      properties:
+        scopes:
+          type: array
+          items:
+            $ref: "#/components/schemas/ScopeResponse"
     ConfigResponse:
       type: object
       required:

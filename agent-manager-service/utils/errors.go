@@ -96,6 +96,7 @@ var (
 	ErrCustomEvaluatorInUse           = errors.New("custom evaluator is referenced by one or more active monitors")
 	ErrInvalidInput                   = errors.New("invalid input")
 	ErrImmutableFieldChange           = errors.New("cannot change immutable field")
+	ErrScopeNotFound                  = errors.New("scope not found")
 
 	// HTTP errors
 	ErrBadRequest   = errors.New("bad request")

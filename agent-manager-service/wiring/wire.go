@@ -96,6 +96,7 @@ var serviceProviderSet = wire.NewSet(
 	services.NewLLMTemplateStore,
 	services.NewGitSecretService,
 	services.NewAIApplicationService,
+	services.NewScopeService,
 )
 
 var instrumentationProviderSet = wire.NewSet(
@@ -130,6 +131,7 @@ var controllerProviderSet = wire.NewSet(
 	controllers.NewAgentConfigurationController,
 	controllers.NewGitSecretController,
 	controllers.NewIdentityController,
+	controllers.NewScopeController,
 )
 
 var testClientProviderSet = wire.NewSet(
@@ -335,6 +337,7 @@ var repositoryProviderSet = wire.NewSet(
 	ProvideOrgPublisherCredentialRepository,
 	ProvideAIApplicationRepository,
 	ProvideAgentThunderClientRepository,
+	repositories.NewScopeRepository,
 )
 
 var websocketProviderSet = wire.NewSet(

@@ -111,6 +111,14 @@ const (
 	MCPServerAPIKeyManage       Permission = "mcp-server:api-key-manage"
 )
 
+// Scope catalog permissions
+const (
+	ScopeCreate Permission = "scope:create"
+	ScopeRead   Permission = "scope:read"
+	ScopeUpdate Permission = "scope:update"
+	ScopeDelete Permission = "scope:delete"
+)
+
 // LLM proxy permissions
 const (
 	LLMProxyCreate       Permission = "llm-proxy:create"

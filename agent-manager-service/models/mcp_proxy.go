@@ -82,7 +82,18 @@ type MCPProxyConfig struct {
 	Policies     []MCPPolicy                     `json:"policies,omitempty"`
 	Capabilities *MCPProxyCapabilities           `json:"capabilities,omitempty"`
 	Security     *SecurityConfig                 `json:"security,omitempty"`
-	Environments map[string]MCPEnvironmentConfig `json:"environments,omitempty"`
+	// ToolScopeBindings is the flat root-level copy populated only on flattened
+	// per-environment deployable artifacts (mirrors the Security duality); on a
+	// source MCPProxy the bindings live per-environment in Environments.
+	ToolScopeBindings []MCPToolScopeBinding           `json:"toolScopeBindings,omitempty"`
+	Environments      map[string]MCPEnvironmentConfig `json:"environments,omitempty"`
+}
+
+// MCPToolScopeBinding binds catalog scopes to one MCP tool in one environment.
+// Scope names reference the org-global scopes catalog by name.
+type MCPToolScopeBinding struct {
+	Tool   string   `json:"tool"`
+	Scopes []string `json:"scopes"`
 }
 
 // MCPEnvironmentConfig is one per-environment blueprint block on a source MCPProxy,
@@ -102,6 +113,10 @@ type MCPEnvironmentConfig struct {
 	Policies     []MCPPolicy           `json:"policies,omitempty"`
 	Capabilities *MCPProxyCapabilities `json:"capabilities,omitempty"`
 	Security     *SecurityConfig       `json:"security,omitempty"`
+
+	// ToolScopeBindings binds catalog scopes to this environment's MCP tools.
+	// Only meaningful when Security selects the Agent Identity variant.
+	ToolScopeBindings []MCPToolScopeBinding `json:"toolScopeBindings,omitempty"`
 
 	// DeploymentStatus is a response-only indicator of whether this environment's single
 	// gateway artifact is currently deployed ("Deployed") or not ("Undeployed"). It is
