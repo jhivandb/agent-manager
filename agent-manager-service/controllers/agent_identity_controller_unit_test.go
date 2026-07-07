@@ -108,17 +108,24 @@ func TestAgentIdentityCreateRole_UnknownScopeRejected(t *testing.T) {
 // dropped scopes are removed, both under the amp-scopes resource server.
 func TestAgentIdentityUpdateRole_ReconcilesScopePermissions(t *testing.T) {
 	var added, removed []string
+	currentPerms := []thundersvc.RolePermissionRequest{
+		{ResourceServerID: "rs-1", Permissions: []string{"repo:read.all", "repo:write.all"}},
+	}
 	envClient := &clientmocks.EnvIdentityClientMock{
 		GetRoleFunc: func(_ context.Context, roleID string) (*thundersvc.ThunderRole, error) {
 			return &thundersvc.ThunderRole{
-				ID:   roleID,
-				Name: "readers",
-				Permissions: []thundersvc.RolePermissionRequest{
-					{ResourceServerID: "rs-1", Permissions: []string{"repo:read.all", "repo:write.all"}},
-				},
+				ID:          roleID,
+				OuID:        "ou-1",
+				Name:        "readers",
+				Permissions: currentPerms,
 			}, nil
 		},
 		UpdateRoleFunc: func(_ context.Context, roleID string, req thundersvc.UpdateRoleRequest) (*thundersvc.ThunderRole, error) {
+			// Thunder's PUT /roles/{id} is a full replace requiring ouId; the
+			// metadata update must echo the role's ouId and current permissions
+			// so a name/description change never drops them (regression: ROL-1001).
+			assert.Equal(t, "ou-1", req.OuID, "update must carry the role's ouId")
+			assert.Equal(t, currentPerms, req.Permissions, "update must preserve current permissions")
 			return &thundersvc.ThunderRole{ID: roleID, Name: req.Name}, nil
 		},
 		EnsureScopeResourceServerFunc: func(_ context.Context, _ []string) (string, error) {

@@ -475,8 +475,13 @@ func (c *agentIdentityController) UpdateRole(w http.ResponseWriter, r *http.Requ
 	}
 
 	updated, err := client.UpdateRole(ctx, roleID, thundersvc.UpdateRoleRequest{
+		OuID:        current.OuID,
 		Name:        body.Name,
 		Description: derefString(body.Description),
+		// Thunder's PUT /roles/{id} is a full replace: echo the current
+		// permissions so a metadata change never drops them. The scope
+		// reconcile below then applies the requested additions/removals.
+		Permissions: current.Permissions,
 	})
 	if err != nil {
 		if thundersvc.IsNotFound(err) {

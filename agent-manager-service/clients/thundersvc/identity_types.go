@@ -143,10 +143,15 @@ type CreateRoleRequest struct {
 	Description string `json:"description,omitempty"`
 }
 
-// UpdateRoleRequest is the payload for PUT /roles/{id} (metadata only).
+// UpdateRoleRequest is the payload for PUT /roles/{id}. Thunder's role update is
+// a full replace and requires ouId; any permissions omitted from the body are
+// dropped, so callers echo the role's current permissions here and let a
+// follow-up reconcile adjust them.
 type UpdateRoleRequest struct {
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
+	OuID        string                  `json:"ouId"`
+	Name        string                  `json:"name"`
+	Description string                  `json:"description,omitempty"`
+	Permissions []RolePermissionRequest `json:"permissions,omitempty"`
 }
 
 // thunderRolePermissionsUpdateBody is used when patching only the permissions via PUT /roles/{id}.
