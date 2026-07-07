@@ -63,6 +63,7 @@ type MCPProxyService struct {
 	gatewayRepo          repositories.GatewayRepository
 	envMCPMappingRepo    repositories.EnvAgentMCPMappingRepository
 	artifactRepo         repositories.ArtifactRepository
+	scopeRepo            repositories.ScopeRepository
 	gatewayEventsService *GatewayEventsService
 	apiKeyBroadcaster    apiKeyBroadcaster
 	client               *http.Client
@@ -79,6 +80,7 @@ func NewMCPProxyService(
 	envMCPMappingRepo repositories.EnvAgentMCPMappingRepository,
 	gatewayEventsService *GatewayEventsService,
 	apiKeyRepo repositories.APIKeyRepository,
+	scopeRepo repositories.ScopeRepository,
 	logger *slog.Logger,
 	encryptionKey []byte,
 ) *MCPProxyService {
@@ -89,6 +91,7 @@ func NewMCPProxyService(
 		gatewayRepo:          gatewayRepo,
 		envMCPMappingRepo:    envMCPMappingRepo,
 		artifactRepo:         repositories.NewArtifactRepo(db),
+		scopeRepo:            scopeRepo,
 		gatewayEventsService: gatewayEventsService,
 		apiKeyBroadcaster: apiKeyBroadcaster{
 			gatewayRepo:    gatewayRepo,
@@ -115,6 +118,9 @@ func (s *MCPProxyService) Create(ctx context.Context, orgUUID, createdBy string,
 	}
 
 	if err := validateMCPEnvironments(ctx, req.Environments); err != nil {
+		return nil, err
+	}
+	if err := s.validateMCPEnvironmentSecurity(ctx, orgUUID, req.Environments); err != nil {
 		return nil, err
 	}
 	environments, err := s.buildMCPEnvironmentsForStorage(req.Environments, nil)
@@ -337,6 +343,9 @@ func (s *MCPProxyService) Update(ctx context.Context, orgUUID, proxyID string, r
 	// so network checks don't hold the row lock. Auth is encrypted inside the transaction
 	// because it may need to preserve the previously stored secret when the client omits it.
 	if err := validateMCPEnvironments(ctx, req.Environments); err != nil {
+		return nil, err
+	}
+	if err := s.validateMCPEnvironmentSecurity(ctx, orgUUID, req.Environments); err != nil {
 		return nil, err
 	}
 
@@ -635,6 +644,19 @@ func copyMCPPolicies(policies []models.MCPPolicy) []models.MCPPolicy {
 	return out
 }
 
+func copyMCPToolScopeBindings(bindings []models.MCPToolScopeBinding) []models.MCPToolScopeBinding {
+	if len(bindings) == 0 {
+		return nil
+	}
+	out := make([]models.MCPToolScopeBinding, 0, len(bindings))
+	for _, b := range bindings {
+		scopes := make([]string, len(b.Scopes))
+		copy(scopes, b.Scopes)
+		out = append(out, models.MCPToolScopeBinding{Tool: b.Tool, Scopes: scopes})
+	}
+	return out
+}
+
 func copyMCPCapabilities(capabilities *models.MCPProxyCapabilities) *models.MCPProxyCapabilities {
 	if capabilities == nil {
 		return nil
@@ -691,6 +713,14 @@ func defaultMCPProxySecurity(security *models.SecurityConfig) *models.SecurityCo
 			out.Enabled = &enabled
 		}
 		if !isBoolTrue(out.Enabled) {
+			return &out
+		}
+		if out.Identity != nil && isBoolTrue(out.Identity.Enabled) {
+			// Agent Identity mode: no API-key defaulting. Mutual exclusion is
+			// enforced in validateMCPEnvironments before this runs.
+			identity := *out.Identity
+			out.Identity = &identity
+			out.APIKey = nil
 			return &out
 		}
 		if out.APIKey == nil {
@@ -813,6 +843,23 @@ func validateMCPEnvironments(ctx context.Context, environments map[string]models
 		if _, err := uuid.Parse(envUUID); err != nil {
 			return fmt.Errorf("%w: environment %q has an invalid environment id: %w", utils.ErrInvalidInput, envID, err)
 		}
+		// Structural security checks first (no network I/O): apiKey and identity are
+		// mutually exclusive, and every tool binding must name a tool with >=1 scope.
+		if sec := env.Security; sec != nil && isBoolTrue(sec.Enabled) {
+			apiKeyOn := sec.APIKey != nil && isBoolTrue(sec.APIKey.Enabled)
+			identityOn := sec.Identity != nil && isBoolTrue(sec.Identity.Enabled)
+			if apiKeyOn && identityOn {
+				return fmt.Errorf("%w: environment %q: apiKey and identity security are mutually exclusive", utils.ErrInvalidInput, envID)
+			}
+		}
+		for _, b := range env.ToolScopeBindings {
+			if strings.TrimSpace(b.Tool) == "" {
+				return fmt.Errorf("%w: environment %q has a tool binding with an empty tool name", utils.ErrInvalidInput, envID)
+			}
+			if len(b.Scopes) == 0 {
+				return fmt.Errorf("%w: environment %q: tool %q binding has no scopes", utils.ErrInvalidInput, envID, b.Tool)
+			}
+		}
 		if env.Upstream == nil || strings.TrimSpace(env.Upstream.URL) == "" {
 			return fmt.Errorf("%w: environment %q is missing an upstream url", utils.ErrInvalidInput, envID)
 		}
@@ -821,6 +868,63 @@ func validateMCPEnvironments(ctx context.Context, environments map[string]models
 		}
 	}
 	return nil
+}
+
+// validateMCPEnvironmentSecurity enforces the cross-resource identity-mode rules:
+// every bound scope exists in the org catalog, and an identity-mode environment's
+// gateway advertises mcp-auth v1 + mcp-authz v1 in its policy manifest. Bindings to
+// tools absent from capabilities are deliberately accepted (tool lists drift; the
+// console flags them). It performs DB reads, so call it outside a transaction.
+func (s *MCPProxyService) validateMCPEnvironmentSecurity(ctx context.Context, orgName string, environments map[string]models.MCPEnvironmentConfig) error {
+	catalog, err := s.scopeRepo.List(ctx, orgName)
+	if err != nil {
+		return fmt.Errorf("failed to load scope catalog: %w", err)
+	}
+	known := make(map[string]struct{}, len(catalog))
+	for _, sc := range catalog {
+		known[sc.Name] = struct{}{}
+	}
+	for envID, env := range environments {
+		for _, b := range env.ToolScopeBindings {
+			for _, scName := range b.Scopes {
+				if _, ok := known[scName]; !ok {
+					return fmt.Errorf("%w: environment %q: tool %q references unknown scope %q", utils.ErrInvalidInput, envID, b.Tool, scName)
+				}
+			}
+		}
+		if env.Security == nil || !isBoolTrue(env.Security.Enabled) ||
+			env.Security.Identity == nil || !isBoolTrue(env.Security.Identity.Enabled) {
+			continue
+		}
+		envUUID, err := uuid.Parse(strings.TrimSpace(envID))
+		if err != nil {
+			continue // already rejected by validateMCPEnvironments
+		}
+		gateway, err := s.resolveGatewayForEnvironment(ctx, envUUID, orgName)
+		if errors.Is(err, errNoActiveGatewayForEnvironment) {
+			continue // no gateway yet: allowed, deploys later; policies checked when one exists
+		}
+		if err != nil {
+			return fmt.Errorf("environment %q: resolve gateway: %w", envID, err)
+		}
+		if !gatewayHasMCPIdentityPolicies(gateway) {
+			return fmt.Errorf("%w: environment %q: its gateway does not support mcp-auth/mcp-authz v1 policies required for Agent Identity security", utils.ErrInvalidInput, envID)
+		}
+	}
+	return nil
+}
+
+// gatewayHasMCPIdentityPolicies reports whether the gateway's policy manifest
+// advertises both mcp-auth v1 and mcp-authz v1 (the policies identity mode emits).
+func gatewayHasMCPIdentityPolicies(gateway *models.Gateway) bool {
+	need := map[string]bool{"mcp-auth\x00v1": false, "mcp-authz\x00v1": false}
+	for _, item := range extractGatewayPolicyManifestItems(gateway.Manifest) {
+		key := item.Name + "\x00" + normalizePolicyVersionToMajor(item.Version)
+		if _, ok := need[key]; ok {
+			need[key] = true
+		}
+	}
+	return need["mcp-auth\x00v1"] && need["mcp-authz\x00v1"]
 }
 
 // buildMCPEnvironmentsForStorage normalizes incoming per-environment blueprint blocks for
@@ -855,10 +959,11 @@ func (s *MCPProxyService) buildMCPEnvironmentsForStorage(incoming, existing map[
 			artifactUUID = uuid.New()
 		}
 		block := models.MCPEnvironmentConfig{
-			ArtifactUUID: &artifactUUID,
-			Policies:     copyMCPPolicies(incomingEnv.Policies),
-			Capabilities: copyMCPCapabilities(incomingEnv.Capabilities),
-			Security:     defaultMCPProxySecurity(incomingEnv.Security),
+			ArtifactUUID:      &artifactUUID,
+			Policies:          copyMCPPolicies(incomingEnv.Policies),
+			Capabilities:      copyMCPCapabilities(incomingEnv.Capabilities),
+			Security:          defaultMCPProxySecurity(incomingEnv.Security),
+			ToolScopeBindings: copyMCPToolScopeBindings(incomingEnv.ToolScopeBindings),
 		}
 		if incomingEnv.Upstream != nil {
 			endpoint := *incomingEnv.Upstream

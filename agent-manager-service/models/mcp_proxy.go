@@ -73,15 +73,15 @@ func (MCPProxyMapping) TableName() string {
 // buildAgentMCPConfigProxy) and leaves Environments empty. The deployment YAML builder
 // reads only the flat root-level fields.
 type MCPProxyConfig struct {
-	Name         string                          `json:"name,omitempty"`
-	Version      string                          `json:"version,omitempty"`
-	Context      *string                         `json:"context,omitempty"`
-	Vhost        *string                         `json:"vhost,omitempty"`
-	SpecVersion  string                          `json:"specVersion,omitempty"`
-	Upstream     UpstreamConfig                  `json:"upstream,omitempty"`
-	Policies     []MCPPolicy                     `json:"policies,omitempty"`
-	Capabilities *MCPProxyCapabilities           `json:"capabilities,omitempty"`
-	Security     *SecurityConfig                 `json:"security,omitempty"`
+	Name         string                `json:"name,omitempty"`
+	Version      string                `json:"version,omitempty"`
+	Context      *string               `json:"context,omitempty"`
+	Vhost        *string               `json:"vhost,omitempty"`
+	SpecVersion  string                `json:"specVersion,omitempty"`
+	Upstream     UpstreamConfig        `json:"upstream,omitempty"`
+	Policies     []MCPPolicy           `json:"policies,omitempty"`
+	Capabilities *MCPProxyCapabilities `json:"capabilities,omitempty"`
+	Security     *SecurityConfig       `json:"security,omitempty"`
 	// ToolScopeBindings is the flat root-level copy populated only on flattened
 	// per-environment deployable artifacts (mirrors the Security duality); on a
 	// source MCPProxy the bindings live per-environment in Environments.

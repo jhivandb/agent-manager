@@ -13977,6 +13977,11 @@ components:
           $ref: "#/components/schemas/MCPProxyCapabilities"
         security:
           $ref: "#/components/schemas/SecurityConfig"
+        environments:
+          type: object
+          description: Per-environment configuration blocks keyed by environment UUID
+          additionalProperties:
+            $ref: "#/components/schemas/MCPEnvironmentConfig"
         inCatalog:
           type: boolean
           description: Whether the MCP proxy is available in the catalog
@@ -14031,6 +14036,11 @@ components:
           $ref: "#/components/schemas/MCPProxyCapabilities"
         security:
           $ref: "#/components/schemas/SecurityConfig"
+        environments:
+          type: object
+          description: Per-environment configuration blocks keyed by environment UUID
+          additionalProperties:
+            $ref: "#/components/schemas/MCPEnvironmentConfig"
         inCatalog:
           type: boolean
           description: Whether the MCP proxy is available in the catalog
@@ -14110,6 +14120,50 @@ components:
             $ref: "#/components/schemas/MCPProxyListItem"
         pagination:
           $ref: "#/components/schemas/PaginationInfo"
+
+    MCPToolScopeBinding:
+      type: object
+      required:
+        - tool
+        - scopes
+      properties:
+        tool:
+          type: string
+          description: Name of the MCP tool the scopes gate
+          example: list_repos
+        scopes:
+          type: array
+          description: Catalog scope names required to call the tool
+          items:
+            type: string
+          example:
+            - repo:read.all
+
+    MCPEnvironmentConfig:
+      type: object
+      description: Per-environment blueprint block of an MCP proxy, keyed by environment UUID.
+      properties:
+        artifactUuid:
+          type: string
+          format: uuid
+          readOnly: true
+        upstream:
+          $ref: "#/components/schemas/UpstreamEndpoint"
+        policies:
+          type: array
+          items:
+            $ref: "#/components/schemas/MCPPolicy"
+        capabilities:
+          $ref: "#/components/schemas/MCPProxyCapabilities"
+        security:
+          $ref: "#/components/schemas/SecurityConfig"
+        toolScopeBindings:
+          type: array
+          items:
+            $ref: "#/components/schemas/MCPToolScopeBinding"
+        deploymentStatus:
+          type: string
+          readOnly: true
 
     MCPPolicy:
       type: object
@@ -14562,6 +14616,9 @@ components:
 
     SecurityConfig:
       type: object
+      description: >-
+        Security configuration. Exactly one variant is active: apiKey or identity
+        (both omitted / enabled=false means no security).
       properties:
         enabled:
           type: boolean
@@ -14569,6 +14626,8 @@ components:
           example: true
         apiKey:
           $ref: "#/components/schemas/APIKeySecurity"
+        identity:
+          $ref: "#/components/schemas/IdentitySecurity"
 
     APIKeySecurity:
       type: object
@@ -14587,6 +14646,16 @@ components:
             - header
             - query
           example: header
+
+    IdentitySecurity:
+      type: object
+      description: >-
+        Agent Identity security — callers present a JWT issued by the environment's
+        IdP. v1 pins the issuer to the ThunderKeyManager key manager.
+      properties:
+        enabled:
+          type: boolean
+          description: Whether Agent Identity security is enabled
 
     # ============================================================================
     # Evaluation Score Schemas

@@ -17,11 +17,12 @@ import (
 // checks if the SecurityConfig type satisfies the MappedNullable interface at compile time
 var _ MappedNullable = &SecurityConfig{}
 
-// SecurityConfig struct for SecurityConfig
+// SecurityConfig Security configuration. Exactly one variant is active: apiKey or identity (both omitted / enabled=false means no security).
 type SecurityConfig struct {
 	// Whether security is enabled
-	Enabled *bool           `json:"enabled,omitempty"`
-	ApiKey  *APIKeySecurity `json:"apiKey,omitempty"`
+	Enabled  *bool             `json:"enabled,omitempty"`
+	ApiKey   *APIKeySecurity   `json:"apiKey,omitempty"`
+	Identity *IdentitySecurity `json:"identity,omitempty"`
 }
 
 // NewSecurityConfig instantiates a new SecurityConfig object
@@ -105,6 +106,38 @@ func (o *SecurityConfig) SetApiKey(v APIKeySecurity) {
 	o.ApiKey = &v
 }
 
+// GetIdentity returns the Identity field value if set, zero value otherwise.
+func (o *SecurityConfig) GetIdentity() IdentitySecurity {
+	if o == nil || IsNil(o.Identity) {
+		var ret IdentitySecurity
+		return ret
+	}
+	return *o.Identity
+}
+
+// GetIdentityOk returns a tuple with the Identity field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *SecurityConfig) GetIdentityOk() (*IdentitySecurity, bool) {
+	if o == nil || IsNil(o.Identity) {
+		return nil, false
+	}
+	return o.Identity, true
+}
+
+// HasIdentity returns a boolean if a field has been set.
+func (o *SecurityConfig) HasIdentity() bool {
+	if o != nil && !IsNil(o.Identity) {
+		return true
+	}
+
+	return false
+}
+
+// SetIdentity gets a reference to the given IdentitySecurity and assigns it to the Identity field.
+func (o *SecurityConfig) SetIdentity(v IdentitySecurity) {
+	o.Identity = &v
+}
+
 func (o SecurityConfig) MarshalJSON() ([]byte, error) {
 	toSerialize, err := o.ToMap()
 	if err != nil {
@@ -120,6 +153,9 @@ func (o SecurityConfig) ToMap() (map[string]interface{}, error) {
 	}
 	if !IsNil(o.ApiKey) {
 		toSerialize["apiKey"] = o.ApiKey
+	}
+	if !IsNil(o.Identity) {
+		toSerialize["identity"] = o.Identity
 	}
 	return toSerialize, nil
 }

@@ -39,6 +39,8 @@ type MCPProxyResponse struct {
 	Policies     []MCPPolicy           `json:"policies,omitempty"`
 	Capabilities *MCPProxyCapabilities `json:"capabilities,omitempty"`
 	Security     *SecurityConfig       `json:"security,omitempty"`
+	// Per-environment configuration blocks keyed by environment UUID
+	Environments *map[string]MCPEnvironmentConfig `json:"environments,omitempty"`
 	// Whether the MCP proxy is available in the catalog
 	InCatalog *bool `json:"inCatalog,omitempty"`
 	// Gateway UUIDs associated with the MCP proxy
@@ -392,6 +394,38 @@ func (o *MCPProxyResponse) SetSecurity(v SecurityConfig) {
 	o.Security = &v
 }
 
+// GetEnvironments returns the Environments field value if set, zero value otherwise.
+func (o *MCPProxyResponse) GetEnvironments() map[string]MCPEnvironmentConfig {
+	if o == nil || IsNil(o.Environments) {
+		var ret map[string]MCPEnvironmentConfig
+		return ret
+	}
+	return *o.Environments
+}
+
+// GetEnvironmentsOk returns a tuple with the Environments field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *MCPProxyResponse) GetEnvironmentsOk() (*map[string]MCPEnvironmentConfig, bool) {
+	if o == nil || IsNil(o.Environments) {
+		return nil, false
+	}
+	return o.Environments, true
+}
+
+// HasEnvironments returns a boolean if a field has been set.
+func (o *MCPProxyResponse) HasEnvironments() bool {
+	if o != nil && !IsNil(o.Environments) {
+		return true
+	}
+
+	return false
+}
+
+// SetEnvironments gets a reference to the given map[string]MCPEnvironmentConfig and assigns it to the Environments field.
+func (o *MCPProxyResponse) SetEnvironments(v map[string]MCPEnvironmentConfig) {
+	o.Environments = &v
+}
+
 // GetInCatalog returns the InCatalog field value if set, zero value otherwise.
 func (o *MCPProxyResponse) GetInCatalog() bool {
 	if o == nil || IsNil(o.InCatalog) {
@@ -586,6 +620,9 @@ func (o MCPProxyResponse) ToMap() (map[string]interface{}, error) {
 	}
 	if !IsNil(o.Security) {
 		toSerialize["security"] = o.Security
+	}
+	if !IsNil(o.Environments) {
+		toSerialize["environments"] = o.Environments
 	}
 	if !IsNil(o.InCatalog) {
 		toSerialize["inCatalog"] = o.InCatalog

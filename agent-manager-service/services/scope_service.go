@@ -55,7 +55,7 @@ type ScopeService interface {
 }
 
 type scopeService struct {
-	repo     repositories.ScopeRepository
+	repo      repositories.ScopeRepository
 	proxyRepo repositories.MCPProxyRepository
 }
 

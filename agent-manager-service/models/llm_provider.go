@@ -155,10 +155,20 @@ type RateLimitResetWindow struct {
 	Unit     string `json:"unit"`
 }
 
-// SecurityConfig represents security configuration
+// SecurityConfig represents security configuration. Exactly one variant is active:
+// apiKey or identity (both nil / enabled=false => no security). The identity variant
+// is a shared primitive — LLM providers may adopt it later.
 type SecurityConfig struct {
-	Enabled *bool           `json:"enabled,omitempty" yaml:"enabled,omitempty"`
-	APIKey  *APIKeySecurity `json:"apiKey,omitempty" yaml:"apiKey,omitempty"`
+	Enabled  *bool             `json:"enabled,omitempty" yaml:"enabled,omitempty"`
+	APIKey   *APIKeySecurity   `json:"apiKey,omitempty" yaml:"apiKey,omitempty"`
+	Identity *IdentitySecurity `json:"identity,omitempty" yaml:"identity,omitempty"`
+}
+
+// IdentitySecurity selects Agent Identity security: callers authenticate with a JWT
+// from the environment's Thunder IdP. v1 pins the issuer to the gateway key-manager
+// named ThunderKeyManager, so there is no issuer field yet.
+type IdentitySecurity struct {
+	Enabled *bool `json:"enabled,omitempty" yaml:"enabled,omitempty"`
 }
 
 // APIKeySecurity represents API key security configuration
