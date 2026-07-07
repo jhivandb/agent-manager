@@ -19,11 +19,14 @@ package thundersvc
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/wso2/agent-manager/agent-manager-service/middleware/logger"
 	"github.com/wso2/agent-manager/agent-manager-service/rbac"
@@ -53,6 +56,13 @@ type IdentityClient interface {
 	RemoveGroupMembers(ctx context.Context, groupID string, userIDs []string) error
 	GetGroupMembers(ctx context.Context, groupID string, offset, limit int) ([]ThunderUser, int, error)
 	GetGroupRoles(ctx context.Context, groupID string) ([]ThunderRole, error)
+	// AddGroupMemberEntries adds typed members (agents, users, nested groups) to a group.
+	AddGroupMemberEntries(ctx context.Context, groupID string, members []GroupMember) error
+	// RemoveGroupMemberEntries removes typed members from a group.
+	RemoveGroupMemberEntries(ctx context.Context, groupID string, members []GroupMember) error
+	// ListGroupMemberEntries returns the raw typed member entries of a group (unlike
+	// GetGroupMembers, which resolves and returns only user members).
+	ListGroupMemberEntries(ctx context.Context, groupID string, offset, limit int) ([]GroupMember, int, error)
 
 	// Roles
 	ListRoles(ctx context.Context, ouID string, offset, limit int) ([]ThunderRole, int, error)
@@ -68,6 +78,9 @@ type IdentityClient interface {
 
 	// Permissions catalog
 	ListAMPPermissions(ctx context.Context) ([]ThunderPermission, string, error)
+	// EnsureScopeResourceServer makes sure the amp-scopes resource server exists and
+	// that every given scope is registered as a permission under it, returning its ID.
+	EnsureScopeResourceServer(ctx context.Context, scopes []string) (string, error)
 
 	// Organization units
 	GetOUIDByHandle(ctx context.Context, handle string) (string, error)
@@ -395,6 +408,54 @@ func (c *thunderClient) GetGroupMembers(ctx context.Context, groupID string, off
 		users = append(users, *user)
 	}
 	return users, resp.TotalResults, nil
+}
+
+// AddGroupMemberEntries adds typed members (agents, users, nested groups) to a
+// group. Unlike AddGroupMembers it does not assume Type "user".
+func (c *thunderClient) AddGroupMemberEntries(ctx context.Context, groupID string, members []GroupMember) error {
+	token, err := c.getSystemToken(ctx)
+	if err != nil {
+		return err
+	}
+	_, err = c.doRequest(ctx, http.MethodPost, c.baseURL+"/groups/"+groupID+"/members/add", token, GroupMembersRequest{Members: members})
+	if err != nil {
+		return fmt.Errorf("thunder add group member entries: %w", err)
+	}
+	return nil
+}
+
+// RemoveGroupMemberEntries removes typed members from a group. Unlike
+// RemoveGroupMembers it does not assume Type "user".
+func (c *thunderClient) RemoveGroupMemberEntries(ctx context.Context, groupID string, members []GroupMember) error {
+	token, err := c.getSystemToken(ctx)
+	if err != nil {
+		return err
+	}
+	_, err = c.doRequest(ctx, http.MethodPost, c.baseURL+"/groups/"+groupID+"/members/remove", token, GroupMembersRequest{Members: members})
+	if err != nil {
+		return fmt.Errorf("thunder remove group member entries: %w", err)
+	}
+	return nil
+}
+
+// ListGroupMemberEntries returns the raw typed member entries of a group. Unlike
+// GetGroupMembers, it does not resolve entries into full user objects, so it
+// preserves non-user members (agents, nested groups).
+func (c *thunderClient) ListGroupMemberEntries(ctx context.Context, groupID string, offset, limit int) ([]GroupMember, int, error) {
+	token, err := c.getSystemToken(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+	url := fmt.Sprintf("%s/groups/%s/members?offset=%d&limit=%d", c.baseURL, groupID, offset, limit)
+	body, err := c.doRequest(ctx, http.MethodGet, url, token, nil)
+	if err != nil {
+		return nil, 0, fmt.Errorf("thunder list group member entries: %w", err)
+	}
+	var resp thunderGroupMemberList
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return nil, 0, fmt.Errorf("thunder list group member entries decode: %w", err)
+	}
+	return resp.Members, resp.TotalResults, nil
 }
 
 // listRoleAssignmentEntries fetches only the raw {type, id} assignment entries for a role
@@ -758,33 +819,10 @@ func (c *thunderClient) ListAMPPermissions(ctx context.Context) ([]ThunderPermis
 		return nil, "", err
 	}
 
-	// Paginate through resource servers to find the "amp" one.
-	const rsPageSize = 20
-	var ampRSID string
-	rsOffset := 0
-	for {
-		rsURL := fmt.Sprintf("%s/resource-servers?offset=%d&limit=%d", c.baseURL, rsOffset, rsPageSize)
-		rsBody, err := c.doRequest(ctx, http.MethodGet, rsURL, token, nil)
-		if err != nil {
-			return nil, "", fmt.Errorf("thunder list resource servers: %w", err)
-		}
-		var page thunderResourceServerList
-		if err := json.Unmarshal(rsBody, &page); err != nil {
-			return nil, "", fmt.Errorf("thunder list resource servers decode: %w", err)
-		}
-		for _, rs := range page.ResourceServers {
-			if rs.Identifier == rbac.ResourceServer {
-				ampRSID = rs.ID
-				break
-			}
-		}
-		if ampRSID != "" {
-			break
-		}
-		rsOffset += len(page.ResourceServers)
-		if rsOffset >= page.Total || len(page.ResourceServers) == 0 {
-			break
-		}
+	// Find the "amp" resource server.
+	ampRSID, err := c.findResourceServerID(ctx, token, rbac.ResourceServer)
+	if err != nil {
+		return nil, "", err
 	}
 	if ampRSID == "" {
 		// Return empty list if amp resource server not found - permissions can be managed without it
@@ -840,6 +878,178 @@ func (c *thunderClient) ListAMPPermissions(ctx context.Context) ([]ThunderPermis
 	}
 
 	return perms, ampRSID, nil
+}
+
+const (
+	// scopeResourceServerIdentifier is the identifier of the resource server that
+	// holds the org's catalog scopes as permissions in each environment's Thunder.
+	scopeResourceServerIdentifier = "amp-scopes"
+	scopeResourceServerName       = "AMP Scopes"
+	// scopeActionHandle is the constant action handle under each per-scope resource;
+	// uniqueness is provided by the resource, so the action handle is fixed.
+	scopeActionHandle = "access"
+)
+
+// findResourceServerID paginates through resource servers and returns the ID of
+// the one whose identifier matches, or "" if none match.
+func (c *thunderClient) findResourceServerID(ctx context.Context, token, identifier string) (string, error) {
+	const rsPageSize = 20
+	rsOffset := 0
+	for {
+		rsURL := fmt.Sprintf("%s/resource-servers?offset=%d&limit=%d", c.baseURL, rsOffset, rsPageSize)
+		rsBody, err := c.doRequest(ctx, http.MethodGet, rsURL, token, nil)
+		if err != nil {
+			return "", fmt.Errorf("thunder list resource servers: %w", err)
+		}
+		var page thunderResourceServerList
+		if err := json.Unmarshal(rsBody, &page); err != nil {
+			return "", fmt.Errorf("thunder list resource servers decode: %w", err)
+		}
+		for _, rs := range page.ResourceServers {
+			if rs.Identifier == identifier {
+				return rs.ID, nil
+			}
+		}
+		rsOffset += len(page.ResourceServers)
+		if rsOffset >= page.Total || len(page.ResourceServers) == 0 {
+			return "", nil
+		}
+	}
+}
+
+// EnsureScopeResourceServer makes sure the amp-scopes resource server exists and
+// that every given scope is registered as a permission under it, then returns the
+// resource server ID. Idempotent; called lazily before role writes.
+func (c *thunderClient) EnsureScopeResourceServer(ctx context.Context, scopes []string) (string, error) {
+	token, err := c.getSystemToken(ctx)
+	if err != nil {
+		return "", err
+	}
+
+	rsID, err := c.findResourceServerID(ctx, token, scopeResourceServerIdentifier)
+	if err != nil {
+		return "", err
+	}
+	if rsID == "" {
+		ouID, err := c.getDefaultOUID(ctx, token)
+		if err != nil {
+			return "", fmt.Errorf("thunder ensure scope resource server (default ou): %w", err)
+		}
+		body, err := c.doRequest(ctx, http.MethodPost, c.baseURL+"/resource-servers", token,
+			map[string]string{"name": scopeResourceServerName, "identifier": scopeResourceServerIdentifier, "ouId": ouID})
+		if err != nil {
+			return "", fmt.Errorf("thunder create scope resource server: %w", err)
+		}
+		var created ThunderResourceServer
+		if err := json.Unmarshal(body, &created); err != nil {
+			return "", fmt.Errorf("thunder create scope resource server decode: %w", err)
+		}
+		rsID = created.ID
+	}
+
+	existing, err := c.listResourceServerPermissions(ctx, token, rsID)
+	if err != nil {
+		return "", err
+	}
+	for _, scope := range scopes {
+		if scope == "" {
+			continue
+		}
+		if _, ok := existing[scope]; ok {
+			continue
+		}
+		if err := c.createScopePermission(ctx, token, rsID, scope); err != nil {
+			return "", err
+		}
+		existing[scope] = struct{}{} // guard against duplicate scopes in the input slice
+	}
+	return rsID, nil
+}
+
+// listResourceServerPermissions returns the set of permission strings already
+// registered (as resource actions) under the given resource server.
+func (c *thunderClient) listResourceServerPermissions(ctx context.Context, token, rsID string) (map[string]struct{}, error) {
+	const resPageSize = 20
+	var resources []ThunderResource
+	resOffset := 0
+	for {
+		resURL := fmt.Sprintf("%s/resource-servers/%s/resources?offset=%d&limit=%d", c.baseURL, rsID, resOffset, resPageSize)
+		resBody, err := c.doRequest(ctx, http.MethodGet, resURL, token, nil)
+		if err != nil {
+			return nil, fmt.Errorf("thunder list scope resources: %w", err)
+		}
+		var page thunderResourceList
+		if err := json.Unmarshal(resBody, &page); err != nil {
+			return nil, fmt.Errorf("thunder list scope resources decode: %w", err)
+		}
+		resources = append(resources, page.Resources...)
+		resOffset += len(page.Resources)
+		if resOffset >= page.TotalResults || len(page.Resources) == 0 {
+			break
+		}
+	}
+
+	perms := make(map[string]struct{})
+	for _, res := range resources {
+		actURL := fmt.Sprintf("%s/resource-servers/%s/resources/%s/actions", c.baseURL, rsID, res.ID)
+		actBody, err := c.doRequest(ctx, http.MethodGet, actURL, token, nil)
+		if err != nil {
+			return nil, fmt.Errorf("thunder list scope actions for resource %s: %w", res.ID, err)
+		}
+		var actPage thunderActionList
+		if err := json.Unmarshal(actBody, &actPage); err != nil {
+			return nil, fmt.Errorf("thunder list scope actions decode for resource %s: %w", res.ID, err)
+		}
+		for _, action := range actPage.Actions {
+			name := action.Permission
+			if name == "" {
+				name = res.Handle + ":" + action.Handle
+			}
+			perms[name] = struct{}{}
+		}
+	}
+	return perms, nil
+}
+
+// createScopePermission registers one scope as a permission under the resource
+// server: a resource carrying the scope, plus an action whose permission field is
+// the exact scope string (the value that surfaces in role permissions and the
+// agent token's scope claim).
+func (c *thunderClient) createScopePermission(ctx context.Context, token, rsID, scope string) error {
+	resBody, err := c.doRequest(ctx, http.MethodPost, c.baseURL+"/resource-servers/"+rsID+"/resources", token,
+		map[string]string{"name": scope, "handle": scopeResourceHandle(scope), "permission": scope})
+	if err != nil {
+		return fmt.Errorf("thunder create scope resource %q: %w", scope, err)
+	}
+	var res ThunderResource
+	if err := json.Unmarshal(resBody, &res); err != nil {
+		return fmt.Errorf("thunder create scope resource decode %q: %w", scope, err)
+	}
+	_, err = c.doRequest(ctx, http.MethodPost, c.baseURL+"/resource-servers/"+rsID+"/resources/"+res.ID+"/actions", token,
+		map[string]string{"name": scope, "handle": scopeActionHandle, "permission": scope})
+	if err != nil {
+		return fmt.Errorf("thunder create scope action %q: %w", scope, err)
+	}
+	return nil
+}
+
+// scopeResourceHandle derives a Thunder-safe, collision-free resource handle from
+// a scope name. Scope names may contain the resource-server delimiter ':' (e.g.
+// "repo:read.all"), which is not valid in a handle, so disallowed characters are
+// replaced and a short hash of the full scope is appended to keep handles unique.
+func scopeResourceHandle(scope string) string {
+	var b strings.Builder
+	for _, r := range scope {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9',
+			r == '.', r == '_', r == '-':
+			b.WriteRune(r)
+		default:
+			b.WriteRune('-')
+		}
+	}
+	sum := sha256.Sum256([]byte(scope))
+	return b.String() + "-" + hex.EncodeToString(sum[:])[:8]
 }
 
 // ListUsersByOUId fetches users directly from Thunder's OU-scoped endpoint.

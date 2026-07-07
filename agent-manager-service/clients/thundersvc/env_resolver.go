@@ -55,6 +55,18 @@ var ErrThunderUnreachable = errors.New("env-thunder is provisioned but not reach
 //go:generate moq -rm -fmt goimports -skip-ensure -pkg clientmocks -out ../clientmocks/env_thunder_resolver_fake.go . EnvThunderResolver:EnvThunderResolverMock
 type EnvThunderResolver interface {
 	Resolve(ctx context.Context, orgName, envName string) (ThunderClient, error)
+	// ResolveIdentity returns the same resolved client widened to identity
+	// operations (the concrete client implements both interfaces).
+	ResolveIdentity(ctx context.Context, orgName, envName string) (EnvIdentityClient, error)
+}
+
+// EnvIdentityClient is the env-Thunder surface the agent-identity passthrough
+// needs: full identity management plus default-OU lookup.
+//
+//go:generate moq -rm -fmt goimports -skip-ensure -pkg clientmocks -out ../clientmocks/env_identity_client_mock.go . EnvIdentityClient:EnvIdentityClientMock
+type EnvIdentityClient interface {
+	IdentityClient
+	GetDefaultOUID(ctx context.Context) (string, error)
 }
 
 // openBaoReader is the narrow slice of the vault/OpenBao API this resolver needs —
@@ -180,4 +192,18 @@ func (r *envThunderResolver) Resolve(ctx context.Context, orgName, envName strin
 		return nil, err
 	}
 	return result.(ThunderClient), nil
+}
+
+// ResolveIdentity resolves the env-Thunder client and widens it to the identity
+// surface. The concrete client returned by Resolve implements both interfaces.
+func (r *envThunderResolver) ResolveIdentity(ctx context.Context, orgName, envName string) (EnvIdentityClient, error) {
+	c, err := r.Resolve(ctx, orgName, envName)
+	if err != nil {
+		return nil, err
+	}
+	ic, ok := c.(EnvIdentityClient)
+	if !ok {
+		return nil, fmt.Errorf("resolved thunder client for %s/%s does not support identity operations", orgName, envName)
+	}
+	return ic, nil
 }
