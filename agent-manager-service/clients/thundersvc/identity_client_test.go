@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -89,10 +90,10 @@ func TestListGroupMemberEntries_ReturnsTypedEntries(t *testing.T) {
 	assert.Equal(t, GroupMember{ID: "u1", Type: "user"}, members[1])
 }
 
-func TestEnsureScopeResourceServer_CreatesWhenMissing(t *testing.T) {
+func TestEnsureScopeResourceServer_CreatesScopeAsSingleResourceWithSlashDelimiter(t *testing.T) {
 	var createRSBody map[string]any
-	var createActionBody map[string]any
-	rsCreated, resCreated, actionCreated := 0, 0, 0
+	var createResourceBody map[string]any
+	rsCreated, resCreated := 0, 0
 
 	srv := newTestThunderServer(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -109,12 +110,13 @@ func TestEnsureScopeResourceServer_CreatesWhenMissing(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(map[string]any{"resources": []any{}, "totalResults": 0})
 		case r.Method == http.MethodPost && r.URL.Path == "/resource-servers/rs-1/resources":
 			resCreated++
-			_ = json.NewEncoder(w).Encode(map[string]any{"id": "res-1", "handle": "h", "permission": "repo:read.all"})
-		case r.Method == http.MethodPost && r.URL.Path == "/resource-servers/rs-1/resources/res-1/actions":
-			actionCreated++
-			require.NoError(t, json.NewDecoder(r.Body).Decode(&createActionBody))
-			_ = json.NewEncoder(w).Encode(map[string]any{"id": "act-1", "permission": "repo:read.all"})
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&createResourceBody))
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id": "res-1", "handle": createResourceBody["handle"], "permission": "repo:read.all",
+			})
 		default:
+			// Any other request (notably an action POST) is a bug: Thunder derives the
+			// permission from the resource handle, so no action must be created.
 			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
 		}
 	})
@@ -127,13 +129,16 @@ func TestEnsureScopeResourceServer_CreatesWhenMissing(t *testing.T) {
 	assert.Equal(t, "rs-1", rsID)
 	assert.Equal(t, 1, rsCreated, "resource server created exactly once")
 	assert.Equal(t, 1, resCreated, "scope resource created exactly once")
-	assert.Equal(t, 1, actionCreated, "scope action created exactly once")
 	assert.Equal(t, scopeResourceServerIdentifier, createRSBody["identifier"])
 	assert.Equal(t, "ou-1", createRSBody["ouId"], "resource-server creation requires the default OU id")
-	assert.Equal(t, "repo:read.all", createActionBody["permission"], "action permission carries the exact scope string")
+	assert.Equal(t, "/", createRSBody["delimiter"],
+		"resource server uses '/' delimiter so scope handles never contain the delimiter")
+	assert.Equal(t, "repo:read.all", createResourceBody["handle"],
+		"each scope is registered as a resource whose handle is the raw scope, so the server-derived permission equals the scope")
+	assert.Equal(t, "repo:read.all", createResourceBody["name"])
 }
 
-func TestEnsureScopeResourceServer_IdempotentWhenPresent(t *testing.T) {
+func TestEnsureScopeResourceServer_IdempotentReadsResourcePermission(t *testing.T) {
 	srv := newTestThunderServer(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
@@ -146,16 +151,14 @@ func TestEnsureScopeResourceServer_IdempotentWhenPresent(t *testing.T) {
 			})
 		case r.Method == http.MethodGet && r.URL.Path == "/resource-servers/rs-1/resources":
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"resources":    []map[string]any{{"id": "res-1", "handle": "repo", "permission": "repo"}},
+				"resources":    []map[string]any{{"id": "res-1", "handle": "repo:read.all", "permission": "repo:read.all"}},
 				"totalResults": 1,
-			})
-		case r.Method == http.MethodGet && r.URL.Path == "/resource-servers/rs-1/resources/res-1/actions":
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"actions": []map[string]any{{"id": "act-1", "handle": "read.all", "permission": "repo:read.all"}},
 			})
 		case r.Method == http.MethodPost:
 			t.Fatalf("no creation calls expected when the scope already exists, got POST %s", r.URL.Path)
 		default:
+			// The idempotency check must read the resource's own permission field, not
+			// list per-resource actions; any other GET (e.g. an actions listing) is a bug.
 			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
 		}
 	})
@@ -166,4 +169,18 @@ func TestEnsureScopeResourceServer_IdempotentWhenPresent(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, "rs-1", rsID)
+}
+
+func TestEnsureScopeResourceServer_RejectsScopeExceedingHandleLimit(t *testing.T) {
+	srv := newTestThunderServer(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("no Thunder calls expected for an over-long scope, got %s %s", r.Method, r.URL.Path)
+	})
+	defer srv.Close()
+
+	longScope := strings.Repeat("a", 101)
+	c := NewIdentityClient(srv.URL, "sys-client", "sys-secret")
+	_, err := c.EnsureScopeResourceServer(context.Background(), []string{longScope})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "100", "error should state the 100-character Thunder handle limit")
 }

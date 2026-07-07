@@ -19,14 +19,11 @@ package thundersvc
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 
 	"github.com/wso2/agent-manager/agent-manager-service/middleware/logger"
 	"github.com/wso2/agent-manager/agent-manager-service/rbac"
@@ -885,9 +882,17 @@ const (
 	// holds the org's catalog scopes as permissions in each environment's Thunder.
 	scopeResourceServerIdentifier = "amp-scopes"
 	scopeResourceServerName       = "AMP Scopes"
-	// scopeActionHandle is the constant action handle under each per-scope resource;
-	// uniqueness is provided by the resource, so the action handle is fixed.
-	scopeActionHandle = "access"
+	// scopeResourceServerDelimiter is the resource-server permission delimiter. Thunder
+	// derives a resource's permission by joining ancestor handles with this delimiter;
+	// with no parent and an empty resource-server handle the derived permission equals
+	// the resource's own handle. We use "/" — which scope names never contain — so each
+	// scope can be its own resource handle and the derived permission equals the raw
+	// scope exactly (the value carried in role permissions and the agent token claim).
+	scopeResourceServerDelimiter = "/"
+	// scopeHandleMaxLen is Thunder's maximum resource-handle length. The scope catalog
+	// allows longer names, so over-long scopes are rejected with a clear error instead
+	// of letting Thunder reject the handle with an opaque 400.
+	scopeHandleMaxLen = 100
 )
 
 // findResourceServerID paginates through resource servers and returns the ID of
@@ -921,6 +926,12 @@ func (c *thunderClient) findResourceServerID(ctx context.Context, token, identif
 // that every given scope is registered as a permission under it, then returns the
 // resource server ID. Idempotent; called lazily before role writes.
 func (c *thunderClient) EnsureScopeResourceServer(ctx context.Context, scopes []string) (string, error) {
+	for _, scope := range scopes {
+		if len(scope) > scopeHandleMaxLen {
+			return "", fmt.Errorf("scope %q exceeds the Thunder resource handle limit of %d characters", scope, scopeHandleMaxLen)
+		}
+	}
+
 	token, err := c.getSystemToken(ctx)
 	if err != nil {
 		return "", err
@@ -936,7 +947,12 @@ func (c *thunderClient) EnsureScopeResourceServer(ctx context.Context, scopes []
 			return "", fmt.Errorf("thunder ensure scope resource server (default ou): %w", err)
 		}
 		body, err := c.doRequest(ctx, http.MethodPost, c.baseURL+"/resource-servers", token,
-			map[string]string{"name": scopeResourceServerName, "identifier": scopeResourceServerIdentifier, "ouId": ouID})
+			map[string]string{
+				"name":       scopeResourceServerName,
+				"identifier": scopeResourceServerIdentifier,
+				"ouId":       ouID,
+				"delimiter":  scopeResourceServerDelimiter,
+			})
 		if err != nil {
 			return "", fmt.Errorf("thunder create scope resource server: %w", err)
 		}
@@ -967,10 +983,14 @@ func (c *thunderClient) EnsureScopeResourceServer(ctx context.Context, scopes []
 }
 
 // listResourceServerPermissions returns the set of permission strings already
-// registered (as resource actions) under the given resource server.
+// registered under the given resource server. Thunder derives each resource's
+// permission from its handle and returns it on the resource itself, so the set is
+// read directly from resource.Permission — no per-resource action listing is needed
+// (and reading actions would make the idempotency check re-create on every call,
+// since scopes are stored as resources with no actions).
 func (c *thunderClient) listResourceServerPermissions(ctx context.Context, token, rsID string) (map[string]struct{}, error) {
 	const resPageSize = 20
-	var resources []ThunderResource
+	perms := make(map[string]struct{})
 	resOffset := 0
 	for {
 		resURL := fmt.Sprintf("%s/resource-servers/%s/resources?offset=%d&limit=%d", c.baseURL, rsID, resOffset, resPageSize)
@@ -982,74 +1002,33 @@ func (c *thunderClient) listResourceServerPermissions(ctx context.Context, token
 		if err := json.Unmarshal(resBody, &page); err != nil {
 			return nil, fmt.Errorf("thunder list scope resources decode: %w", err)
 		}
-		resources = append(resources, page.Resources...)
+		for _, res := range page.Resources {
+			if res.Permission != "" {
+				perms[res.Permission] = struct{}{}
+			}
+		}
 		resOffset += len(page.Resources)
 		if resOffset >= page.TotalResults || len(page.Resources) == 0 {
 			break
 		}
 	}
-
-	perms := make(map[string]struct{})
-	for _, res := range resources {
-		actURL := fmt.Sprintf("%s/resource-servers/%s/resources/%s/actions", c.baseURL, rsID, res.ID)
-		actBody, err := c.doRequest(ctx, http.MethodGet, actURL, token, nil)
-		if err != nil {
-			return nil, fmt.Errorf("thunder list scope actions for resource %s: %w", res.ID, err)
-		}
-		var actPage thunderActionList
-		if err := json.Unmarshal(actBody, &actPage); err != nil {
-			return nil, fmt.Errorf("thunder list scope actions decode for resource %s: %w", res.ID, err)
-		}
-		for _, action := range actPage.Actions {
-			name := action.Permission
-			if name == "" {
-				name = res.Handle + ":" + action.Handle
-			}
-			perms[name] = struct{}{}
-		}
-	}
 	return perms, nil
 }
 
-// createScopePermission registers one scope as a permission under the resource
-// server: a resource carrying the scope, plus an action whose permission field is
-// the exact scope string (the value that surfaces in role permissions and the
-// agent token's scope claim).
+// createScopePermission registers one scope as a single resource under the scope
+// resource server. Thunder ignores any client-supplied permission and derives it
+// from handles: with the resource server's empty handle and "/" delimiter, and the
+// raw scope as the resource handle, the derived RESOURCE.PERMISSION equals the scope
+// exactly — the value that surfaces in role permissions and the agent token's scope
+// claim. No action is created; the resource alone carries the permission. Callers
+// must ensure the scope is within scopeHandleMaxLen before invoking this.
 func (c *thunderClient) createScopePermission(ctx context.Context, token, rsID, scope string) error {
-	resBody, err := c.doRequest(ctx, http.MethodPost, c.baseURL+"/resource-servers/"+rsID+"/resources", token,
-		map[string]string{"name": scope, "handle": scopeResourceHandle(scope), "permission": scope})
+	_, err := c.doRequest(ctx, http.MethodPost, c.baseURL+"/resource-servers/"+rsID+"/resources", token,
+		map[string]string{"name": scope, "handle": scope})
 	if err != nil {
 		return fmt.Errorf("thunder create scope resource %q: %w", scope, err)
 	}
-	var res ThunderResource
-	if err := json.Unmarshal(resBody, &res); err != nil {
-		return fmt.Errorf("thunder create scope resource decode %q: %w", scope, err)
-	}
-	_, err = c.doRequest(ctx, http.MethodPost, c.baseURL+"/resource-servers/"+rsID+"/resources/"+res.ID+"/actions", token,
-		map[string]string{"name": scope, "handle": scopeActionHandle, "permission": scope})
-	if err != nil {
-		return fmt.Errorf("thunder create scope action %q: %w", scope, err)
-	}
 	return nil
-}
-
-// scopeResourceHandle derives a Thunder-safe, collision-free resource handle from
-// a scope name. Scope names may contain the resource-server delimiter ':' (e.g.
-// "repo:read.all"), which is not valid in a handle, so disallowed characters are
-// replaced and a short hash of the full scope is appended to keep handles unique.
-func scopeResourceHandle(scope string) string {
-	var b strings.Builder
-	for _, r := range scope {
-		switch {
-		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9',
-			r == '.', r == '_', r == '-':
-			b.WriteRune(r)
-		default:
-			b.WriteRune('-')
-		}
-	}
-	sum := sha256.Sum256([]byte(scope))
-	return b.String() + "-" + hex.EncodeToString(sum[:])[:8]
 }
 
 // ListUsersByOUId fetches users directly from Thunder's OU-scoped endpoint.
