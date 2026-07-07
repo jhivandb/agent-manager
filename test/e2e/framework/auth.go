@@ -40,7 +40,8 @@ type tokenResponse struct {
 // (v0.44+) issues and what RBAC checks — i.e. Permission.Scope() in
 // agent-manager-service/rbac/permissions.go; the IDP grants only the ones the
 // client app is actually allowed, so requesting the superset is safe.
-const ampScopes = "amp:agent-kind:create amp:agent-kind:delete amp:agent-kind:read amp:agent-kind:update " +
+const ampScopes = "amp:agent-identity:create amp:agent-identity:delete amp:agent-identity:read amp:agent-identity:update " +
+	"amp:agent-kind:create amp:agent-kind:delete amp:agent-kind:read amp:agent-kind:update " +
 	"amp:agent:api-key-manage amp:agent:build amp:agent:create amp:agent:delete amp:agent:deploy-non-production " +
 	"amp:agent:deploy-production amp:agent:promote amp:agent:read amp:agent:rollback amp:agent:suspend " +
 	"amp:agent:token-manage amp:agent:update amp:catalog:read amp:data-plane:read " +
@@ -60,6 +61,7 @@ const ampScopes = "amp:agent-kind:create amp:agent-kind:delete amp:agent-kind:re
 	"amp:org:assign-role amp:org:invite-member amp:org:manage-idp amp:org:manage-service-account amp:org:modify-settings amp:org:remove-member amp:org:view " +
 	"amp:project:create amp:project:delete amp:project:read amp:project:update amp:repository:read " +
 	"amp:role:create amp:role:delete amp:role:read amp:role:update " +
+	"amp:scope:create amp:scope:delete amp:scope:read amp:scope:update " +
 	"amp:profile:read amp:profile:update-attributes"
 
 // FetchToken obtains an OAuth2 access token from the Thunder IDP using the

@@ -267,6 +267,14 @@ thunder:
       - "amp:repository:read"
       - "amp:profile:read"
       - "amp:profile:update-attributes"
+      - "amp:scope:create"
+      - "amp:scope:read"
+      - "amp:scope:update"
+      - "amp:scope:delete"
+      - "amp:agent-identity:read"
+      - "amp:agent-identity:create"
+      - "amp:agent-identity:update"
+      - "amp:agent-identity:delete"
     configMap:
       name: amp-thunder-bootstrap
       files:
