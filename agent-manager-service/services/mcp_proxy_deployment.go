@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 
@@ -42,6 +43,11 @@ const (
 	mcpBackendAuthPolicyName        = mcpSetHeadersPolicyName
 	mcpBackendAuthPolicyVersion     = "v1"
 	mcpBackendAuthPolicyDisplayName = "Backend Authentication Header"
+	mcpAuthPolicyName               = "mcp-auth"
+	mcpAuthPolicyVersion            = "v1"
+	mcpAuthzPolicyName              = "mcp-authz"
+	mcpAuthzPolicyVersion           = "v1"
+	mcpIdentityIssuerKeyManager     = "ThunderKeyManager"
 )
 
 type mcpPolicyMergeStrategy string
@@ -424,6 +430,7 @@ func (s *MCPProxyService) buildMCPProxyDeploymentYAML(proxy *models.MCPProxy) (*
 	if err != nil {
 		return nil, err
 	}
+	policies = appendMCPIdentityAuthPolicies(policies, proxy.Configuration.Security, proxy.Configuration.ToolScopeBindings)
 	policies = appendMCPBackendAuthPolicy(policies, upstreamAuth)
 	policies = mergeMCPPoliciesForDeployment(normalizeMCPPoliciesForDeployment(policies))
 	handle := proxy.Handle
@@ -520,6 +527,59 @@ func appendMCPAPIKeyAuthPolicy(policies []models.MCPPolicy, security *models.Sec
 		},
 	})
 	return out, nil
+}
+
+// appendMCPIdentityAuthPolicies emits the Agent Identity gateway policies for a
+// flattened per-environment artifact: mcp-auth (JWT validation against the
+// ThunderKeyManager key manager; requiredScopes is metadata advertisement only)
+// and mcp-authz (per-tool requiredScopes enforcement). Tools without bindings get
+// no rule — gateway default-permit means authenticated-only. Tool-rule order follows
+// the bindings slice (storage preserves the client's order).
+func appendMCPIdentityAuthPolicies(policies []models.MCPPolicy, security *models.SecurityConfig, bindings []models.MCPToolScopeBinding) []models.MCPPolicy {
+	if security == nil || !isBoolTrue(security.Enabled) ||
+		security.Identity == nil || !isBoolTrue(security.Identity.Enabled) {
+		return policies
+	}
+
+	scopeSet := map[string]struct{}{}
+	toolRules := make([]map[string]interface{}, 0, len(bindings))
+	for _, b := range bindings {
+		if strings.TrimSpace(b.Tool) == "" || len(b.Scopes) == 0 {
+			continue
+		}
+		scopes := make([]string, 0, len(b.Scopes))
+		for _, sc := range b.Scopes {
+			if sc == "" {
+				continue
+			}
+			scopes = append(scopes, sc)
+			scopeSet[sc] = struct{}{}
+		}
+		if len(scopes) == 0 {
+			continue
+		}
+		toolRules = append(toolRules, map[string]interface{}{"name": b.Tool, "requiredScopes": scopes})
+	}
+
+	authParams := map[string]interface{}{
+		"issuers": []interface{}{mcpIdentityIssuerKeyManager},
+	}
+	if len(scopeSet) > 0 {
+		union := make([]string, 0, len(scopeSet))
+		for sc := range scopeSet {
+			union = append(union, sc)
+		}
+		sort.Strings(union)
+		authParams["requiredScopes"] = union
+	}
+
+	out := make([]models.MCPPolicy, 0, len(policies)+2)
+	out = append(out, policies...)
+	out = append(out, models.MCPPolicy{Name: mcpAuthPolicyName, Version: mcpAuthPolicyVersion, Params: authParams})
+	if len(toolRules) > 0 {
+		out = append(out, models.MCPPolicy{Name: mcpAuthzPolicyName, Version: mcpAuthzPolicyVersion, Params: map[string]interface{}{"tools": toolRules}})
+	}
+	return out
 }
 
 func normalizeMCPPoliciesForDeployment(policies []models.MCPPolicy) []models.MCPPolicy {

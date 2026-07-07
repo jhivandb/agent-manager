@@ -21,6 +21,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/stretchr/testify/assert"
 	"gopkg.in/yaml.v3"
 
 	"github.com/wso2/agent-manager/agent-manager-service/models"
@@ -664,6 +665,64 @@ func TestNormalizeMCPUpstreamURLForDeployment(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestAppendMCPIdentityAuthPolicies covers the Agent Identity policy emission:
+// mcp-auth (with the pinned issuer and a sorted scope union) plus per-tool mcp-authz.
+func TestAppendMCPIdentityAuthPolicies(t *testing.T) {
+	enabled := true
+	identity := &models.SecurityConfig{Enabled: &enabled, Identity: &models.IdentitySecurity{Enabled: &enabled}}
+	bindings := []models.MCPToolScopeBinding{
+		{Tool: "list_repos", Scopes: []string{"repo:read.all"}},
+		{Tool: "create_issue", Scopes: []string{"repo:write.all", "repo:read.all"}},
+	}
+
+	t.Run("disabled security emits nothing", func(t *testing.T) {
+		out := appendMCPIdentityAuthPolicies(nil, nil, bindings)
+		assert.Empty(t, out)
+	})
+
+	t.Run("api-key security emits nothing", func(t *testing.T) {
+		sec := &models.SecurityConfig{Enabled: &enabled, APIKey: &models.APIKeySecurity{Enabled: &enabled}}
+		assert.Empty(t, appendMCPIdentityAuthPolicies(nil, sec, bindings))
+	})
+
+	t.Run("identity mode emits mcp-auth with sorted scope union and per-tool mcp-authz", func(t *testing.T) {
+		out := appendMCPIdentityAuthPolicies(nil, identity, bindings)
+		assert.Len(t, out, 2)
+		assert.Equal(t, "mcp-auth", out[0].Name)
+		assert.Equal(t, "v1", out[0].Version)
+		assert.Equal(t, []interface{}{"ThunderKeyManager"}, out[0].Params["issuers"])
+		assert.Equal(t, []string{"repo:read.all", "repo:write.all"}, out[0].Params["requiredScopes"])
+		assert.Equal(t, "mcp-authz", out[1].Name)
+		assert.Equal(t, "v1", out[1].Version)
+		tools := out[1].Params["tools"].([]map[string]interface{})
+		assert.Len(t, tools, 2)
+		assert.Equal(t, "list_repos", tools[0]["name"])
+		assert.Equal(t, "create_issue", tools[1]["name"])
+	})
+
+	t.Run("no bindings: mcp-auth only, no requiredScopes, no mcp-authz", func(t *testing.T) {
+		out := appendMCPIdentityAuthPolicies(nil, identity, nil)
+		assert.Len(t, out, 1)
+		assert.Equal(t, "mcp-auth", out[0].Name)
+		_, hasScopes := out[0].Params["requiredScopes"]
+		assert.False(t, hasScopes)
+	})
+
+	t.Run("binding with empty scopes list is skipped", func(t *testing.T) {
+		out := appendMCPIdentityAuthPolicies(nil, identity, []models.MCPToolScopeBinding{{Tool: "x", Scopes: nil}})
+		assert.Len(t, out, 1) // auth only — unbound tools stay authenticated-only
+	})
+
+	t.Run("preserves and appends to existing policies", func(t *testing.T) {
+		existing := []models.MCPPolicy{{Name: "log-message", Version: "v1"}}
+		out := appendMCPIdentityAuthPolicies(existing, identity, bindings)
+		assert.Len(t, out, 3)
+		assert.Equal(t, "log-message", out[0].Name)
+		assert.Equal(t, "mcp-auth", out[1].Name)
+		assert.Equal(t, "mcp-authz", out[2].Name)
+	})
 }
 
 func TestMCPProxyEnvArtifactHandleUsesFullCompactedEnvironmentUUID(t *testing.T) {
