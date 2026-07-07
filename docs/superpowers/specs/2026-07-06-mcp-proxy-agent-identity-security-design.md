@@ -1,9 +1,14 @@
 # MCP Proxy Agent-Identity Security — Design
 
 Date: 2026-07-06 (amended 2026-07-06: role/group grants, first-class scopes,
-per-env proxy security, per-agent routes removed)
+per-env proxy security, per-agent routes removed; amended 2026-07-07:
+reconciled to the finalized restructure model delivered by PR #1258 —
+capabilities/policies/security/tool-bindings are all per-environment, security
+is expressed by a `SecurityConfig` variant rather than a stored mode enum, and
+per-agent mapping rows are retained as the API-key issuance vehicle)
 Status: Approved (brainstorm concluded; ready for implementation planning)
-Branch context: builds on `task/agent-id-2a` (per-agent Thunder identity provisioning)
+Branch context: builds on `task/agent-id-2a` (per-agent Thunder identity
+provisioning); restructure prerequisites delivered by PR #1258 (`mcp-proxy-ux-revamp`)
 
 ## 1. Problem
 
@@ -17,8 +22,14 @@ OAuth scopes carried in that token.
 
 This spec adds an **Agent Identity** security mode to MCP proxies:
 
-- Platform operators define **org-global scopes** in a new catalog.
-- Proxy authors bind catalog scopes (many-to-many) to the proxy's tools.
+- Platform operators define **org-global scopes** in a new catalog. Scopes are
+  **resource-agnostic**: the same scope entity can authorize an LLM provider and
+  an MCP tool. This spec consumes them for MCP tool bindings, but they are not
+  MCP-specific and the catalog is shared platform-wide.
+- Proxy authors bind catalog scopes (many-to-many) to a proxy environment's
+  tools. Bindings are **per environment**: they live in each environment's
+  configuration block alongside that environment's capabilities and security,
+  so different environments may carry different scope contracts.
 - Grants are expressed through **Thunder roles and groups**: a role carries
   scope permissions; roles are assigned to agents directly or to groups the
   agent belongs to. Agents, groups, and roles are managed in a new
@@ -28,24 +39,27 @@ This spec adds an **Agent Identity** security mode to MCP proxies:
   enforces the per-tool scope rules.
 
 The proxy exposure model is **one endpoint per environment**: every agent in
-an environment calls the same proxy route. There are no per-agent mapping
-routes. Security configuration is per environment on the proxy.
+an environment calls the same shared proxy artifact (one gateway artifact per
+configured environment). There are no per-agent gateway routes. Per-agent
+mapping rows still exist, but only to mint per-agent inbound API keys against
+the shared artifact in API-Key mode; Agent Identity mode mints no per-agent
+keys. Security configuration is per environment on the proxy.
 
 ## 2. Decisions (from brainstorm Q&A, both sessions)
 
 | Topic | Decision |
 |---|---|
-| Scope model | First-class org-global entities in a new AMS `mcp_scopes` table (the catalog); proxies and roles reference them by name |
-| Scope authoring UI | Dedicated Scopes tab in the Agent Identity section (org-global; ignores the env picker) |
-| Tool binding | Proxy Security tab picker matches catalog scopes to `capabilities.tools`; post-creation only (tool discovery happens after create) |
-| Security modes | Per environment on the proxy: None / API Key / Agent Identity (mode is the only per-env part; scopes + bindings are proxy-global) |
+| Scope model | First-class, org-global, **resource-agnostic** entities in a new AMS `scopes` table (the catalog); the same scope can gate LLM providers and MCP tools. Proxy environments and roles reference them by name |
+| Scope authoring UI | Dedicated Scopes tab in the Agent Identity section (org-global, shared catalog; ignores the env picker) |
+| Tool binding | Security tab picker matches catalog scopes to the selected environment's `capabilities.tools`; stored **per environment** in that env's config block; post-creation only (tool discovery happens after create) |
+| Security modes | Per environment on the proxy: None / API Key / Agent Identity. There is no stored mode enum — mode is realized by which variant of the per-env `SecurityConfig` is populated (none, `apiKey`, or a new `identity`). Capabilities, policies, security, and tool bindings are **all** per-environment |
 | Grant mechanism | Thunder-native: roles → agents (direct) and roles → groups → agents; token scopes = union of both paths |
 | Grant management | Agent Identity console section (env picker; Scopes / Groups / Roles tabs), based on the identities section |
 | Grant storage | None in AMS — direct passthrough to the selected environment's Thunder via `EnvThunderResolver`, mirroring `identity_controller.go`'s passthrough to org Thunder. No desired-state rows, no reconciler |
-| Scope→Thunder provisioning | Lazy ensure at role save: AMS ensures the `amp-mcp-scopes` resource server + referenced permissions exist in that env-Thunder, then writes the role |
-| Per-agent routes | Removed (prerequisite restructure); one shared endpoint per environment per proxy |
-| Proxy deployment | Environment-driven: deploy into each env with a per-env config entry, resolving the env's gateway (`resolveGatewayForEnvironment`); explicit gateway-ID selection goes away |
-| API-key mode on shared endpoint | **Open — owned by the restructure work, resolved before this task starts.** Evidence: `apiKeyBroadcaster.broadcastCreate` already supports multiple named keys per artifact, so per-agent keys on a shared route look feasible |
+| Scope→Thunder provisioning | Lazy ensure at role save: AMS ensures the `amp-scopes` resource server + referenced permissions exist in that env-Thunder, then writes the role |
+| Per-agent routes | Collapsed into one shared gateway artifact per environment (`MCPEnvironmentConfig.ArtifactUUID`). The `mcp_proxy_mappings` / `env_agent_mcp_mapping` rows are **retained** and repurposed: they mint per-agent inbound API keys against the shared artifact (API-Key mode only) and drive per-agent env-var injection |
+| Proxy deployment | Environment-driven: `deployMCPProxyEnvironments` deploys one artifact per configured environment, resolving the env's gateway via `resolveGatewayForEnvironment`; explicit gateway-ID selection is gone |
+| API-key mode on shared endpoint | **Resolved by PR #1258**: per-agent named keys minted against the shared per-env artifact — `apiID = MCPEnvironmentConfig.ArtifactUUID` (the gateway-facing artifact), `storageUUID` = per-agent key-holder — so many agents share one gateway artifact with per-agent issuance/revocation |
 | Gateway policies | Existing fixed-schema `mcp-auth` v1 + `mcp-authz` v1 |
 | JWKS trust | Gateway-level `config.toml` key managers (already registered by `add-environment.sh` as `ThunderKeyManager`); no JWKS URLs in deployment YAML |
 | Issuer selection | Always `ThunderKeyManager` in v1 (no picker) |
@@ -54,7 +68,7 @@ routes. Security configuration is per environment on the proxy.
 | Token acquisition by agent | Out of scope (pod client-credential injection is separate work) |
 | External agents | Supported identically (they claim credentials and fetch tokens via the external token URL) |
 
-Superseded decisions from the original draft (removed machinery):
+Superseded decisions from earlier drafts (removed machinery):
 
 - `agent_mcp_scope_grants` table, grant reconciler, and synthetic
   `amp-agent-<project>-<agent>` roles — replaced by user-managed roles/groups.
@@ -63,32 +77,51 @@ Superseded decisions from the original draft (removed machinery):
 - Per-agent grant endpoints and the proxy-scanning scope-catalog endpoint —
   replaced by catalog CRUD + Thunder passthrough routes.
 - Per-agent mapping route policy emission and per-mapping key mint/inject —
-  per-agent routes no longer exist.
+  per-agent gateway routes no longer exist; the shared per-env artifact is the
+  only route, and per-agent keys are minted against it.
+- **Proxy-global scopes and tool bindings** (from the 2026-07-06 amendment) —
+  superseded by per-environment bindings, because PR #1258's finalized model
+  stores capabilities/policies/security per environment and leaves no
+  proxy-global place for a blueprint proxy to carry them.
+- **A per-env security *mode enum*** (from the 2026-07-06 amendment) —
+  superseded: PR #1258 reuses the LLM-style `SecurityConfig` (`{Enabled, APIKey}`),
+  so mode is expressed by the populated variant, extended here with `identity`.
 
-## 3. Prerequisites and assumptions (delivered separately)
+## 3. The delivered restructure (PR #1258)
 
-This spec builds on an MCP proxy restructure that is **parallel work, not
-designed here**. Assumptions this spec makes about it:
+This spec builds on the MCP proxy restructure delivered by PR #1258
+(`mcp-proxy-ux-revamp`, "Mcp proxy ux revamp"). Its shape, as built, that this
+spec depends on:
 
-1. `mcp_proxies` gains per-environment policy/security configuration; the
-   per-env entry carries (at least) a security mode: None / API Key /
-   Agent Identity. This spec defines the Agent Identity variant's shape and
-   emission; where the per-env config lives (column/table) is the
-   restructure's call.
-2. One proxy endpoint per environment; `mcp_proxy_mappings` +
-   `env_agent_mcp_mapping`-driven per-agent routes are removed, including the
-   migration of live mappings, minted keys, and injected env vars.
-3. Deployment is environment-driven. **Flag for the restructure:**
-   `resolveGatewayForEnvironment` is an AI-first-preference heuristic with
-   documented wrong-gateway bugs and three fallback call sites in
-   `agent_configuration_service.go`; it becomes the primary deployment driver
-   and needs hardening.
-4. API-key mode mechanics on the shared endpoint are resolved there (per-agent
-   named keys vs one shared key). This spec only requires that the per-env
-   mode enum reserves the API Key value.
-5. Attach remains the trigger for env-var injection: in identity mode the
-   agent pod receives only the proxy `url` env var (`buildMCPEnvVars` already
-   omits `apikey` when `secretRefName` is empty).
+1. `MCPProxyConfig` carries `Environments map[string]MCPEnvironmentConfig`
+   keyed by **environment UUID**. Each `MCPEnvironmentConfig` block holds that
+   environment's `Upstream` (single endpoint), `Policies`, `Capabilities`,
+   `Security`, and a stable `ArtifactUUID` (the one gateway artifact deployed
+   for that environment). The org-level proxy is a **blueprint** that deploys
+   nothing itself; the flat root-level fields exist only for the per-env
+   artifact the builder flattens out. There is **no stored security "mode"
+   field** — `Security` is the shared `{Enabled, APIKey}` `SecurityConfig`.
+2. **One deployed gateway artifact per environment** (`ArtifactUUID`), reachable
+   at the proxy's shared context. The `mcp_proxy_mappings` /
+   `env_agent_mcp_mapping` rows are **not removed** — they are retained and
+   reference the shared artifact to mint per-agent inbound API keys and inject
+   env vars. There is **no migration/backfill**: pre-existing proxies must be
+   re-saved into the UUID-keyed `environments` shape before the new deployment
+   behavior applies (breaking change owned by the restructure).
+3. Deployment is environment-driven: `deployMCPProxyEnvironments` iterates the
+   configured environments and resolves each env's gateway via
+   `resolveGatewayForEnvironment(envUUID, orgName)`, skipping envs with no
+   active gateway (`errNoActiveGatewayForEnvironment`). **Caveat this spec
+   inherits:** `resolveGatewayForEnvironment` is still an AI-first heuristic
+   (now env-scoped via an `EnvironmentID` filter) and is duplicated on both
+   `MCPProxyService` and `agentConfigurationService`; the wrong-gateway concern
+   is narrowed but not eliminated.
+4. API-key mechanics on the shared endpoint are resolved (see the §2 table):
+   per-agent named keys minted against the shared artifact
+   (`createMCPMappingAPIKey(apiID=ArtifactUUID, storageUUID=per-agent)`).
+5. Attach remains the trigger for env-var injection: in identity mode the agent
+   pod receives only the proxy `url` env var (`buildMCPEnvVars` /
+   `buildEmptyMCPEnvVars` omit `apikey` when the mapping has no `secretRefName`).
 
 Existing machinery this design reuses (no changes needed):
 
@@ -104,12 +137,15 @@ Existing machinery this design reuses (no changes needed):
 - `EnvThunderResolver` resolves a ready ThunderClient per org+environment.
 - `identity_controller.go` is the passthrough pattern (routes → thundersvc,
   no AMS DB state) the new agent-identity routes copy.
+- `appendMCPAPIKeyAuthPolicy` and the per-env artifact flatten/deploy path
+  (`buildMCPProxyEnvArtifact` → `generateMCPProxyDeploymentYAML`) are the
+  insertion points for identity policy emission (§6).
 
 ## 4. Architecture
 
 ```
                     Agent Identity console section (env picker)
-                    Scopes tab ──────────► AMS mcp_scopes table (org-global catalog)
+                    Scopes tab ──────────► AMS scopes table (org-global, resource-agnostic catalog)
                     Groups/Roles tabs ───► env-Thunder (direct passthrough,
                                             EnvThunderResolver; role save
                                             lazy-ensures scope permissions)
@@ -118,28 +154,34 @@ agent pod ──client_credentials──► env-Thunder
     │        (JWT scopes = union of direct-role and group-role permissions)
     │  Bearer JWT
     ▼
-dataplane gateway (per env) — ONE proxy route per environment
+dataplane gateway (per env) — ONE shared proxy artifact per environment
     ├─ mcp-auth v1: validates JWT via ThunderKeyManager (config.toml key manager)
-    ├─ mcp-authz v1: per-tool requiredScopes from the proxy's global tool bindings
+    ├─ mcp-authz v1: per-tool requiredScopes from THAT ENVIRONMENT's tool bindings
     ▼
 upstream MCP server
 ```
 
 Control plane (AMS) responsibilities:
 
-1. Own the org-global scope catalog (`mcp_scopes` CRUD; deletion blocked while
-   bound by any proxy).
-2. Store tool→scope bindings on the proxy (proxy-global) and the per-env
-   security mode (restructure's per-env config).
-3. Emit `mcp-auth`/`mcp-authz` policies in the deployment YAML for each
-   environment whose mode is Agent Identity.
+1. Own the org-global, resource-agnostic scope catalog (`scopes` CRUD; deletion
+   blocked while referenced by any resource binding — MCP proxy tool bindings in
+   this spec, LLM-provider bindings when those land).
+2. Store tool→scope bindings and the security mode **per environment** (inside
+   each `MCPEnvironmentConfig`, keyed by env UUID).
+3. Emit `mcp-auth`/`mcp-authz` policies into each environment's flattened
+   gateway artifact when that environment's security is Agent Identity.
 4. Proxy agent-identity group/role operations to the selected env-Thunder;
-   on role save, ensure the `amp-mcp-scopes` resource server and referenced
+   on role save, ensure the `amp-scopes` resource server and referenced
    permissions exist there first.
 
 ## 5. Data model
 
-### 5.1 New table `mcp_scopes` (org-global catalog)
+### 5.1 New table `scopes` (org-global, resource-agnostic catalog)
+
+The catalog is a shared, org-global platform primitive: a scope is not
+MCP-specific, and the same entity can authorize LLM providers and MCP tools.
+This spec implements only the MCP-tool binding + gateway-enforcement side;
+other resource bindings are separate work against the same catalog.
 
 | Column | Notes |
 |---|---|
@@ -149,41 +191,70 @@ Control plane (AMS) responsibilities:
 | `description` | optional |
 | `created_at`, `updated_at` | timestamps |
 
-Deletion rule: rejected with 409 while any MCP proxy's tool bindings reference
-the scope. Thunder roles referencing a deleted scope keep the stale permission
+Deletion rule: rejected with 409 while referenced by any resource binding (MCP
+proxy environment tool bindings in this spec's scope; LLM-provider bindings when
+those land). Thunder roles referencing a deleted scope keep the stale permission
 string — harmless (no gateway rule requires it once unbound) and warn-only in
 the UI.
 
-### 5.2 SecurityConfig extension (identity mode shape)
+### 5.2 Per-environment security + bindings (identity mode shape)
+
+Security and bindings live in the per-environment blueprint block that PR #1258
+introduced. `SecurityConfig` is the shared LLM-style struct; Agent Identity adds
+a third, mutually-exclusive variant, and the per-env block gains the tool
+bindings:
 
 ```go
-// Per-env security entry (location owned by the restructure) selects the mode:
-// none | apiKey | identity.
+// Shared SecurityConfig today (models/llm_provider.go), reused as the per-env
+// MCP security block (MCPEnvironmentConfig.Security):
+//   type SecurityConfig struct {
+//       Enabled *bool           `json:"enabled,omitempty"`
+//       APIKey  *APIKeySecurity `json:"apiKey,omitempty"`
+//   }
 
-// Proxy-global, stored in MCPProxyConfig (JSONB configuration column):
+// Agent Identity adds a third variant. Mode is implied by which of APIKey /
+// Identity is populated (both nil / Enabled false => None). This is a SHARED
+// security primitive: LLM providers can select the Identity variant too — it is
+// not MCP-specific.
+type IdentitySecurity struct {
+    Enabled *bool `json:"enabled,omitempty"`
+    // v1 pins the issuer to ThunderKeyManager, so no issuer field yet.
+}
+// SecurityConfig gains:
+//   Identity *IdentitySecurity `json:"identity,omitempty"`
+
+// Per-environment tool bindings, stored in each MCPEnvironmentConfig alongside
+// that env's Capabilities and Security:
 type MCPToolScopeBinding struct {
     Tool   string   `json:"tool"`
-    Scopes []string `json:"scopes"` // names from the org mcp_scopes catalog
+    Scopes []string `json:"scopes"` // names from the org-global scopes catalog
 }
+// MCPEnvironmentConfig gains:
+//   ToolScopeBindings []MCPToolScopeBinding `json:"toolScopeBindings,omitempty"`
 ```
 
-Tool bindings are proxy-global: the same tool→scope contract applies in every
-environment; only the mode varies per env.
+Tool bindings are **per-environment**: an environment binds scopes against its
+own `Capabilities.Tools`. Different environments may carry different contracts
+(e.g. prod stricter than dev); this matches the finalized per-env grain of
+capabilities/policies/security.
 
-Validation on proxy create/update:
+Validation on proxy create/update (per environment):
 
 - Every binding scope must exist in the org catalog (400 otherwise).
-- Bindings whose `Tool` is absent from current `capabilities.tools` are
-  accepted (upstream tool lists drift); the console flags them.
-- Setting an environment's mode to Agent Identity is rejected if that env's
+- Bindings whose `Tool` is absent from that environment's current
+  `capabilities.tools` are accepted (upstream tool lists drift); the console
+  flags them.
+- Setting an environment's security to Agent Identity is rejected if that env's
   gateway does not report both `mcp-auth` and `mcp-authz` via the existing MCP
   policy-availability mechanism.
 
 ## 6. Deployment YAML emission
 
 `appendMCPIdentityAuthPolicies` beside `appendMCPAPIKeyAuthPolicy` in
-`services/mcp_proxy_deployment.go`, applied per environment in the
-restructure's env-driven build when that env's mode is Agent Identity:
+`services/mcp_proxy_deployment.go`, invoked while the per-environment artifact
+is flattened and deployed (`buildMCPProxyEnvArtifact` →
+`generateMCPProxyDeploymentYAML`) for each environment whose `Security` variant
+is Agent Identity. It reads that environment's own `ToolScopeBindings`:
 
 ```yaml
 policies:
@@ -192,13 +263,13 @@ policies:
     params:
       issuers:
         - ThunderKeyManager
-      requiredScopes: [<union of all bound scopes>]  # metadata advertisement only
+      requiredScopes: [<union of this env's bound scopes>]  # metadata advertisement only
   - name: mcp-authz
     version: v1
     params:
       tools:
         - name: <tool>
-          requiredScopes: [<scopes bound to this tool>]
+          requiredScopes: [<scopes bound to this tool in this env>]
         # one entry per tool with at least one binding; unbound tools omitted
 ```
 
@@ -209,9 +280,9 @@ policies:
   but not enforced (per policy docs); enforcement is `mcp-authz`.
 - Tools without bindings get no `mcp-authz` rule → gateway default-permit →
   callable by any agent with a valid JWT (decision: authenticated-only).
-- If no tool has any binding, the `mcp-authz` policy and the `requiredScopes`
-  param are omitted entirely — identity mode then means "any valid
-  env-Thunder JWT".
+- If an environment has no tool binding, the `mcp-authz` policy and the
+  `requiredScopes` param are omitted entirely — identity mode then means "any
+  valid env-Thunder JWT" for that environment.
 - Existing policy normalize/merge machinery
   (`normalizeMCPPoliciesForDeployment`, `mergeMCPPoliciesForDeployment`)
   applies unchanged; `mcp-auth`/`mcp-authz` use the default override merge
@@ -223,11 +294,11 @@ policies:
 
 Per environment's Thunder instance, all in the default OU:
 
-- **Resource server** `amp-mcp-scopes`: ensured lazily on role save; every
+- **Resource server** `amp-scopes`: ensured lazily on role save; every
   scope referenced by the role is ensured as a permission under it before the
   role is written.
 - **Roles**: user-created and user-named (no AMS-generated names). A role's
-  permissions are catalog scope strings under `amp-mcp-scopes`. Assignees are
+  permissions are catalog scope strings under `amp-scopes`. Assignees are
   agents (`AssignmentEntry{Type: "agent", ID: ThunderAgentID}`) and groups
   (`Type: "group"`).
 - **Groups**: user-created; members are agents (`GroupMember{Type: "agent"}`).
@@ -263,13 +334,13 @@ operator retries after provisioning lands.
 ## 8. API surface (spec-first per add-api-resource workflow)
 
 1. **Scope catalog CRUD**:
-   - `GET /orgs/{orgName}/mcp-scopes` → list (this is the picker source for
-     both the role editor and the proxy tool-binding picker)
-   - `POST /orgs/{orgName}/mcp-scopes` `{name, description?}`
-   - `PUT /orgs/{orgName}/mcp-scopes/{scopeName}` (description only; rename =
+   - `GET /orgs/{orgName}/scopes` → list (this is the picker source for
+     both the role editor and the per-env tool-binding picker)
+   - `POST /orgs/{orgName}/scopes` `{name, description?}`
+   - `PUT /orgs/{orgName}/scopes/{scopeName}` (description only; rename =
      delete + create, subject to the deletion rule)
-   - `DELETE /orgs/{orgName}/mcp-scopes/{scopeName}` → 409 while bound by any
-     proxy
+   - `DELETE /orgs/{orgName}/scopes/{scopeName}` → 409 while bound by any
+     proxy environment
 2. **Agent-identity passthrough routes**, mirroring the `/identities/*` route
    shapes, controller modeled on `identity_controller.go` but resolving the
    client via `EnvThunderResolver(org, env)`:
@@ -279,18 +350,18 @@ operator retries after provisioning lands.
    - `GET .../groups/{groupId}/roles`
    - `GET|POST /orgs/{orgName}/environments/{envName}/agent-identities/roles`
    - `GET|PUT|DELETE .../agent-identities/roles/{roleId}` (PUT reconciles
-     permissions after lazy-ensuring them under `amp-mcp-scopes`)
+     permissions after lazy-ensuring them under `amp-scopes`)
    - `GET .../roles/{roleId}/assignments`,
      `POST .../roles/{roleId}/assignments/add` and `/assignments/remove`
      (agent and group assignees)
    - `GET /orgs/{orgName}/environments/{envName}/agent-identities/agents` →
      agents in the org with their Thunder binding status + `ThunderAgentID`
      for that env (picker source)
-3. **Proxy DTO**: extend the MCP proxy schema in
-   `agent-manager-service/docs/api_v1_openapi.yaml` with `toolScopeBindings`
-   (proxy-global) and the per-env identity mode value (slotting into the
-   restructure's per-env security shape); regenerate spec server code, `am`
-   CLI client, and console types.
+3. **Proxy DTO**: extend the `MCPEnvironmentConfig` schema in
+   `agent-manager-service/docs/api_v1_openapi.yaml` with per-env
+   `toolScopeBindings` and an `identity` variant on its `security`; the DTO
+   already exposes `environments` keyed by env UUID. Regenerate spec server
+   code, the `am` CLI client, and console types.
 4. **RBAC**: new permission entries per route in `rbac/permissions.go`,
    following the per-route-authz workflow.
 
@@ -298,12 +369,19 @@ operator retries after provisioning lands.
 
 ### 9.1 MCP proxy Security tab (`MCPProxySecurityTab.tsx`)
 
+The tab already renders per environment (driven by `selectedEnvironmentId` +
+the env's `MCPEnvironmentConfig`), with `authenticationType` currently
+`"apiKey" | ""`. Extend it:
+
 - Per-environment mode selector: **None | API Key | Agent Identity**
-  (rendered within the restructure's per-env security layout).
-- Tool binding table (proxy-global, shown once, not per env): one row per
-  tool from `capabilities.tools`, each with a multi-select fed by
-  `GET /mcp-scopes`. Unbound tools show an "authenticated only" hint.
-- Warning badges for bindings referencing tools that no longer exist.
+  (`authenticationType` gains `"identity"`, mapping to the env's
+  `security.identity` variant).
+- Tool binding table **for the selected environment**: one row per tool from
+  that env's `capabilities.tools`, each with a multi-select fed by
+  `GET /scopes`. Unbound tools show an "authenticated only" hint. Shown
+  only when the env's mode is Agent Identity.
+- Warning badges for bindings referencing tools that no longer exist in that
+  environment's capabilities.
 - Creation form (`AddMCPProxyForm`) unchanged — bindings are configured
   post-creation on the Security tab (tool discovery happens after create).
 
@@ -312,8 +390,9 @@ operator retries after provisioning lands.
 Environment picker at the top; three tabs:
 
 - **Scopes** (org-global; unaffected by the env picker, labeled as such):
-  catalog CRUD table — name, description, "in use by N proxies" indicator,
-  delete disabled while bound.
+  catalog CRUD table — name, description, "in use by N bindings" indicator
+  (MCP proxy tool bindings today, other resources later), delete disabled while
+  bound.
 - **Groups** (env-scoped): list/create/edit pages copied from
   `GroupsPage`/`GroupEditPage` patterns; members picker lists agents (with
   binding status, un-provisioned disabled); role assignment on the group.
@@ -329,40 +408,45 @@ Uses the two-file API pattern (`apis/` + `hooks/`) per add-console-api-feature.
   surfaced error (no queue, no reconciler); the operator retries. Same
   behavior the identities section has for org Thunder today.
 - **Scope deletion attempted while bound**: 409 with the binding proxies
-  listed. After unbinding, deletion succeeds; Thunder roles keep the stale
-  permission string (inert; warn-only).
-- **Tool removed upstream**: its binding remains in config (flagged in UI);
-  the emitted `mcp-authz` rule for a nonexistent tool never matches and is
-  inert.
+  (and environments) listed. After unbinding, deletion succeeds; Thunder roles
+  keep the stale permission string (inert; warn-only).
+- **Tool removed upstream**: its binding remains in that env's config (flagged
+  in UI); the emitted `mcp-authz` rule for a nonexistent tool never matches and
+  is inert.
 - **Role save referencing a scope deleted mid-edit**: lazy ensure re-creates
   nothing from thin air — catalog membership is validated at role save (400).
 - **Agent not provisioned in env**: role/group assignment fails visibly;
   pickers pre-empt by disabling those agents.
 - **New environment added later**: starts with no groups/roles (per-env by
-  design); identity provisioning for the new env is covered by the existing
-  `ProvisionForEnvironmentIfMissing` hook.
+  design) and no binding block until configured; identity provisioning for the
+  new env is covered by the existing `ProvisionForEnvironmentIfMissing` hook.
 - **Gateway missing policies**: setting an env's mode to Agent Identity fails
   validation for gateways that don't report `mcp-auth` + `mcp-authz`.
 - **Revoked/rotated agent secret**: irrelevant to grants — role/group
   membership is by Thunder agent ID, which is stable across secret rotation.
 - **Mixed modes across envs**: an agent deployed to env A (identity) and
   env B (API key) gets `url`-only vars for A and `url`+`apikey` for B —
-  per-env env-var branching already exists in the attach flow.
+  per-env env-var branching already exists in the attach flow, and each env's
+  `SecurityConfig` variant is independent.
+- **Pre-existing proxy not yet re-saved**: without a UUID-keyed `environments`
+  block there is nowhere to set identity mode or bindings; the proxy must be
+  re-saved into the new shape first (no backfill — inherited from PR #1258).
 
 ## 11. Testing
 
 - **Unit** (per add-service-unit-test conventions: moq fakes, no build tags):
   - Scope catalog: CRUD, name validation, deletion 409 while bound.
-  - Proxy validation: bindings vs catalog (400), stale-tool tolerance,
+  - Proxy validation: per-env bindings vs catalog (400), stale-tool tolerance,
     identity-mode gateway policy-availability check.
-  - YAML emission: identity policies present only for identity-mode envs,
-    union `requiredScopes`, per-tool rules, no-bindings omission.
+  - YAML emission: identity policies present only for identity-mode envs, per
+    environment's own union `requiredScopes`, per-tool rules, no-bindings
+    omission.
   - Agent-identity controller: passthrough mapping, lazy-ensure ordering
     (resource server + permissions before role write), env resolution errors
     surfaced, RBAC.
 - **E2E** (`test/e2e/tests/mcpproxy`): identity-secured proxy lifecycle —
-  create scopes, create proxy + bind tools, set env mode to Agent Identity,
-  attach agent, create role (scopes) + assign agent, obtain a
+  create scopes, create proxy, set an environment's mode to Agent Identity +
+  bind its tools, attach agent, create role (scopes) + assign agent, obtain a
   client_credentials token from env-Thunder, invoke a bound tool (200), an
   ungranted bound tool (403), no-token (401); repeat the granted-tool case
   with the role assigned via a group instead of directly.
@@ -370,10 +454,12 @@ Uses the two-file API pattern (`apis/` + `hooks/`) per add-console-api-feature.
 ## 12. Out of scope
 
 - The MCP proxy restructure itself (per-env config storage, env-driven
-  deployment, per-agent route removal + migration) — prerequisite, delivered
-  separately (Section 3).
-- API-key mode mechanics on the shared endpoint — resolved by the restructure
-  owner before implementation starts.
+  deployment, per-agent route collapse) — delivered by PR #1258 (Section 3).
+- API-key mode mechanics on the shared endpoint — resolved by PR #1258
+  (per-agent named keys minted against the shared per-env artifact).
+- Migration/backfill of pre-existing proxies into the UUID-keyed `environments`
+  shape — owned by the restructure; this spec inherits the "re-save required"
+  behavior.
 - Token acquisition inside the agent pod (client-credential injection is
   separate, parallel work).
 - `tools/list` filtering by scope (gateway policy behavior).
@@ -382,7 +468,14 @@ Uses the two-file API pattern (`apis/` + `hooks/`) per add-console-api-feature.
   policy schema supports the rest later).
 - Cross-environment replication of groups/roles (per-env definition is
   deliberate).
-- LLM provider/proxy identity security (MCP only).
+- Hardening/deduplicating `resolveGatewayForEnvironment` (AI-first heuristic
+  duplicated across two services) — an inherited restructure concern, not
+  addressed here.
+- LLM-provider scope enforcement. The scope catalog and the Identity
+  `SecurityConfig` variant are shared primitives (a scope can gate LLM providers
+  too, and LLM providers can select the Identity variant), but this spec
+  implements only MCP tool binding + gateway enforcement; wiring scopes into
+  LLM-provider authorization is separate, parallel work.
 
 ## 13. Implementation notes
 
@@ -390,9 +483,13 @@ Uses the two-file API pattern (`apis/` + `hooks/`) per add-console-api-feature.
   per-route authz). Console work follows `add-console-api-feature`.
 - Generators: `make am-gen-client`, `cd agent-manager-service && make codegen
   && make fmt`, `make spec`, wire if DI changes.
-- New migration for `mcp_scopes` under
-  `agent-manager-service/db_migrations/`.
+- New migration for the shared `scopes` catalog table under
+  `agent-manager-service/db_migrations/`. No migration is added for existing
+  MCP proxies (they re-save into the `environments` shape — inherited).
 - The agent-identity passthrough controller should share DTO mapping helpers
   with `identity_controller.go` where practical rather than duplicating them.
+- `Identity` lives on the shared `SecurityConfig` (models/llm_provider.go) and
+  is deliberately usable by both LLM providers and MCP proxies — not MCP-only;
+  keep the `apiKey`/`identity` variants mutually exclusive at validation.
 - Before building the Groups tab, run the Section 7.1 token verifications
   (a)–(c) against a live env-Thunder; (c) gates shipping groups.
