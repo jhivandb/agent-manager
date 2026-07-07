@@ -132,6 +132,7 @@ var controllerProviderSet = wire.NewSet(
 	controllers.NewGitSecretController,
 	controllers.NewIdentityController,
 	controllers.NewScopeController,
+	controllers.NewAgentIdentityController,
 )
 
 var testClientProviderSet = wire.NewSet(

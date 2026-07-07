@@ -52,6 +52,7 @@ var PredefinedRolePermissions = map[string][]Permission{
 		ObservabilityGuardrailMetric, ObservabilityInfraMetric,
 		RoleCreate, RoleRead, RoleUpdate, RoleDelete,
 		GroupCreate, GroupRead, GroupUpdate, GroupDelete,
+		AgentIdentityRead, AgentIdentityCreate, AgentIdentityUpdate, AgentIdentityDelete,
 		CatalogRead, RepositoryRead,
 		ProfileRead, ProfileUpdateAttributes,
 	},

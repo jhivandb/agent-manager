@@ -167,6 +167,7 @@ func InitializeAppParams(cfg *config.Config, db *gorm.DB, authProvider client.Au
 	identityController := controllers.NewIdentityController(identityClient)
 	scopeService := services.NewScopeService(scopeRepository, mcpProxyRepository)
 	scopeController := controllers.NewScopeController(scopeService)
+	agentIdentityController := controllers.NewAgentIdentityController(envThunderResolver, scopeRepository, agentThunderClientRepository)
 	monitorSchedulerService := services.NewMonitorSchedulerService(openChoreoClient, publisherCredentialProvisioner, logger, monitorExecutor, monitorRepository)
 	agentThunderReconcilerService := services.NewAgentThunderReconcilerService(agentThunderProvisioningService, agentThunderClientRepository, logger)
 	traceObserverSvcClient, err := ProvideTraceObserverClient(configConfig, authProvider)
@@ -203,6 +204,7 @@ func InitializeAppParams(cfg *config.Config, db *gorm.DB, authProvider client.Au
 		GitSecretController:              gitSecretController,
 		IdentityController:               identityController,
 		ScopeController:                  scopeController,
+		AgentIdentityController:          agentIdentityController,
 		MonitorScheduler:                 monitorSchedulerService,
 		AgentThunderReconciler:           agentThunderReconcilerService,
 		LLMTemplateStore:                 llmTemplateStore,
@@ -344,6 +346,7 @@ func InitializeTestAppParamsWithClientMocks(cfg *config.Config, db *gorm.DB, aut
 	identityController := controllers.NewIdentityController(identityClient)
 	scopeService := services.NewScopeService(scopeRepository, mcpProxyRepository)
 	scopeController := controllers.NewScopeController(scopeService)
+	agentIdentityController := controllers.NewAgentIdentityController(envThunderResolver, scopeRepository, agentThunderClientRepository)
 	monitorSchedulerService := services.NewMonitorSchedulerService(openChoreoClient, publisherCredentialProvisioner, logger, monitorExecutor, monitorRepository)
 	agentThunderReconcilerService := services.NewAgentThunderReconcilerService(agentThunderProvisioningService, agentThunderClientRepository, logger)
 	traceObserverSvcClient := ProvideTestTraceObserverClient(testClients)
@@ -377,6 +380,7 @@ func InitializeTestAppParamsWithClientMocks(cfg *config.Config, db *gorm.DB, aut
 		GitSecretController:              gitSecretController,
 		IdentityController:               identityController,
 		ScopeController:                  scopeController,
+		AgentIdentityController:          agentIdentityController,
 		MonitorScheduler:                 monitorSchedulerService,
 		AgentThunderReconciler:           agentThunderReconcilerService,
 		LLMTemplateStore:                 llmTemplateStore,
@@ -419,7 +423,7 @@ var instrumentationProviderSet = wire.NewSet(
 	ProvideDefaultPythonVersion,
 )
 
-var controllerProviderSet = wire.NewSet(controllers.NewAgentController, controllers.NewAgentKindController, controllers.NewInfraResourceController, controllers.NewAgentTokenController, controllers.NewRepositoryController, controllers.NewEnvironmentController, controllers.NewGatewayController, controllers.NewLLMController, controllers.NewLLMDeploymentController, controllers.NewLLMProviderAPIKeyController, controllers.NewLLMProxyAPIKeyController, controllers.NewAgentAPIKeyController, controllers.NewLLMProxyDeploymentController, controllers.NewMCPProxyController, ProvideWebSocketController, controllers.NewGatewayInternalController, controllers.NewMonitorController, controllers.NewMonitorScoresController, controllers.NewMonitorScoresPublisherController, controllers.NewEvaluatorController, controllers.NewCatalogController, ProvideAgentBuildOptionsController, controllers.NewAgentConfigurationController, controllers.NewGitSecretController, controllers.NewIdentityController, controllers.NewScopeController)
+var controllerProviderSet = wire.NewSet(controllers.NewAgentController, controllers.NewAgentKindController, controllers.NewInfraResourceController, controllers.NewAgentTokenController, controllers.NewRepositoryController, controllers.NewEnvironmentController, controllers.NewGatewayController, controllers.NewLLMController, controllers.NewLLMDeploymentController, controllers.NewLLMProviderAPIKeyController, controllers.NewLLMProxyAPIKeyController, controllers.NewAgentAPIKeyController, controllers.NewLLMProxyDeploymentController, controllers.NewMCPProxyController, ProvideWebSocketController, controllers.NewGatewayInternalController, controllers.NewMonitorController, controllers.NewMonitorScoresController, controllers.NewMonitorScoresPublisherController, controllers.NewEvaluatorController, controllers.NewCatalogController, ProvideAgentBuildOptionsController, controllers.NewAgentConfigurationController, controllers.NewGitSecretController, controllers.NewIdentityController, controllers.NewScopeController, controllers.NewAgentIdentityController)
 
 var testClientProviderSet = wire.NewSet(
 	ProvideTestOpenChoreoClient,

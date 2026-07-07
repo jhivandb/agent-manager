@@ -80,6 +80,7 @@ func MakeHTTPHandler(params *wiring.AppParams, extraAPIRoutes func(*http.ServeMu
 	RegisterGitSecretRoutes(rr, params.GitSecretController)
 	registerIdentityRoutes(rr, params.IdentityController)
 	registerScopeRoutes(rr, params.ScopeController)
+	registerAgentIdentityRoutes(rr, params.AgentIdentityController)
 
 	if extraAPIRoutes != nil {
 		extraAPIRoutes(apiMux, params)

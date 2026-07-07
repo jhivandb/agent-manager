@@ -45,6 +45,10 @@ type AgentThunderClientRepository interface {
 	// FindByAgent returns every binding for the given agent, across all environments.
 	FindByAgent(ctx context.Context, orgName, projectName, agentName string) ([]models.AgentThunderClient, error)
 
+	// FindByOrgAndEnvironment returns every binding row for the org+environment,
+	// the source for the agent-identity assignment picker (name, status, ThunderAgentID).
+	FindByOrgAndEnvironment(ctx context.Context, orgName, environmentName string) ([]models.AgentThunderClient, error)
+
 	// Get returns the binding for a specific agent in a specific environment.
 	Get(ctx context.Context, orgName, projectName, agentName, environmentName string) (*models.AgentThunderClient, error)
 
@@ -149,6 +153,17 @@ func (r *AgentThunderClientRepo) FindByAgent(ctx context.Context, orgName, proje
 	if err := r.db.WithContext(ctx).Where("org_name = ? AND project_name = ? AND agent_name = ?", orgName, projectName, agentName).
 		Order("environment_name").Find(&rows).Error; err != nil {
 		return nil, fmt.Errorf("find agent thunder clients by agent: %w", err)
+	}
+	return rows, nil
+}
+
+func (r *AgentThunderClientRepo) FindByOrgAndEnvironment(ctx context.Context, orgName, environmentName string) ([]models.AgentThunderClient, error) {
+	var rows []models.AgentThunderClient
+	if err := r.db.WithContext(ctx).
+		Where("org_name = ? AND environment_name = ?", orgName, environmentName).
+		Order("project_name asc, agent_name asc").
+		Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("failed to list agent thunder bindings for %s/%s: %w", orgName, environmentName, err)
 	}
 	return rows, nil
 }

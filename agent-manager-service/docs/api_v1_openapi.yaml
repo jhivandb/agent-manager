@@ -9545,7 +9545,603 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /orgs/{orgName}/environments/{envName}/agent-identities/groups:
+    parameters:
+      - $ref: "#/components/parameters/AgentIdentityOrgName"
+      - $ref: "#/components/parameters/AgentIdentityEnvName"
+    get:
+      tags:
+        - Agent Identity
+      summary: List agent identity groups
+      description: Lists the environment Thunder groups used to grant scopes to agent identities.
+      operationId: listAgentIdentityGroups
+      parameters:
+        - $ref: "#/components/parameters/AgentIdentityOffset"
+        - $ref: "#/components/parameters/AgentIdentityLimit"
+      responses:
+        "200":
+          description: List of groups
+          content:
+            application/json:
+              schema:
+                type: object
+        "503":
+          description: The environment's identity provider is not available
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      tags:
+        - Agent Identity
+      summary: Create an agent identity group
+      operationId: createAgentIdentityGroup
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentIdentityGroupRequest"
+      responses:
+        "201":
+          description: Group created
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: The environment's identity provider is not available
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /orgs/{orgName}/environments/{envName}/agent-identities/groups/{groupID}:
+    parameters:
+      - $ref: "#/components/parameters/AgentIdentityOrgName"
+      - $ref: "#/components/parameters/AgentIdentityEnvName"
+      - $ref: "#/components/parameters/AgentIdentityGroupID"
+    get:
+      tags:
+        - Agent Identity
+      summary: Get an agent identity group
+      operationId: getAgentIdentityGroup
+      responses:
+        "200":
+          description: Group details
+          content:
+            application/json:
+              schema:
+                type: object
+        "404":
+          description: Group not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: The environment's identity provider is not available
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    put:
+      tags:
+        - Agent Identity
+      summary: Update an agent identity group
+      operationId: updateAgentIdentityGroup
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentIdentityGroupRequest"
+      responses:
+        "200":
+          description: Group updated
+          content:
+            application/json:
+              schema:
+                type: object
+        "404":
+          description: Group not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: The environment's identity provider is not available
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      tags:
+        - Agent Identity
+      summary: Delete an agent identity group
+      operationId: deleteAgentIdentityGroup
+      responses:
+        "204":
+          description: Group deleted
+        "404":
+          description: Group not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: The environment's identity provider is not available
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /orgs/{orgName}/environments/{envName}/agent-identities/groups/{groupID}/members:
+    parameters:
+      - $ref: "#/components/parameters/AgentIdentityOrgName"
+      - $ref: "#/components/parameters/AgentIdentityEnvName"
+      - $ref: "#/components/parameters/AgentIdentityGroupID"
+    get:
+      tags:
+        - Agent Identity
+      summary: List agent identity group members
+      operationId: getAgentIdentityGroupMembers
+      parameters:
+        - $ref: "#/components/parameters/AgentIdentityOffset"
+        - $ref: "#/components/parameters/AgentIdentityLimit"
+      responses:
+        "200":
+          description: Group members
+          content:
+            application/json:
+              schema:
+                type: object
+        "503":
+          description: The environment's identity provider is not available
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /orgs/{orgName}/environments/{envName}/agent-identities/groups/{groupID}/members/add:
+    parameters:
+      - $ref: "#/components/parameters/AgentIdentityOrgName"
+      - $ref: "#/components/parameters/AgentIdentityEnvName"
+      - $ref: "#/components/parameters/AgentIdentityGroupID"
+    post:
+      tags:
+        - Agent Identity
+      summary: Add agent identity group members
+      operationId: addAgentIdentityGroupMembers
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentIdentityMembersRequest"
+      responses:
+        "200":
+          description: Members added
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: The environment's identity provider is not available
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /orgs/{orgName}/environments/{envName}/agent-identities/groups/{groupID}/members/remove:
+    parameters:
+      - $ref: "#/components/parameters/AgentIdentityOrgName"
+      - $ref: "#/components/parameters/AgentIdentityEnvName"
+      - $ref: "#/components/parameters/AgentIdentityGroupID"
+    post:
+      tags:
+        - Agent Identity
+      summary: Remove agent identity group members
+      operationId: removeAgentIdentityGroupMembers
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentIdentityMembersRequest"
+      responses:
+        "200":
+          description: Members removed
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: The environment's identity provider is not available
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /orgs/{orgName}/environments/{envName}/agent-identities/groups/{groupID}/roles:
+    parameters:
+      - $ref: "#/components/parameters/AgentIdentityOrgName"
+      - $ref: "#/components/parameters/AgentIdentityEnvName"
+      - $ref: "#/components/parameters/AgentIdentityGroupID"
+    get:
+      tags:
+        - Agent Identity
+      summary: List roles assigned to an agent identity group
+      operationId: getAgentIdentityGroupRoles
+      responses:
+        "200":
+          description: Group roles
+          content:
+            application/json:
+              schema:
+                type: object
+        "503":
+          description: The environment's identity provider is not available
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /orgs/{orgName}/environments/{envName}/agent-identities/roles:
+    parameters:
+      - $ref: "#/components/parameters/AgentIdentityOrgName"
+      - $ref: "#/components/parameters/AgentIdentityEnvName"
+    get:
+      tags:
+        - Agent Identity
+      summary: List agent identity roles
+      operationId: listAgentIdentityRoles
+      parameters:
+        - $ref: "#/components/parameters/AgentIdentityOffset"
+        - $ref: "#/components/parameters/AgentIdentityLimit"
+      responses:
+        "200":
+          description: List of roles
+          content:
+            application/json:
+              schema:
+                type: object
+        "503":
+          description: The environment's identity provider is not available
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      tags:
+        - Agent Identity
+      summary: Create an agent identity role
+      description: Creates a role carrying the given catalog scopes as its permissions.
+      operationId: createAgentIdentityRole
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentIdentityRoleRequest"
+      responses:
+        "201":
+          description: Role created
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: Invalid request or unknown scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: The environment's identity provider rejected the request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: The environment's identity provider is not available
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /orgs/{orgName}/environments/{envName}/agent-identities/roles/{roleID}:
+    parameters:
+      - $ref: "#/components/parameters/AgentIdentityOrgName"
+      - $ref: "#/components/parameters/AgentIdentityEnvName"
+      - $ref: "#/components/parameters/AgentIdentityRoleID"
+    get:
+      tags:
+        - Agent Identity
+      summary: Get an agent identity role
+      operationId: getAgentIdentityRole
+      responses:
+        "200":
+          description: Role details
+          content:
+            application/json:
+              schema:
+                type: object
+        "404":
+          description: Role not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: The environment's identity provider is not available
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    put:
+      tags:
+        - Agent Identity
+      summary: Update an agent identity role
+      description: Updates the role metadata and reconciles its scope permissions to match the request.
+      operationId: updateAgentIdentityRole
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentIdentityRoleRequest"
+      responses:
+        "200":
+          description: Role updated
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: Invalid request or unknown scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Role not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: The environment's identity provider rejected the request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: The environment's identity provider is not available
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      tags:
+        - Agent Identity
+      summary: Delete an agent identity role
+      operationId: deleteAgentIdentityRole
+      responses:
+        "204":
+          description: Role deleted
+        "404":
+          description: Role not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: The environment's identity provider is not available
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /orgs/{orgName}/environments/{envName}/agent-identities/roles/{roleID}/assignments:
+    parameters:
+      - $ref: "#/components/parameters/AgentIdentityOrgName"
+      - $ref: "#/components/parameters/AgentIdentityEnvName"
+      - $ref: "#/components/parameters/AgentIdentityRoleID"
+    get:
+      tags:
+        - Agent Identity
+      summary: List agent identity role assignments
+      operationId: getAgentIdentityRoleAssignments
+      responses:
+        "200":
+          description: Role assignments
+          content:
+            application/json:
+              schema:
+                type: object
+        "503":
+          description: The environment's identity provider is not available
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /orgs/{orgName}/environments/{envName}/agent-identities/roles/{roleID}/assignments/add:
+    parameters:
+      - $ref: "#/components/parameters/AgentIdentityOrgName"
+      - $ref: "#/components/parameters/AgentIdentityEnvName"
+      - $ref: "#/components/parameters/AgentIdentityRoleID"
+    post:
+      tags:
+        - Agent Identity
+      summary: Add agent identity role assignees
+      operationId: addAgentIdentityRoleAssignees
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentIdentityAssignmentsRequest"
+      responses:
+        "200":
+          description: Assignees added
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: The environment's identity provider is not available
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /orgs/{orgName}/environments/{envName}/agent-identities/roles/{roleID}/assignments/remove:
+    parameters:
+      - $ref: "#/components/parameters/AgentIdentityOrgName"
+      - $ref: "#/components/parameters/AgentIdentityEnvName"
+      - $ref: "#/components/parameters/AgentIdentityRoleID"
+    post:
+      tags:
+        - Agent Identity
+      summary: Remove agent identity role assignees
+      operationId: removeAgentIdentityRoleAssignees
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentIdentityAssignmentsRequest"
+      responses:
+        "200":
+          description: Assignees removed
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: The environment's identity provider is not available
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /orgs/{orgName}/environments/{envName}/agent-identities/agents:
+    parameters:
+      - $ref: "#/components/parameters/AgentIdentityOrgName"
+      - $ref: "#/components/parameters/AgentIdentityEnvName"
+    get:
+      tags:
+        - Agent Identity
+      summary: List agent identity bindings for the environment
+      description: Lists the agent identities provisioned in this environment's Thunder, used as the assignment picker.
+      operationId: listAgentIdentityAgents
+      responses:
+        "200":
+          description: List of agent identity bindings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentIdentityAgentListResponse"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
 components:
+  parameters:
+    AgentIdentityOrgName:
+      name: orgName
+      in: path
+      required: true
+      description: Organization name/handle
+      schema:
+        type: string
+    AgentIdentityEnvName:
+      name: envName
+      in: path
+      required: true
+      description: Environment name
+      schema:
+        type: string
+    AgentIdentityGroupID:
+      name: groupID
+      in: path
+      required: true
+      description: Thunder group ID
+      schema:
+        type: string
+    AgentIdentityRoleID:
+      name: roleID
+      in: path
+      required: true
+      description: Thunder role ID
+      schema:
+        type: string
+    AgentIdentityOffset:
+      name: offset
+      in: query
+      required: false
+      description: Number of results to skip
+      schema:
+        type: integer
+        default: 0
+        minimum: 0
+    AgentIdentityLimit:
+      name: limit
+      in: query
+      required: false
+      description: Maximum number of results to return
+      schema:
+        type: integer
+        default: 20
+        minimum: 1
+        maximum: 100
   schemas:
     ScopeRequest:
       type: object
@@ -9597,6 +10193,84 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ScopeResponse"
+    AgentIdentityGroupRequest:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+    AgentIdentityMembersRequest:
+      type: object
+      required:
+        - agentIds
+      properties:
+        agentIds:
+          type: array
+          items:
+            type: string
+          description: Thunder agent IDs (from the agents picker)
+    AgentIdentityRoleRequest:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        scopes:
+          type: array
+          items:
+            type: string
+          description: Catalog scope names carried as the role's permissions
+    AgentIdentityAssignmentsRequest:
+      type: object
+      required:
+        - assignments
+      properties:
+        assignments:
+          type: array
+          items:
+            type: object
+            required:
+              - id
+              - type
+            properties:
+              id:
+                type: string
+              type:
+                type: string
+                enum:
+                  - agent
+                  - group
+    AgentIdentityAgentResponse:
+      type: object
+      required:
+        - agentName
+        - projectName
+        - status
+      properties:
+        agentName:
+          type: string
+        projectName:
+          type: string
+        status:
+          type: string
+          description: Thunder binding status (pending/in_progress/completed/failed)
+        thunderAgentId:
+          type: string
+    AgentIdentityAgentListResponse:
+      type: object
+      required:
+        - agents
+      properties:
+        agents:
+          type: array
+          items:
+            $ref: "#/components/schemas/AgentIdentityAgentResponse"
     ConfigResponse:
       type: object
       required:

@@ -119,6 +119,14 @@ const (
 	ScopeDelete Permission = "scope:delete"
 )
 
+// Agent identity (env-Thunder agent groups/roles) permissions
+const (
+	AgentIdentityRead   Permission = "agent-identity:read"
+	AgentIdentityCreate Permission = "agent-identity:create"
+	AgentIdentityUpdate Permission = "agent-identity:update"
+	AgentIdentityDelete Permission = "agent-identity:delete"
+)
+
 // LLM proxy permissions
 const (
 	LLMProxyCreate       Permission = "llm-proxy:create"
