@@ -166,6 +166,86 @@ func TestAgentIdentityUpdateRole_ReconcilesScopePermissions(t *testing.T) {
 	assert.ElementsMatch(t, []string{"repo:read.all"}, removed, "dropped scope must be removed")
 }
 
+// TestAgentIdentityUpdateRole_PreservesNameWhenOmitted proves that a role update
+// omitting "name" preserves the role's current name (Thunder's PUT is a full
+// replace, so an empty name would blank it). scopes and current permissions are
+// both empty, so the handler early-returns right after the metadata write.
+func TestAgentIdentityUpdateRole_PreservesNameWhenOmitted(t *testing.T) {
+	var captured thundersvc.UpdateRoleRequest
+	envClient := &clientmocks.EnvIdentityClientMock{
+		GetRoleFunc: func(_ context.Context, roleID string) (*thundersvc.ThunderRole, error) {
+			return &thundersvc.ThunderRole{ID: roleID, OuID: "ou-1", Name: "readers"}, nil
+		},
+		UpdateRoleFunc: func(_ context.Context, roleID string, req thundersvc.UpdateRoleRequest) (*thundersvc.ThunderRole, error) {
+			captured = req
+			return &thundersvc.ThunderRole{ID: roleID, OuID: req.OuID, Name: req.Name}, nil
+		},
+	}
+	resolver := &clientmocks.EnvThunderResolverMock{
+		ResolveIdentityFunc: func(_ context.Context, _, _ string) (thundersvc.EnvIdentityClient, error) {
+			return envClient, nil
+		},
+	}
+	scopeRepo := &repomocks.ScopeRepositoryMock{
+		ListFunc: func(_ context.Context, _ string) ([]models.Scope, error) {
+			return []models.Scope{}, nil
+		},
+	}
+	ctrl := NewAgentIdentityController(resolver, scopeRepo, &repomocks.AgentThunderClientRepositoryMock{})
+
+	req := httptest.NewRequest(http.MethodPut, "/orgs/o1/environments/dev/agent-identities/roles/role-1",
+		strings.NewReader(`{"description":"metadata only"}`))
+	req.SetPathValue("orgName", "o1")
+	req.SetPathValue("envName", "dev")
+	req.SetPathValue("roleID", "role-1")
+	w := httptest.NewRecorder()
+
+	ctrl.UpdateRole(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "readers", captured.Name, "omitted name must preserve the current role name")
+	assert.Equal(t, "ou-1", captured.OuID, "update must carry the role's ouId")
+	assert.Equal(t, "metadata only", captured.Description, "provided description must be applied")
+}
+
+// TestAgentIdentityUpdateGroup_PreservesNameWhenOmitted proves the group update
+// fetches the current group and preserves its name when the body omits "name",
+// applying only the provided description.
+func TestAgentIdentityUpdateGroup_PreservesNameWhenOmitted(t *testing.T) {
+	var captured thundersvc.UpdateGroupRequest
+	getCalled := false
+	envClient := &clientmocks.EnvIdentityClientMock{
+		GetGroupFunc: func(_ context.Context, groupID string) (*thundersvc.ThunderGroup, error) {
+			getCalled = true
+			return &thundersvc.ThunderGroup{ID: groupID, Name: "team-a"}, nil
+		},
+		UpdateGroupFunc: func(_ context.Context, groupID string, req thundersvc.UpdateGroupRequest) (*thundersvc.ThunderGroup, error) {
+			captured = req
+			return &thundersvc.ThunderGroup{ID: groupID, Name: req.Name, Description: req.Description}, nil
+		},
+	}
+	resolver := &clientmocks.EnvThunderResolverMock{
+		ResolveIdentityFunc: func(_ context.Context, _, _ string) (thundersvc.EnvIdentityClient, error) {
+			return envClient, nil
+		},
+	}
+	ctrl := NewAgentIdentityController(resolver, &repomocks.ScopeRepositoryMock{}, &repomocks.AgentThunderClientRepositoryMock{})
+
+	req := httptest.NewRequest(http.MethodPut, "/orgs/o1/environments/dev/agent-identities/groups/grp-1",
+		strings.NewReader(`{"description":"x"}`))
+	req.SetPathValue("orgName", "o1")
+	req.SetPathValue("envName", "dev")
+	req.SetPathValue("groupID", "grp-1")
+	w := httptest.NewRecorder()
+
+	ctrl.UpdateGroup(w, req)
+
+	assert.True(t, getCalled, "update must fetch the current group first")
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "team-a", captured.Name, "omitted name must preserve the current group name")
+	assert.Equal(t, "x", captured.Description, "provided description must be applied")
+}
+
 // TestAgentIdentityRoutes_EnvThunderUnavailable proves that when the environment
 // has no provisioned Thunder, a passthrough handler surfaces 503 (not 500) so
 // callers know to retry once the environment is provisioned.

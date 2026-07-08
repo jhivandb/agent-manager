@@ -591,19 +591,9 @@ func (c *identityController) UpdateGroup(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	name := ""
-	if body.Name != nil {
-		name = *body.Name
-	}
-	description := ""
-	if body.Description != nil {
-		description = *body.Description
-	}
-
-	req := thundersvc.UpdateGroupRequest{
-		Name:        name,
-		Description: description,
-	}
+	// Thunder's PUT /groups/{id} is a full replace: NewGroupReplace preserves the
+	// group's current name/description when the body omits them.
+	req := thundersvc.NewGroupReplace(*group, body.Name, body.Description)
 
 	updatedGroup, err := c.client.UpdateGroup(ctx, groupID, req)
 	if err != nil {
@@ -998,19 +988,10 @@ func (c *identityController) UpdateRole(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	name := ""
-	if body.Name != nil {
-		name = *body.Name
-	}
-	description := ""
-	if body.Description != nil {
-		description = *body.Description
-	}
-
-	req := thundersvc.UpdateRoleRequest{
-		Name:        name,
-		Description: description,
-	}
+	// Thunder's PUT /roles/{id} is a full replace: NewRoleReplace carries the
+	// role's ouId and current permissions and preserves name/description when the
+	// body omits them, so a metadata edit never blanks the OU or drops permissions.
+	req := thundersvc.NewRoleReplace(*role, body.Name, body.Description)
 
 	updatedRole, err := c.client.UpdateRole(ctx, roleID, req)
 	if err != nil {

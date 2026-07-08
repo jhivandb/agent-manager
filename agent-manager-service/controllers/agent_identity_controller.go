@@ -196,10 +196,23 @@ func (c *agentIdentityController) UpdateGroup(w http.ResponseWriter, r *http.Req
 	if !ok {
 		return
 	}
-	group, err := client.UpdateGroup(ctx, groupID, thundersvc.UpdateGroupRequest{
-		Name:        body.Name,
-		Description: derefString(body.Description),
-	})
+	current, err := client.GetGroup(ctx, groupID)
+	if err != nil {
+		if thundersvc.IsNotFound(err) {
+			utils.WriteErrorResponse(w, http.StatusNotFound, "Group not found")
+			return
+		}
+		log.Error("agent-identity UpdateGroup: get group failed", "groupID", groupID, "error", err)
+		utils.WriteErrorResponse(w, http.StatusInternalServerError, "Failed to update group")
+		return
+	}
+	var namePtr *string
+	if body.Name != "" {
+		namePtr = &body.Name
+	}
+	// Thunder's PUT /groups/{id} is a full replace: NewGroupReplace preserves the
+	// group's current name when the body omits it, applying only the given fields.
+	group, err := client.UpdateGroup(ctx, groupID, thundersvc.NewGroupReplace(*current, namePtr, body.Description))
 	if err != nil {
 		if thundersvc.IsNotFound(err) {
 			utils.WriteErrorResponse(w, http.StatusNotFound, "Group not found")
@@ -474,15 +487,15 @@ func (c *agentIdentityController) UpdateRole(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	updated, err := client.UpdateRole(ctx, roleID, thundersvc.UpdateRoleRequest{
-		OuID:        current.OuID,
-		Name:        body.Name,
-		Description: derefString(body.Description),
-		// Thunder's PUT /roles/{id} is a full replace: echo the current
-		// permissions so a metadata change never drops them. The scope
-		// reconcile below then applies the requested additions/removals.
-		Permissions: current.Permissions,
-	})
+	var namePtr *string
+	if body.Name != "" {
+		namePtr = &body.Name
+	}
+	// Thunder's PUT /roles/{id} is a full replace: NewRoleReplace carries the
+	// role's ouId and current permissions and preserves the name when the body
+	// omits it, so a metadata change never blanks the name or drops permissions.
+	// The scope reconcile below then applies the requested additions/removals.
+	updated, err := client.UpdateRole(ctx, roleID, thundersvc.NewRoleReplace(*current, namePtr, body.Description))
 	if err != nil {
 		if thundersvc.IsNotFound(err) {
 			utils.WriteErrorResponse(w, http.StatusNotFound, "Role not found")

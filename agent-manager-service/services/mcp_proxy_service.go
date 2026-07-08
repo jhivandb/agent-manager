@@ -852,13 +852,22 @@ func validateMCPEnvironments(ctx context.Context, environments map[string]models
 				return fmt.Errorf("%w: environment %q: apiKey and identity security are mutually exclusive", utils.ErrInvalidInput, envID)
 			}
 		}
+		seenTools := make(map[string]struct{}, len(env.ToolScopeBindings))
 		for _, b := range env.ToolScopeBindings {
-			if strings.TrimSpace(b.Tool) == "" {
+			tool := strings.TrimSpace(b.Tool)
+			if tool == "" {
 				return fmt.Errorf("%w: environment %q has a tool binding with an empty tool name", utils.ErrInvalidInput, envID)
 			}
 			if len(b.Scopes) == 0 {
 				return fmt.Errorf("%w: environment %q: tool %q binding has no scopes", utils.ErrInvalidInput, envID, b.Tool)
 			}
+			// A tool→scopes mapping is conceptually a map: two bindings for the same
+			// tool produce ambiguous mcp-authz rules, so reject duplicates outright
+			// rather than let the gateway combine them in an order we do not control.
+			if _, dup := seenTools[tool]; dup {
+				return fmt.Errorf("%w: environment %q has duplicate tool binding %q", utils.ErrInvalidInput, envID, tool)
+			}
+			seenTools[tool] = struct{}{}
 		}
 		if env.Upstream == nil || strings.TrimSpace(env.Upstream.URL) == "" {
 			return fmt.Errorf("%w: environment %q is missing an upstream url", utils.ErrInvalidInput, envID)

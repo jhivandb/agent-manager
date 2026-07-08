@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"regexp"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
 
 	"github.com/wso2/agent-manager/agent-manager-service/models"
@@ -79,6 +80,13 @@ func (s *scopeService) Create(ctx context.Context, orgName, name, description st
 	}
 	scope := &models.Scope{OrgName: orgName, Name: name, Description: description}
 	if err := s.repo.Create(ctx, scope); err != nil {
+		// A concurrent create can win the race between the GetByName check above
+		// and this insert; the unique constraint (uq_scopes_org_name) then fires.
+		// Map it to a conflict so the API returns 409, matching the check path.
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return nil, fmt.Errorf("%w: scope %q already exists", utils.ErrConflict, name)
+		}
 		return nil, err
 	}
 	return scope, nil
@@ -92,6 +100,9 @@ func (s *scopeService) Update(ctx context.Context, orgName, name, description st
 		return nil, fmt.Errorf("failed to load scope: %w", err)
 	}
 	if err := s.repo.Update(ctx, &models.Scope{OrgName: orgName, Name: name, Description: description}); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, utils.ErrScopeNotFound
+		}
 		return nil, err
 	}
 	updated, err := s.repo.GetByName(ctx, orgName, name)

@@ -18,9 +18,11 @@ package services
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/assert"
 	"gorm.io/gorm"
 
@@ -97,4 +99,35 @@ func TestScopeService_Delete_MissingScopeNotFound(t *testing.T) {
 
 	err := svc.Delete(context.Background(), "org1", "repo:read.all")
 	assert.ErrorIs(t, err, utils.ErrScopeNotFound)
+}
+
+func TestScopeService_Update_MissingAfterGetReturnsNotFound(t *testing.T) {
+	scopeRepo := &repomocks.ScopeRepositoryMock{
+		GetByNameFunc: func(_ context.Context, orgName, name string) (*models.Scope, error) {
+			return &models.Scope{OrgName: orgName, Name: name}, nil // passes the pre-check
+		},
+		UpdateFunc: func(_ context.Context, _ *models.Scope) error {
+			return gorm.ErrRecordNotFound // row deleted between the get and the update
+		},
+	}
+	svc := NewScopeService(scopeRepo, &repomocks.MCPProxyRepositoryMock{})
+
+	_, err := svc.Update(context.Background(), "org1", "repo:read.all", "desc")
+	assert.ErrorIs(t, err, utils.ErrScopeNotFound)
+}
+
+func TestScopeService_Create_DuplicateRaceReturnsConflict(t *testing.T) {
+	scopeRepo := &repomocks.ScopeRepositoryMock{
+		GetByNameFunc: func(_ context.Context, _, _ string) (*models.Scope, error) {
+			return nil, gorm.ErrRecordNotFound // pre-check says absent
+		},
+		CreateFunc: func(_ context.Context, _ *models.Scope) error {
+			// A concurrent create won the race; the unique constraint fires.
+			return fmt.Errorf("failed to create scope: %w", &pgconn.PgError{Code: "23505"})
+		},
+	}
+	svc := NewScopeService(scopeRepo, &repomocks.MCPProxyRepositoryMock{})
+
+	_, err := svc.Create(context.Background(), "org1", "repo:read.all", "")
+	assert.ErrorIs(t, err, utils.ErrConflict)
 }

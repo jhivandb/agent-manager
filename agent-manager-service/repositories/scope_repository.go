@@ -72,11 +72,14 @@ func (r *scopeRepository) Create(ctx context.Context, scope *models.Scope) error
 }
 
 func (r *scopeRepository) Update(ctx context.Context, scope *models.Scope) error {
-	if err := r.db.WithContext(ctx).Model(&models.Scope{}).
+	res := r.db.WithContext(ctx).Model(&models.Scope{}).
 		Where("org_name = ? AND name = ?", scope.OrgName, scope.Name).
-		Updates(map[string]any{"description": scope.Description, "updated_at": time.Now()}).
-		Error; err != nil {
-		return fmt.Errorf("failed to update scope: %w", err)
+		Updates(map[string]any{"description": scope.Description, "updated_at": time.Now()})
+	if res.Error != nil {
+		return fmt.Errorf("failed to update scope: %w", res.Error)
+	}
+	if res.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
 	}
 	return nil
 }

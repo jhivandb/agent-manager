@@ -90,6 +90,20 @@ func TestValidateMCPEnvironments_RejectsBindingWithNoScopes(t *testing.T) {
 	assert.ErrorIs(t, err, utils.ErrInvalidInput)
 }
 
+func TestValidateMCPEnvironments_RejectsDuplicateToolBinding(t *testing.T) {
+	envs := map[string]models.MCPEnvironmentConfig{
+		testMCPEnvUUID: {
+			Upstream: &models.UpstreamEndpoint{URL: "https://93.184.216.34"},
+			ToolScopeBindings: []models.MCPToolScopeBinding{
+				{Tool: "search", Scopes: []string{"a:read"}},
+				{Tool: "search", Scopes: []string{"a:admin"}},
+			},
+		},
+	}
+	err := validateMCPEnvironments(context.Background(), envs)
+	assert.ErrorIs(t, err, utils.ErrInvalidInput)
+}
+
 func TestValidateMCPEnvironmentSecurity_UnknownBindingScope(t *testing.T) {
 	scopeRepo := &repomocks.ScopeRepositoryMock{
 		ListFunc: func(_ context.Context, orgName string) ([]models.Scope, error) {
