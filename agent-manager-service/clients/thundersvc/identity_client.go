@@ -937,6 +937,12 @@ func (c *thunderClient) EnsureScopeResourceServer(ctx context.Context, scopes []
 		return "", err
 	}
 
+	// Avoids a TOCTOU race where concurrent callers both create a duplicate
+	// resource server or permission; safe to scope per-client since clients
+	// are cached per org/env.
+	c.ensureScopeResourceServerMu.Lock()
+	defer c.ensureScopeResourceServerMu.Unlock()
+
 	rsID, err := c.findResourceServerID(ctx, token, scopeResourceServerIdentifier)
 	if err != nil {
 		return "", err

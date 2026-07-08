@@ -332,6 +332,10 @@ func (c *agentIdentityController) GetGroupRoles(w http.ResponseWriter, r *http.R
 	}
 	roles, err := client.GetGroupRoles(ctx, groupID)
 	if err != nil {
+		if thundersvc.IsNotFound(err) {
+			utils.WriteErrorResponse(w, http.StatusNotFound, "Group not found")
+			return
+		}
 		log.Error("agent-identity GetGroupRoles failed", "groupID", groupID, "error", err)
 		utils.WriteErrorResponse(w, http.StatusInternalServerError, "Failed to get group roles")
 		return
@@ -572,6 +576,10 @@ func (c *agentIdentityController) GetRoleAssignments(w http.ResponseWriter, r *h
 	}
 	assignments, err := client.GetRoleAssignments(ctx, roleID)
 	if err != nil {
+		if thundersvc.IsNotFound(err) {
+			utils.WriteErrorResponse(w, http.StatusNotFound, "Role not found")
+			return
+		}
 		log.Error("agent-identity GetRoleAssignments failed", "roleID", roleID, "error", err)
 		utils.WriteErrorResponse(w, http.StatusInternalServerError, "Failed to get role assignments")
 		return
@@ -666,6 +674,9 @@ func (c *agentIdentityController) validateScopesInCatalog(ctx context.Context, o
 	}
 	catalog, err := c.scopeRepo.List(ctx, orgName)
 	if err != nil {
+		// Callers surface this error's message directly to the HTTP client as a 400,
+		// so the cause is logged here rather than wrapped into the returned error.
+		logger.GetLogger(ctx).Error("agent-identity validateScopesInCatalog: load scope catalog failed", "orgName", orgName, "error", err)
 		return errors.New("failed to load scope catalog")
 	}
 	known := make(map[string]struct{}, len(catalog))

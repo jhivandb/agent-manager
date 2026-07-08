@@ -845,12 +845,16 @@ func validateMCPEnvironments(ctx context.Context, environments map[string]models
 		}
 		// Structural security checks first (no network I/O): apiKey and identity are
 		// mutually exclusive, and every tool binding must name a tool with >=1 scope.
+		identityOn := false
 		if sec := env.Security; sec != nil && isBoolTrue(sec.Enabled) {
 			apiKeyOn := sec.APIKey != nil && isBoolTrue(sec.APIKey.Enabled)
-			identityOn := sec.Identity != nil && isBoolTrue(sec.Identity.Enabled)
+			identityOn = sec.Identity != nil && isBoolTrue(sec.Identity.Enabled)
 			if apiKeyOn && identityOn {
 				return fmt.Errorf("%w: environment %q: apiKey and identity security are mutually exclusive", utils.ErrInvalidInput, envID)
 			}
+		}
+		if len(env.ToolScopeBindings) > 0 && !identityOn {
+			return fmt.Errorf("%w: environment %q: toolScopeBindings require identity security to be enabled", utils.ErrInvalidInput, envID)
 		}
 		seenTools := make(map[string]struct{}, len(env.ToolScopeBindings))
 		for _, b := range env.ToolScopeBindings {
