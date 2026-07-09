@@ -31,6 +31,11 @@ import (
 // testMCPEnvUUID is a valid environment UUID used as the Environments map key.
 const testMCPEnvUUID = "3fa85f64-5717-4562-b3fc-2c963f66afa6"
 
+// testOrgUUID is the resolved org OU UUID (the artifacts/gateway key). It is
+// deliberately distinct from the org handle so tests cannot accidentally pass
+// when the two identifiers are conflated (see the scope-catalog lookup bug).
+const testOrgUUID = "019f419c-a1cf-7810-a1e9-63726dfca4a1"
+
 // identityEnabledSecurity returns a SecurityConfig selecting the Agent Identity variant.
 func identityEnabledSecurity() *models.SecurityConfig {
 	return &models.SecurityConfig{
@@ -118,7 +123,7 @@ func TestValidateMCPEnvironmentSecurity_UnknownBindingScope(t *testing.T) {
 			},
 		},
 	}
-	err := svc.validateMCPEnvironmentSecurity(context.Background(), "org1", envs)
+	err := svc.validateMCPEnvironmentSecurity(context.Background(), testOrgUUID, "org1", envs)
 	assert.ErrorIs(t, err, utils.ErrInvalidInput)
 	assert.Contains(t, err.Error(), "repo:write.all")
 }
@@ -137,7 +142,7 @@ func TestValidateMCPEnvironmentSecurity_KnownScopesPass(t *testing.T) {
 			},
 		},
 	}
-	assert.NoError(t, svc.validateMCPEnvironmentSecurity(context.Background(), "org1", envs))
+	assert.NoError(t, svc.validateMCPEnvironmentSecurity(context.Background(), testOrgUUID, "org1", envs))
 }
 
 func TestValidateMCPEnvironmentSecurity_IdentityNeedsGatewayPolicies(t *testing.T) {
@@ -161,7 +166,7 @@ func TestValidateMCPEnvironmentSecurity_IdentityNeedsGatewayPolicies(t *testing.
 			},
 		},
 	}
-	err := svc.validateMCPEnvironmentSecurity(context.Background(), "org1", envs)
+	err := svc.validateMCPEnvironmentSecurity(context.Background(), testOrgUUID, "org1", envs)
 	assert.ErrorIs(t, err, utils.ErrInvalidInput)
 }
 
@@ -185,7 +190,40 @@ func TestValidateMCPEnvironmentSecurity_IdentityAcceptedWithGatewayPolicies(t *t
 			},
 		},
 	}
-	assert.NoError(t, svc.validateMCPEnvironmentSecurity(context.Background(), "org1", envs))
+	assert.NoError(t, svc.validateMCPEnvironmentSecurity(context.Background(), testOrgUUID, "org1", envs))
+}
+
+// TestValidateMCPEnvironmentSecurity_ScopeCatalogKeyedByHandleNotUUID guards the
+// regression where the MCP-proxy create/update path forwarded the resolved org OU
+// UUID into the scope-catalog lookup. The catalog is keyed by the org handle
+// (scopes.org_name), so the UUID query read an empty catalog and every tool-scope
+// binding was rejected with "references unknown scope" even though the scope existed.
+func TestValidateMCPEnvironmentSecurity_ScopeCatalogKeyedByHandleNotUUID(t *testing.T) {
+	const orgHandle = "default"
+	var gotListArg string
+	scopeRepo := &repomocks.ScopeRepositoryMock{
+		ListFunc: func(_ context.Context, org string) ([]models.Scope, error) {
+			gotListArg = org
+			// The catalog only knows handle-keyed rows; a UUID lookup finds nothing.
+			if org != orgHandle {
+				return []models.Scope{}, nil
+			}
+			return []models.Scope{{OrgName: orgHandle, Name: "mcp:greet"}}, nil
+		},
+	}
+	svc := &MCPProxyService{scopeRepo: scopeRepo}
+	envs := map[string]models.MCPEnvironmentConfig{
+		testMCPEnvUUID: {
+			ToolScopeBindings: []models.MCPToolScopeBinding{
+				{Tool: "GreetMe", Scopes: []string{"mcp:greet"}},
+			},
+		},
+	}
+
+	err := svc.validateMCPEnvironmentSecurity(context.Background(), testOrgUUID, orgHandle, envs)
+
+	assert.NoError(t, err, "a binding to an existing scope must validate when the catalog is queried by handle")
+	assert.Equal(t, orgHandle, gotListArg, "scope catalog must be queried by org handle, not the OU UUID")
 }
 
 func TestValidateMCPEnvironmentSecurity_IdentityAllowedWhenNoGatewayYet(t *testing.T) {
@@ -210,5 +248,5 @@ func TestValidateMCPEnvironmentSecurity_IdentityAllowedWhenNoGatewayYet(t *testi
 			},
 		},
 	}
-	assert.NoError(t, svc.validateMCPEnvironmentSecurity(context.Background(), "org1", envs))
+	assert.NoError(t, svc.validateMCPEnvironmentSecurity(context.Background(), testOrgUUID, "org1", envs))
 }

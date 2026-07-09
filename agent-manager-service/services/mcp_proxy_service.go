@@ -105,7 +105,7 @@ func NewMCPProxyService(
 }
 
 // Create creates a new MCP proxy.
-func (s *MCPProxyService) Create(ctx context.Context, orgUUID, createdBy string, req *models.MCPProxyDTO) (*models.MCPProxyDTO, error) {
+func (s *MCPProxyService) Create(ctx context.Context, orgUUID, orgHandle, createdBy string, req *models.MCPProxyDTO) (*models.MCPProxyDTO, error) {
 	if req == nil {
 		return nil, utils.ErrInvalidInput
 	}
@@ -120,7 +120,7 @@ func (s *MCPProxyService) Create(ctx context.Context, orgUUID, createdBy string,
 	if err := validateMCPEnvironments(ctx, req.Environments); err != nil {
 		return nil, err
 	}
-	if err := s.validateMCPEnvironmentSecurity(ctx, orgUUID, req.Environments); err != nil {
+	if err := s.validateMCPEnvironmentSecurity(ctx, orgUUID, orgHandle, req.Environments); err != nil {
 		return nil, err
 	}
 	environments, err := s.buildMCPEnvironmentsForStorage(req.Environments, nil)
@@ -320,7 +320,7 @@ func (s *MCPProxyService) Get(ctx context.Context, orgUUID, proxyID string) (*mo
 // Update modifies an existing MCP proxy and redeploys it to active gateways. Returns
 // the DTO for the response and the underlying model so the caller can cascade further
 // work (e.g. redeploying agent-scoped mapping artifacts).
-func (s *MCPProxyService) Update(ctx context.Context, orgUUID, proxyID string, req *models.MCPProxyDTO) (*models.MCPProxyDTO, error) {
+func (s *MCPProxyService) Update(ctx context.Context, orgUUID, orgHandle, proxyID string, req *models.MCPProxyDTO) (*models.MCPProxyDTO, error) {
 	if req == nil {
 		return nil, utils.ErrInvalidInput
 	}
@@ -345,7 +345,7 @@ func (s *MCPProxyService) Update(ctx context.Context, orgUUID, proxyID string, r
 	if err := validateMCPEnvironments(ctx, req.Environments); err != nil {
 		return nil, err
 	}
-	if err := s.validateMCPEnvironmentSecurity(ctx, orgUUID, req.Environments); err != nil {
+	if err := s.validateMCPEnvironmentSecurity(ctx, orgUUID, orgHandle, req.Environments); err != nil {
 		return nil, err
 	}
 
@@ -888,8 +888,14 @@ func validateMCPEnvironments(ctx context.Context, environments map[string]models
 // gateway advertises mcp-auth v1 + mcp-authz v1 in its policy manifest. Bindings to
 // tools absent from capabilities are deliberately accepted (tool lists drift; the
 // console flags them). It performs DB reads, so call it outside a transaction.
-func (s *MCPProxyService) validateMCPEnvironmentSecurity(ctx context.Context, orgName string, environments map[string]models.MCPEnvironmentConfig) error {
-	catalog, err := s.scopeRepo.List(ctx, orgName)
+//
+// It takes both org identifiers because the two catalogs it consults are keyed
+// differently: the scope catalog is keyed by the org handle (scopes.org_name),
+// while gateways/artifacts are keyed by the org UUID (ou_id). Passing the UUID to
+// the handle-keyed scope lookup reads an empty catalog and rejects every binding,
+// so the two identifiers must not be conflated.
+func (s *MCPProxyService) validateMCPEnvironmentSecurity(ctx context.Context, orgUUID, orgHandle string, environments map[string]models.MCPEnvironmentConfig) error {
+	catalog, err := s.scopeRepo.List(ctx, orgHandle)
 	if err != nil {
 		return fmt.Errorf("failed to load scope catalog: %w", err)
 	}
@@ -913,7 +919,7 @@ func (s *MCPProxyService) validateMCPEnvironmentSecurity(ctx context.Context, or
 		if err != nil {
 			continue // already rejected by validateMCPEnvironments
 		}
-		gateway, err := s.resolveGatewayForEnvironment(ctx, envUUID, orgName)
+		gateway, err := s.resolveGatewayForEnvironment(ctx, envUUID, orgUUID)
 		if errors.Is(err, errNoActiveGatewayForEnvironment) {
 			continue // no gateway yet: allowed, deploys later; policies checked when one exists
 		}

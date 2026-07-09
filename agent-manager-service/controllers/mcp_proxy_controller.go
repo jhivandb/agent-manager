@@ -56,6 +56,9 @@ func (c *mcpProxyController) CreateMCPProxy(w http.ResponseWriter, r *http.Reque
 	ctx := r.Context()
 	log := logger.GetLogger(ctx)
 	ouID := middleware.OUIDFromRequest(r)
+	// The scope catalog is keyed by the org handle (scopes.org_name), not the
+	// resolved OU UUID, so pass the handle through for tool-scope-binding validation.
+	orgHandle := r.PathValue(utils.PathParamOrgName)
 
 	log.Info("CreateMCPProxy: starting", "ouID", ouID)
 
@@ -66,7 +69,7 @@ func (c *mcpProxyController) CreateMCPProxy(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	resp, err := c.mcpProxyService.Create(ctx, ouID, "system", &req)
+	resp, err := c.mcpProxyService.Create(ctx, ouID, orgHandle, "system", &req)
 	if err != nil {
 		switch {
 		case errors.Is(err, utils.ErrInvalidInput), errors.Is(err, utils.ErrInvalidURL):
@@ -168,6 +171,8 @@ func (c *mcpProxyController) UpdateMCPProxy(w http.ResponseWriter, r *http.Reque
 	log := logger.GetLogger(ctx)
 	ouID := middleware.OUIDFromRequest(r)
 	proxyID := r.PathValue(utils.PathParamProxyId)
+	// See CreateMCPProxy: scope-binding validation looks the catalog up by org handle.
+	orgHandle := r.PathValue(utils.PathParamOrgName)
 
 	log.Info("UpdateMCPProxy: starting", "ouID", ouID, "proxyID", proxyID)
 
@@ -178,7 +183,7 @@ func (c *mcpProxyController) UpdateMCPProxy(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	resp, err := c.mcpProxyService.Update(ctx, ouID, proxyID, &req)
+	resp, err := c.mcpProxyService.Update(ctx, ouID, orgHandle, proxyID, &req)
 	if err != nil {
 		switch {
 		case errors.Is(err, utils.ErrMCPProxyNotFound):
