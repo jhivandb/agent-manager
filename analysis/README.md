@@ -12,6 +12,7 @@
 | [cli.md](cli.md) | amctl: flag UX, client codegen, error envelopes, test gaps |
 | [python-and-observability.md](python-and-observability.md) | amp-evaluation, amp-instrumentation, provider, evaluation-job, traces-observer-service |
 | [infrastructure.md](infrastructure.md) | CI workflows, Makefiles, helm charts, e2e, docs, repo hygiene, releases |
+| [single-go-module-feasibility.md](single-go-module-feasibility.md) | Feasibility of merging the three Go modules (AMS, CLI, traces-observer) into one — verdict: feasible, recommended |
 
 This file is the synthesis: cross-cutting themes ordered by impact, with the per-domain reports as backing detail.
 
