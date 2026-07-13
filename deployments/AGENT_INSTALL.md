@@ -36,11 +36,10 @@ background or with a generous timeout — never a default 2-minute command timeo
   ```
 
   Verify `docker ps` works afterwards (Colima sets the docker context).
-- Several host ports must be free — the console and API use `8080`/`8443`, and the
-  installer also needs a range of gateway, registry, and OpenSearch ports. You do not need
-  to pre-check them all: the installer checks required ports early and **aborts listing any
-  that are busy**. If it aborts on a port, free the conflicting process
-  (`lsof -i :<port>`) and re-run.
+- Several host ports must be free — the console (`3000`), the API (`9000`), and a range of
+  gateway, registry, and OpenSearch ports. You do not need to pre-check them all: the
+  installer checks required ports early and **aborts listing any that are busy**. If it
+  aborts on a port, free the conflicting process (`lsof -i :<port>`) and re-run.
 
 ### Install (non-interactive)
 
