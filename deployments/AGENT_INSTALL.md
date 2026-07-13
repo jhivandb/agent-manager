@@ -73,26 +73,30 @@ docker exec -u wso2-amp amp-quick-start bash -lc '
   kubectl wait --for=jsonpath="{.status.readyReplicas}"=1 statefulset/amp-postgresql -n wso2-amp --timeout=120s &&
   kubectl wait --for=condition=Available deployment/amp-api -n wso2-amp --timeout=120s &&
   kubectl wait --for=condition=Available deployment/amp-console -n wso2-amp --timeout=120s &&
-  kubectl wait --for=condition=Available deployment/amp-traces-observer -n openchoreo-observability-plane --timeout=120s'
+  if kubectl get deployment amp-traces-observer -n openchoreo-observability-plane >/dev/null 2>&1; then
+    kubectl wait --for=condition=Available deployment/amp-traces-observer -n openchoreo-observability-plane --timeout=120s
+  fi'
 ```
 
-Then probe the endpoints from the host. `.localhost` names may not resolve for curl (they
-do in browsers), so pin them:
+The traces-observer check is guarded because the installer treats the observability
+extension as non-fatal — it may be absent on an otherwise healthy install, and an
+unconditional wait would hang until timeout.
+
+Then probe the endpoints from the host (the quick-start container runs with
+`--network=host`, so the platform is reachable on plain `localhost`):
 
 ```bash
-curl -fsS --resolve api.amp.localhost:8080:127.0.0.1 \
-  http://api.amp.localhost:8080/api/v1/healthz
-curl -fsS -o /dev/null -w "%{http_code}\n" --resolve console.amp.localhost:8080:127.0.0.1 \
-  http://console.amp.localhost:8080
+curl -fsS http://localhost:9000/api/v1/healthz
+curl -fsS -o /dev/null -w "%{http_code}\n" http://localhost:3000
 ```
 
-Success: all four `kubectl wait` calls pass, healthz returns success, console returns 200.
+Success: the required `kubectl wait` calls pass, healthz returns success, console returns 200.
 
 ### Report to the user
 
-- Console: `http://console.amp.localhost:8080` — login `admin` / `admin`
-- API: `http://api.amp.localhost:8080`
-- Traces (OTLP ingest): `http://default-default.gateway.localhost:19080/otel`
+- Console: `http://localhost:3000` — login `admin` / `admin`
+- API: `http://localhost:9000`
+- Traces (OTLP ingest): `http://localhost:22893/otel`
 
 ## Path B: Linux VM with public IP
 
@@ -118,7 +122,7 @@ Optional flags: `--email <addr>` (ACME notifications), `--no-external-gateways`.
 
 ### Verify health
 
-As root on the VM, run the same four `kubectl wait` commands as Path A (without the
+As root on the VM, run the same `kubectl wait` commands as Path A (without the
 `docker exec` wrapper), then:
 
 ```bash
@@ -142,7 +146,7 @@ in their own terminal (new terminal if PATH just changed):
 
 ```bash
 # Path A:
-amctl login --url http://api.amp.localhost:8080 --name local
+amctl login --url http://localhost:9000 --name local
 # Path B:
 amctl login --url https://api.amp.<PUBLIC_IP>.sslip.io --name <a-name>
 ```
@@ -160,11 +164,11 @@ whether or not login succeeded).
 | Pods stuck `Pending`, installs time out | Docker VM under-resourced | Increase Colima/Docker resources to ≥4 CPU / 8 GB, re-run |
 | "Data plane agent certificate not ready" | cert-manager slow | Re-run `./install.sh` — the wait guards a re-issuance race |
 | "Control Plane webhook was not ready" then failure | Webhook race persisted past the built-in retry | Re-run `./install.sh` |
-| Helm/registry fetch 429s | GitHub rate limiting | Installer already retries with backoff; wait a few minutes and re-run |
+| Helm/registry fetch fails with 429 | GitHub rate limiting | No automatic retry — wait a few minutes and re-run the installer |
 | VM URLs unreachable but pods healthy | :443 blocked or non-static IP | Open 443 as raw TCP; if the IP changed, reinstall |
 
-Re-running `./install.sh` (or `install-vm.sh` with the same flags) is safe — steps are
-idempotent (`helm upgrade --install` throughout).
+Re-running `./install.sh` (or `install-vm.sh` with the same flags) is safe — the installer
+skips already-installed components and re-applies the rest.
 
 ## Teardown
 
