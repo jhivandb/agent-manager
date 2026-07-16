@@ -269,6 +269,12 @@ paths:
         - $ref: "#/components/parameters/environment"
         - $ref: "#/components/parameters/startTimeRequired"
         - $ref: "#/components/parameters/endTimeRequired"
+        - name: searchPhrase
+          in: query
+          required: false
+          description: Free-text phrase to filter log lines by
+          schema:
+            type: string
         - $ref: "#/components/parameters/logLevels"
         - name: limit
           in: query

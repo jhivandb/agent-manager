@@ -17,9 +17,13 @@
 package handlers
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/wso2/agent-manager/agent-manager-observer/controllers"
+	"github.com/wso2/agent-manager/agent-manager-observer/observer"
 )
 
 // newHandler creates a Handler with nil controllers — safe for validation-only
@@ -303,6 +307,68 @@ func TestGetLogs_InvalidSortOrder(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.GetLogs(rec, r)
 	assertBadRequest(t, rec)
+}
+
+// fakeObserverClient is a minimal observer.Client that captures the request
+// passed to QueryLogs so handler tests can assert on pass-through parameters.
+type fakeObserverClient struct {
+	lastLogsReq observer.LogsQueryRequest
+}
+
+func (f *fakeObserverClient) QueryTraces(_ context.Context, _ observer.TracesQueryRequest) (*observer.TracesQueryResponse, error) {
+	return &observer.TracesQueryResponse{}, nil
+}
+
+func (f *fakeObserverClient) QueryTraceSpans(_ context.Context, _ string, _ observer.TracesQueryRequest) (*observer.TraceSpansQueryResponse, error) {
+	return &observer.TraceSpansQueryResponse{}, nil
+}
+
+func (f *fakeObserverClient) GetSpanDetails(_ context.Context, _, _ string) (*observer.SpanDetailsResponse, error) {
+	return &observer.SpanDetailsResponse{}, nil
+}
+
+func (f *fakeObserverClient) QueryLogs(_ context.Context, req observer.LogsQueryRequest) (*observer.LogsQueryResponse, error) {
+	f.lastLogsReq = req
+	return &observer.LogsQueryResponse{}, nil
+}
+
+func (f *fakeObserverClient) QueryMetrics(_ context.Context, _ observer.MetricsQueryRequest) (*observer.ResourceMetricsTimeSeries, error) {
+	return &observer.ResourceMetricsTimeSeries{}, nil
+}
+
+func (f *fakeObserverClient) NamespaceFor(_ string) string {
+	return "default"
+}
+
+func TestGetLogs_SearchPhrasePassedThrough(t *testing.T) {
+	fake := &fakeObserverClient{}
+	h := NewHandler(nil, controllers.NewObservabilityController(fake))
+
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/logs?"+baseParams()+"&searchPhrase=connection+refused", nil)
+	rec := httptest.NewRecorder()
+	h.GetLogs(rec, r)
+
+	assertStatus(t, rec, http.StatusOK)
+	if fake.lastLogsReq.SearchPhrase == nil {
+		t.Fatal("expected searchPhrase to be forwarded to the upstream request, got nil")
+	}
+	if got := *fake.lastLogsReq.SearchPhrase; got != "connection refused" {
+		t.Errorf("expected searchPhrase %q, got %q", "connection refused", got)
+	}
+}
+
+func TestGetLogs_EmptySearchPhraseOmittedUpstream(t *testing.T) {
+	fake := &fakeObserverClient{}
+	h := NewHandler(nil, controllers.NewObservabilityController(fake))
+
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/logs?"+baseParams(), nil)
+	rec := httptest.NewRecorder()
+	h.GetLogs(rec, r)
+
+	assertStatus(t, rec, http.StatusOK)
+	if fake.lastLogsReq.SearchPhrase != nil {
+		t.Errorf("expected no searchPhrase upstream when absent, got %q", *fake.lastLogsReq.SearchPhrase)
+	}
 }
 
 func TestGetLogs_MethodNotAllowed(t *testing.T) {

@@ -385,6 +385,7 @@ func (h *Handler) GetLogs(w http.ResponseWriter, r *http.Request) {
 		Environment:  environment,
 		StartTime:    startTime,
 		EndTime:      endTime,
+		SearchPhrase: query.Get("searchPhrase"),
 		LogLevels:    logLevels,
 		Limit:        limit,
 		SortOrder:    sortOrder,
