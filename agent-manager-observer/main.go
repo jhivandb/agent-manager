@@ -74,7 +74,7 @@ func main() {
 	// Setup structured logging
 	setupLogger(cfg)
 
-	slog.Info("Starting tracing service", "port", cfg.Server.Port)
+	slog.Info("Starting agent-manager-observer", "port", cfg.Server.Port)
 
 	// Setup routes
 	mux := http.NewServeMux()

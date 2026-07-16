@@ -81,9 +81,9 @@ func TestGetWorkflowRunLogs_SendsExpectedQueryParamsAndDecodesResponse(t *testin
 	assert.InDelta(t, float32(12.5), got.TookMs, 0.001)
 }
 
-// TestGetWorkflowRunLogs_RetriesOnceAfter401 mirrors doGetMap's existing
-// 401-retry behavior: on a first 401 response the token is invalidated and the
-// request retried once before giving up.
+// TestGetWorkflowRunLogs_RetriesOnceAfter401 exercises doGetJSON's 401-retry
+// behavior: on a first 401 response the token is invalidated and the request
+// retried once before giving up.
 func TestGetWorkflowRunLogs_RetriesOnceAfter401(t *testing.T) {
 	calls := 0
 	mux := http.NewServeMux()

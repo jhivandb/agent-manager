@@ -23,7 +23,7 @@ import (
 	"strings"
 )
 
-// Config holds all configuration for the tracing service
+// Config holds all configuration for agent-manager-observer
 type Config struct {
 	Server   ServerConfig
 	Observer ObserverConfig
