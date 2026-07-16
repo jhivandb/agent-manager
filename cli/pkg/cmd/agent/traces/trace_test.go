@@ -24,16 +24,16 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/wso2/agent-manager/cli/pkg/clients/traceobssvc"
+	"github.com/wso2/agent-manager/cli/pkg/clients/observersvc"
 	"github.com/wso2/agent-manager/cli/pkg/iostreams"
 )
 
 func TestTrace_TextOutput(t *testing.T) {
 	ios, _, out, _ := iostreams.Test()
 	ios.JSON = false
-	client, closeFn := newTraceTestClient(t, http.StatusOK, traceobssvc.SpanListResponse{
+	client, closeFn := newTraceTestClient(t, http.StatusOK, observersvc.SpanListResponse{
 		TotalCount: 2,
-		Spans: []traceobssvc.SpanSummary{
+		Spans: []observersvc.SpanSummary{
 			{SpanID: "s1", SpanName: "handle_request", DurationNs: 1200000000},
 			{SpanID: "s2", ParentSpanID: "s1", SpanName: "llm_call", DurationNs: 800000000},
 		},
@@ -60,9 +60,9 @@ func TestTrace_TextOutput(t *testing.T) {
 
 func TestTrace_JSONOutput(t *testing.T) {
 	ios, out, _ := newTraceTestIO(true)
-	client, closeFn := newTraceTestClient(t, http.StatusOK, traceobssvc.SpanListResponse{
+	client, closeFn := newTraceTestClient(t, http.StatusOK, observersvc.SpanListResponse{
 		TotalCount: 1,
-		Spans: []traceobssvc.SpanSummary{
+		Spans: []observersvc.SpanSummary{
 			{SpanID: "s1", SpanName: "root"},
 		},
 	})
@@ -86,7 +86,7 @@ func TestTrace_JSONOutput(t *testing.T) {
 func TestPrintSpanDetail_PrefersResourceServiceAndAmpKind(t *testing.T) {
 	ios, _, out, _ := iostreams.Test()
 	ios.JSON = false
-	span := &traceobssvc.Span{
+	span := &observersvc.Span{
 		SpanID:  "s1",
 		Name:    "openai.chat",
 		Service: "40240e31-2d59-4892-a3cf-550e05d1f7df",
@@ -94,7 +94,7 @@ func TestPrintSpanDetail_PrefersResourceServiceAndAmpKind(t *testing.T) {
 		Resource: map[string]any{
 			"service.name": "otel-agent",
 		},
-		AmpAttributes: &traceobssvc.AmpAttributes{Kind: "llm"},
+		AmpAttributes: &observersvc.AmpAttributes{Kind: "llm"},
 	}
 
 	if err := printSpanDetail(ios, span); err != nil {
@@ -117,11 +117,11 @@ func TestRunTrace_LowercasesTraceID(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(traceobssvc.SpanListResponse{})
+		_ = json.NewEncoder(w).Encode(observersvc.SpanListResponse{})
 	}))
 	defer server.Close()
 
-	client, err := traceobssvc.NewClient(server.URL)
+	client, err := observersvc.NewClient(server.URL)
 	if err != nil {
 		t.Fatalf("new client: %v", err)
 	}
@@ -130,7 +130,7 @@ func TestRunTrace_LowercasesTraceID(t *testing.T) {
 	upperID := "F367180F0717ABCDEF1234567890ABCD"
 	err = runTrace(context.Background(), &TraceOptions{
 		IO: ios,
-		TraceClient: func(context.Context) (*traceobssvc.Client, error) {
+		TraceClient: func(context.Context) (*observersvc.Client, error) {
 			return client, nil
 		},
 		Scope:     traceBaseScope(),
@@ -158,11 +158,11 @@ func TestRunSpanDetail_LowercasesTraceAndSpanID(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(traceobssvc.Span{})
+		_ = json.NewEncoder(w).Encode(observersvc.Span{})
 	}))
 	defer server.Close()
 
-	client, err := traceobssvc.NewClient(server.URL)
+	client, err := observersvc.NewClient(server.URL)
 	if err != nil {
 		t.Fatalf("new client: %v", err)
 	}
@@ -172,7 +172,7 @@ func TestRunSpanDetail_LowercasesTraceAndSpanID(t *testing.T) {
 	upperSpan := "ABCDEF1234567890"
 	err = runSpanDetail(context.Background(), &TraceOptions{
 		IO: ios,
-		TraceClient: func(context.Context) (*traceobssvc.Client, error) {
+		TraceClient: func(context.Context) (*observersvc.Client, error) {
 			return client, nil
 		},
 		Scope:     traceBaseScope(),
@@ -197,7 +197,7 @@ func TestRunSpanDetail_LowercasesTraceAndSpanID(t *testing.T) {
 func TestPrintSpanDetail_FallbackWhenNoResourceOrAmpKind(t *testing.T) {
 	ios, _, out, _ := iostreams.Test()
 	ios.JSON = false
-	span := &traceobssvc.Span{
+	span := &observersvc.Span{
 		SpanID:  "s1",
 		Name:    "openai.chat",
 		Service: "otel-agent",

@@ -23,6 +23,7 @@ import (
 	"github.com/spf13/cobra"
 
 	amsvc "github.com/wso2/agent-manager/cli/pkg/clients/amsvc/gen"
+	"github.com/wso2/agent-manager/cli/pkg/clients/observersvc"
 	"github.com/wso2/agent-manager/cli/pkg/clierr"
 	"github.com/wso2/agent-manager/cli/pkg/cmdutil"
 	"github.com/wso2/agent-manager/cli/pkg/iostreams"
@@ -32,6 +33,7 @@ import (
 type LogsOptions struct {
 	IO           *iostreams.IOStreams
 	Client       func(context.Context) (*amsvc.ClientWithResponses, error)
+	Observer     func(context.Context) (*observersvc.Client, error)
 	ResolveScope func(*cobra.Command, bool, bool) (string, string, error)
 	MakeScope    func(org, proj, agent string) render.Scope
 	ResolveAgent func([]string) (string, []string, error)
@@ -47,6 +49,7 @@ func NewLogsCmd(f *cmdutil.Factory) *cobra.Command {
 	opts := &LogsOptions{
 		IO:           f.IOStreams,
 		Client:       f.AgentManager,
+		Observer:     f.Observer,
 		ResolveScope: f.ResolveOrgProject,
 		MakeScope:    f.AgentScope,
 		ResolveAgent: f.ResolveAgent,
@@ -111,19 +114,24 @@ func runLogs(ctx context.Context, o *LogsOptions) error {
 		buildName = resolved
 	}
 
-	resp, err := client.GetBuildLogsWithResponse(ctx, o.Org, o.Proj, o.AgentName, buildName)
+	observer, err := o.Observer(ctx)
 	if err != nil {
-		return render.Error(o.IO, o.Scope, clierr.Newf(clierr.Transport, "%v", err))
+		return render.Error(o.IO, o.Scope, err)
 	}
-	if resp.JSON200 == nil {
-		return render.Error(o.IO, o.Scope, cmdutil.ErrorFromServer(resp.HTTPResponse, cmdutil.FirstNonNil(resp.JSON404, resp.JSON500)))
+
+	resp, err := observer.GetBuildLogs(ctx, observersvc.BuildLogsParams{
+		Organization: o.Org,
+		BuildName:    buildName,
+	})
+	if err != nil {
+		return render.Error(o.IO, o.Scope, cmdutil.ObserverErrorFromResponse(err))
 	}
 
 	if o.IO.JSON {
-		return render.JSONSuccess(o.IO, o.Scope, resp.JSON200)
+		return render.JSONSuccess(o.IO, o.Scope, resp)
 	}
 
-	for _, entry := range resp.JSON200.Logs {
+	for _, entry := range resp.Logs {
 		fmt.Fprintln(o.IO.Out, entry.Log)
 	}
 	return nil

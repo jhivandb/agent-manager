@@ -26,7 +26,7 @@ import (
 func NewTracesCmd(f *cmdutil.Factory) *cobra.Command {
 	opts := &ListTracesOptions{
 		IO:           f.IOStreams,
-		TraceClient:  f.TraceObserver,
+		TraceClient:  f.Observer,
 		AMClient:     f.AgentManager,
 		ResolveScope: f.ResolveOrgProject,
 		ResolveAgent: f.ResolveAgent,

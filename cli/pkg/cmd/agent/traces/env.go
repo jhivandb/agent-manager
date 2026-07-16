@@ -26,7 +26,7 @@ import (
 
 // requireEnvironment verifies that env exists in org via the agent-manager
 // service, so that callers can surface "Environment not found" the same way
-// `agent metrics` does, instead of the generic 500 from traces-observer.
+// `agent metrics` does, instead of the generic 500 from the observer.
 func requireEnvironment(ctx context.Context, client *amsvc.ClientWithResponses, org, env string) error {
 	if env == "" {
 		return nil

@@ -22,18 +22,18 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/wso2/agent-manager/cli/pkg/clients/traceobssvc"
+	"github.com/wso2/agent-manager/cli/pkg/clients/observersvc"
 )
 
 func TestExportTraces_OutputsJSON(t *testing.T) {
 	ios, out, _ := newTraceTestIO(false)
 	ios.JSON = true
-	client, closeFn := newTraceTestClient(t, http.StatusOK, traceobssvc.TraceExportResponse{
+	client, closeFn := newTraceTestClient(t, http.StatusOK, observersvc.TraceExportResponse{
 		TotalCount: 1,
-		Traces: []traceobssvc.FullTrace{
+		Traces: []observersvc.FullTrace{
 			{
-				TraceOverview: traceobssvc.TraceOverview{TraceID: "abc123", SpanCount: 3},
-				Spans: []traceobssvc.Span{
+				TraceOverview: observersvc.TraceOverview{TraceID: "abc123", SpanCount: 3},
+				Spans: []observersvc.Span{
 					{SpanID: "s1", Name: "root"},
 				},
 			},

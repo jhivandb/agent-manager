@@ -24,16 +24,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/wso2/agent-manager/cli/pkg/clients/traceobssvc"
+	"github.com/wso2/agent-manager/cli/pkg/clients/observersvc"
 	"github.com/wso2/agent-manager/cli/pkg/iostreams"
 )
 
 func TestListTraces_TextOutput(t *testing.T) {
 	ios, _, out, _ := iostreams.Test()
 	ios.JSON = false
-	client, closeFn := newTraceTestClient(t, http.StatusOK, traceobssvc.TraceOverviewResponse{
+	client, closeFn := newTraceTestClient(t, http.StatusOK, observersvc.TraceOverviewResponse{
 		TotalCount: 1,
-		Traces: []traceobssvc.TraceOverview{
+		Traces: []observersvc.TraceOverview{
 			{
 				TraceID:      "abc123",
 				RootSpanName: "handle_request",
@@ -62,9 +62,9 @@ func TestRunFilteredTraces_SameColumnsAsList(t *testing.T) {
 	ios, _, out, _ := iostreams.Test()
 	ios.JSON = false
 	startTime := time.Now().Add(-5 * time.Minute).UTC().Format(time.RFC3339Nano)
-	client, closeFn := newTraceTestClient(t, http.StatusOK, traceobssvc.TraceOverviewResponse{
+	client, closeFn := newTraceTestClient(t, http.StatusOK, observersvc.TraceOverviewResponse{
 		TotalCount: 1,
-		Traces: []traceobssvc.TraceOverview{
+		Traces: []observersvc.TraceOverview{
 			{
 				TraceID:         "abc123",
 				RootSpanID:      "rootspanidshouldnotshow",

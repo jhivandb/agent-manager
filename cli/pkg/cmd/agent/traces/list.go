@@ -25,7 +25,7 @@ import (
 	"github.com/spf13/cobra"
 
 	amsvc "github.com/wso2/agent-manager/cli/pkg/clients/amsvc/gen"
-	"github.com/wso2/agent-manager/cli/pkg/clients/traceobssvc"
+	"github.com/wso2/agent-manager/cli/pkg/clients/observersvc"
 	"github.com/wso2/agent-manager/cli/pkg/cmdutil"
 	"github.com/wso2/agent-manager/cli/pkg/iostreams"
 	"github.com/wso2/agent-manager/cli/pkg/render"
@@ -42,7 +42,7 @@ const (
 
 type ListTracesOptions struct {
 	IO           *iostreams.IOStreams
-	TraceClient  func(context.Context) (*traceobssvc.Client, error)
+	TraceClient  func(context.Context) (*observersvc.Client, error)
 	AMClient     func(context.Context) (*amsvc.ClientWithResponses, error)
 	ResolveScope func(*cobra.Command, bool, bool) (string, string, error)
 	ResolveAgent func([]string) (string, []string, error)
@@ -84,7 +84,7 @@ func runListTraces(ctx context.Context, o *ListTracesOptions) error {
 
 	limit := o.Limit
 	sortOrder := o.SortOrder
-	resp, err := client.ListTraces(ctx, &traceobssvc.ListTracesParams{
+	resp, err := client.ListTraces(ctx, &observersvc.ListTracesParams{
 		Organization: o.Org,
 		Project:      o.Proj,
 		Agent:        o.AgentName,
@@ -95,7 +95,7 @@ func runListTraces(ctx context.Context, o *ListTracesOptions) error {
 		SortOrder:    &sortOrder,
 	})
 	if err != nil {
-		return render.Error(o.IO, o.Scope, cmdutil.TraceObserverErrorFromResponse(err))
+		return render.Error(o.IO, o.Scope, cmdutil.ObserverErrorFromResponse(err))
 	}
 
 	if o.IO.JSON {
@@ -110,7 +110,7 @@ func runListTraces(ctx context.Context, o *ListTracesOptions) error {
 	return renderOverviewTable(o, resp.Traces)
 }
 
-func renderOverviewTable(o *ListTracesOptions, traces []traceobssvc.TraceOverview) error {
+func renderOverviewTable(o *ListTracesOptions, traces []observersvc.TraceOverview) error {
 	tp := tableprinter.New(o.IO, "trace id", "status", "duration", "spans", "tokens", "root span", "started")
 	for _, tr := range traces {
 		tp.AddField(truncate(tr.TraceID, 16))
@@ -136,7 +136,7 @@ func runFilteredTraces(ctx context.Context, o *ListTracesOptions) error {
 
 	limit := o.Limit
 	sortOrder := o.SortOrder
-	params := &traceobssvc.ListTracesParams{
+	params := &observersvc.ListTracesParams{
 		Organization: o.Org,
 		Project:      o.Proj,
 		Agent:        o.AgentName,
@@ -151,9 +151,9 @@ func runFilteredTraces(ctx context.Context, o *ListTracesOptions) error {
 	if o.Condition == conditionToolCallFails {
 		resp, err := client.ExportTraces(ctx, params)
 		if err != nil {
-			return render.Error(o.IO, o.Scope, cmdutil.TraceObserverErrorFromResponse(err))
+			return render.Error(o.IO, o.Scope, cmdutil.ObserverErrorFromResponse(err))
 		}
-		filtered := make([]traceobssvc.TraceOverview, 0, len(resp.Traces))
+		filtered := make([]observersvc.TraceOverview, 0, len(resp.Traces))
 		for _, tr := range resp.Traces {
 			if matchesFullCondition(tr) {
 				filtered = append(filtered, tr.TraceOverview)
@@ -164,9 +164,9 @@ func runFilteredTraces(ctx context.Context, o *ListTracesOptions) error {
 
 	resp, err := client.ListTraces(ctx, params)
 	if err != nil {
-		return render.Error(o.IO, o.Scope, cmdutil.TraceObserverErrorFromResponse(err))
+		return render.Error(o.IO, o.Scope, cmdutil.ObserverErrorFromResponse(err))
 	}
-	filtered := make([]traceobssvc.TraceOverview, 0, len(resp.Traces))
+	filtered := make([]observersvc.TraceOverview, 0, len(resp.Traces))
 	for _, tr := range resp.Traces {
 		if matchesOverviewCondition(tr, o) {
 			filtered = append(filtered, tr)
@@ -175,10 +175,10 @@ func runFilteredTraces(ctx context.Context, o *ListTracesOptions) error {
 	return renderFilteredOverview(o, filtered)
 }
 
-func renderFilteredOverview(o *ListTracesOptions, traces []traceobssvc.TraceOverview) error {
+func renderFilteredOverview(o *ListTracesOptions, traces []observersvc.TraceOverview) error {
 	if o.IO.JSON {
 		if traces == nil {
-			traces = []traceobssvc.TraceOverview{}
+			traces = []observersvc.TraceOverview{}
 		}
 		return render.JSONSuccess(o.IO, o.Scope, map[string]any{
 			"traces": traces,
@@ -212,7 +212,7 @@ func validateCondition(c string) error {
 	return cmdutil.FlagErrorf("--condition: %q is not valid; must be one of %s", c, strings.Join(validConditions, ", "))
 }
 
-func matchesOverviewCondition(tr traceobssvc.TraceOverview, o *ListTracesOptions) bool {
+func matchesOverviewCondition(tr observersvc.TraceOverview, o *ListTracesOptions) bool {
 	switch o.Condition {
 	case conditionErrorStatus:
 		return tr.Status != nil && tr.Status.ErrorCount > 0
@@ -227,7 +227,7 @@ func matchesOverviewCondition(tr traceobssvc.TraceOverview, o *ListTracesOptions
 	}
 }
 
-func matchesFullCondition(tr traceobssvc.FullTrace) bool {
+func matchesFullCondition(tr observersvc.FullTrace) bool {
 	for _, span := range tr.Spans {
 		attrs := span.AmpAttributes
 		if attrs == nil {
@@ -243,14 +243,14 @@ func matchesFullCondition(tr traceobssvc.FullTrace) bool {
 	return false
 }
 
-func traceStatus(status *traceobssvc.TraceStatus) string {
+func traceStatus(status *observersvc.TraceStatus) string {
 	if status != nil && status.ErrorCount > 0 {
 		return "error"
 	}
 	return "ok"
 }
 
-func tokenCount(usage *traceobssvc.TokenUsage) string {
+func tokenCount(usage *observersvc.TokenUsage) string {
 	if usage == nil {
 		return "0"
 	}

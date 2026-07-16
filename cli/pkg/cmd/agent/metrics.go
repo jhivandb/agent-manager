@@ -23,7 +23,7 @@ import (
 	"github.com/spf13/cobra"
 
 	amsvc "github.com/wso2/agent-manager/cli/pkg/clients/amsvc/gen"
-	"github.com/wso2/agent-manager/cli/pkg/clierr"
+	"github.com/wso2/agent-manager/cli/pkg/clients/observersvc"
 	"github.com/wso2/agent-manager/cli/pkg/cmdutil"
 	"github.com/wso2/agent-manager/cli/pkg/iostreams"
 	"github.com/wso2/agent-manager/cli/pkg/render"
@@ -33,6 +33,7 @@ import (
 type MetricsOptions struct {
 	IO           *iostreams.IOStreams
 	Client       func(context.Context) (*amsvc.ClientWithResponses, error)
+	Observer     func(context.Context) (*observersvc.Client, error)
 	ResolveScope func(*cobra.Command, bool, bool) (string, string, error)
 	ResolveAgent func([]string) (string, []string, error)
 	ResolveEnv   func(*cobra.Command) (string, error)
@@ -51,6 +52,7 @@ func NewMetricsCmd(f *cmdutil.Factory) *cobra.Command {
 	opts := &MetricsOptions{
 		IO:           f.IOStreams,
 		Client:       f.AgentManager,
+		Observer:     f.Observer,
 		ResolveScope: f.ResolveOrgProject,
 		ResolveAgent: f.ResolveAgent,
 		ResolveEnv:   f.ResolveEnvironment,
@@ -110,26 +112,28 @@ func runMetrics(ctx context.Context, o *MetricsOptions) error {
 		return render.Error(o.IO, o.Scope, err)
 	}
 
-	resp, err := client.GetAgentMetricsWithResponse(ctx, o.Org, o.Proj, o.AgentName,
-		amsvc.MetricsFilterRequest{
-			EnvironmentName: o.Env,
-			StartTime:       o.StartTime,
-			EndTime:         o.EndTime,
-		},
-	)
+	observer, err := o.Observer(ctx)
 	if err != nil {
-		return render.Error(o.IO, o.Scope, clierr.Newf(clierr.Transport, "%v", err))
+		return render.Error(o.IO, o.Scope, err)
 	}
-	if resp.JSON200 == nil {
-		return render.Error(o.IO, o.Scope, cmdutil.ErrorFromServer(resp.HTTPResponse,
-			cmdutil.FirstNonNil(resp.JSON400, resp.JSON404, resp.JSON500)))
+
+	resp, err := observer.GetMetrics(ctx, observersvc.MetricsParams{
+		Organization: o.Org,
+		Project:      o.Proj,
+		Agent:        o.AgentName,
+		Environment:  o.Env,
+		StartTime:    o.StartTime,
+		EndTime:      o.EndTime,
+	})
+	if err != nil {
+		return render.Error(o.IO, o.Scope, cmdutil.ObserverErrorFromResponse(err))
 	}
 
 	if o.IO.JSON {
-		return render.JSONSuccess(o.IO, o.Scope, resp.JSON200)
+		return render.JSONSuccess(o.IO, o.Scope, resp)
 	}
 
-	m := resp.JSON200
+	m := resp
 	tp := tableprinter.New(o.IO, "metric", "current", "request", "limit")
 	tp.AddField("CPU")
 	tp.AddField(formatCPU(lastValue(m.CpuUsage)))
@@ -144,7 +148,7 @@ func runMetrics(ctx context.Context, o *MetricsOptions) error {
 	return tp.Render()
 }
 
-func lastValue(points []amsvc.MetricDataPoint) float64 {
+func lastValue(points []observersvc.MetricDataPoint) float64 {
 	if len(points) == 0 {
 		return 0
 	}

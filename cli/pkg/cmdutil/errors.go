@@ -23,7 +23,7 @@ import (
 	"strings"
 
 	amsvc "github.com/wso2/agent-manager/cli/pkg/clients/amsvc/gen"
-	"github.com/wso2/agent-manager/cli/pkg/clients/traceobssvc"
+	"github.com/wso2/agent-manager/cli/pkg/clients/observersvc"
 	"github.com/wso2/agent-manager/cli/pkg/clierr"
 )
 
@@ -122,10 +122,10 @@ func FirstNonNil(errs ...*amsvc.ErrorResponse) *amsvc.ErrorResponse {
 	return nil
 }
 
-// TraceObserverErrorFromResponse converts a traceobssvc error into a CLIError.
+// ObserverErrorFromResponse converts an observersvc error into a CLIError.
 // Non-HTTP errors map to clierr.Transport.
-func TraceObserverErrorFromResponse(err error) clierr.CLIError {
-	var herr *traceobssvc.HTTPError
+func ObserverErrorFromResponse(err error) clierr.CLIError {
+	var herr *observersvc.HTTPError
 	if !errors.As(err, &herr) {
 		return clierr.CLIError{
 			Code:           clierr.Transport,
@@ -144,7 +144,7 @@ func TraceObserverErrorFromResponse(err error) clierr.CLIError {
 	case http.StatusBadRequest:
 		code = clierr.Validation
 	}
-	msg := fmt.Sprintf("trace observer returned %d", herr.StatusCode)
+	msg := fmt.Sprintf("observer returned %d", herr.StatusCode)
 	if herr.Body != nil && herr.Body.Message != "" {
 		msg = herr.Body.Message
 	}

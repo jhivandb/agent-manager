@@ -14,9 +14,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Package traceobssvc is a handwritten client for the traces-observer-service.
-// Types mirror the opensearch/controllers shapes used by the upstream service.
-package traceobssvc
+// Package observersvc is a handwritten client for the agent-manager-observer
+// service. Types mirror the opensearch/controllers shapes used by the
+// upstream service.
+package observersvc
 
 import (
 	"fmt"
@@ -36,9 +37,9 @@ type HTTPError struct {
 
 func (e *HTTPError) Error() string {
 	if e.Body != nil && e.Body.Message != "" {
-		return fmt.Sprintf("traces-observer: %d %s: %s", e.StatusCode, e.Body.Error, e.Body.Message)
+		return fmt.Sprintf("observer: %d %s: %s", e.StatusCode, e.Body.Error, e.Body.Message)
 	}
-	return fmt.Sprintf("traces-observer: %d", e.StatusCode)
+	return fmt.Sprintf("observer: %d", e.StatusCode)
 }
 
 type TokenUsage struct {
@@ -150,4 +151,64 @@ type GetTraceSpansParams struct {
 	EndTime      time.Time
 	Limit        *int
 	SortOrder    *string
+}
+
+// RuntimeLogsParams are the query params for GET /api/v1/logs.
+type RuntimeLogsParams struct {
+	Organization string
+	Project      string
+	Agent        string
+	Environment  string
+	StartTime    string
+	EndTime      string
+	SearchPhrase string
+	SortOrder    string
+	LogLevels    []string
+	Limit        *int
+}
+
+// BuildLogsParams are the query params for GET /api/v1/build-logs.
+type BuildLogsParams struct {
+	Organization string
+	BuildName    string
+}
+
+// MetricsParams are the query params for GET /api/v1/metrics.
+type MetricsParams struct {
+	Organization string
+	Project      string
+	Agent        string
+	Environment  string
+	StartTime    string
+	EndTime      string
+}
+
+// LogEntry is a single log line in a LogsResponse.
+type LogEntry struct {
+	Timestamp time.Time `json:"timestamp"`
+	Log       string    `json:"log"`
+	LogLevel  string    `json:"logLevel"`
+}
+
+// LogsResponse is the response for the runtime-logs and build-logs endpoints.
+type LogsResponse struct {
+	Logs       []LogEntry `json:"logs"`
+	TotalCount int32      `json:"totalCount"`
+	TookMs     float32    `json:"tookMs"`
+}
+
+// MetricDataPoint is a single timestamped value in a metrics time series.
+type MetricDataPoint struct {
+	Time  string  `json:"time"`
+	Value float64 `json:"value"`
+}
+
+// MetricsResponse is the response for the resource metrics endpoint.
+type MetricsResponse struct {
+	CpuUsage       []MetricDataPoint `json:"cpuUsage"`
+	CpuRequests    []MetricDataPoint `json:"cpuRequests"`
+	CpuLimits      []MetricDataPoint `json:"cpuLimits"`
+	Memory         []MetricDataPoint `json:"memory"`
+	MemoryRequests []MetricDataPoint `json:"memoryRequests"`
+	MemoryLimits   []MetricDataPoint `json:"memoryLimits"`
 }

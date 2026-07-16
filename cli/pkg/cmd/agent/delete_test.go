@@ -27,6 +27,7 @@ import (
 	"testing"
 
 	amsvc "github.com/wso2/agent-manager/cli/pkg/clients/amsvc/gen"
+	"github.com/wso2/agent-manager/cli/pkg/clients/observersvc"
 	"github.com/wso2/agent-manager/cli/pkg/clierr"
 	"github.com/wso2/agent-manager/cli/pkg/iostreams"
 	"github.com/wso2/agent-manager/cli/pkg/render"
@@ -122,6 +123,31 @@ func newExternalAgentClient(t *testing.T) (func(context.Context) (*amsvc.ClientW
 
 func unreachableClient(context.Context) (*amsvc.ClientWithResponses, error) {
 	return nil, errors.New("client should not be constructed")
+}
+
+// newObserverTestClient returns an observersvc client that serves status/body
+// for every request, plus the closer for the underlying httptest server.
+func newObserverTestClient(t *testing.T, status int, body any) (func(context.Context) (*observersvc.Client, error), func()) {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		if body != nil {
+			if err := json.NewEncoder(w).Encode(body); err != nil {
+				t.Errorf("encode response: %v", err)
+			}
+		}
+	}))
+	client, err := observersvc.NewClient(server.URL)
+	if err != nil {
+		server.Close()
+		t.Fatalf("new observer client: %v", err)
+	}
+	return func(context.Context) (*observersvc.Client, error) { return client, nil }, server.Close
+}
+
+func unreachableObserverClient(context.Context) (*observersvc.Client, error) {
+	return nil, errors.New("observer client should not be constructed")
 }
 
 type fakePrompter struct {

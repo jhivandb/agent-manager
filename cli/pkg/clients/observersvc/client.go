@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-package traceobssvc
+package observersvc
 
 import (
 	"context"
@@ -52,7 +52,7 @@ func WithRequestEditor(fn RequestEditorFn) Option {
 
 func NewClient(baseURL string, opts ...Option) (*Client, error) {
 	if baseURL == "" {
-		return nil, fmt.Errorf("traceobssvc: baseURL is required")
+		return nil, fmt.Errorf("observersvc: baseURL is required")
 	}
 	c := &Client{
 		baseURL:    strings.TrimRight(baseURL, "/"),
@@ -103,7 +103,7 @@ func (c *Client) do(ctx context.Context, method, path string, q url.Values, out 
 		return nil
 	}
 	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
-		return fmt.Errorf("traceobssvc: decode response: %w", err)
+		return fmt.Errorf("observersvc: decode response: %w", err)
 	}
 	return nil
 }
@@ -192,4 +192,65 @@ func setOptionalString(q url.Values, key string, val *string) {
 	if val != nil && *val != "" {
 		q.Set(key, *val)
 	}
+}
+
+func (c *Client) GetRuntimeLogs(ctx context.Context, p RuntimeLogsParams) (*LogsResponse, error) {
+	q := url.Values{}
+	q.Set("organization", p.Organization)
+	q.Set("project", p.Project)
+	q.Set("agent", p.Agent)
+	q.Set("environment", p.Environment)
+	if p.StartTime != "" {
+		q.Set("startTime", p.StartTime)
+	}
+	if p.EndTime != "" {
+		q.Set("endTime", p.EndTime)
+	}
+	if p.SearchPhrase != "" {
+		q.Set("searchPhrase", p.SearchPhrase)
+	}
+	if len(p.LogLevels) > 0 {
+		q.Set("logLevels", strings.Join(p.LogLevels, ","))
+	}
+	if p.Limit != nil {
+		q.Set("limit", strconv.Itoa(*p.Limit))
+	}
+	if p.SortOrder != "" {
+		q.Set("sortOrder", p.SortOrder)
+	}
+	var out LogsResponse
+	if err := c.do(ctx, http.MethodGet, "/api/v1/logs", q, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *Client) GetBuildLogs(ctx context.Context, p BuildLogsParams) (*LogsResponse, error) {
+	q := url.Values{}
+	q.Set("organization", p.Organization)
+	q.Set("buildName", p.BuildName)
+	var out LogsResponse
+	if err := c.do(ctx, http.MethodGet, "/api/v1/build-logs", q, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *Client) GetMetrics(ctx context.Context, p MetricsParams) (*MetricsResponse, error) {
+	q := url.Values{}
+	q.Set("organization", p.Organization)
+	q.Set("project", p.Project)
+	q.Set("agent", p.Agent)
+	q.Set("environment", p.Environment)
+	if p.StartTime != "" {
+		q.Set("startTime", p.StartTime)
+	}
+	if p.EndTime != "" {
+		q.Set("endTime", p.EndTime)
+	}
+	var out MetricsResponse
+	if err := c.do(ctx, http.MethodGet, "/api/v1/metrics", q, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
 }

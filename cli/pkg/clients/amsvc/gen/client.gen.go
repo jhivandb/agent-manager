@@ -593,9 +593,6 @@ type ClientInterface interface {
 	// GetBuild request
 	GetBuild(ctx context.Context, orgName string, projName string, agentName string, buildName string, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// GetBuildLogs request
-	GetBuildLogs(ctx context.Context, orgName string, projName string, agentName string, buildName string, reqEditors ...RequestEditorFn) (*http.Response, error)
-
 	// GetAgentConfigurations request
 	GetAgentConfigurations(ctx context.Context, orgName string, projName string, agentName string, params *GetAgentConfigurationsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -702,11 +699,6 @@ type ClientInterface interface {
 
 	RotateMCPConfigAPIKey(ctx context.Context, orgName string, projName string, agentName string, configId openapi_types.UUID, envName string, keyName string, body RotateMCPConfigAPIKeyJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// GetAgentMetricsWithBody request with any body
-	GetAgentMetricsWithBody(ctx context.Context, orgName string, projName string, agentName string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
-
-	GetAgentMetrics(ctx context.Context, orgName string, projName string, agentName string, body GetAgentMetricsJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
-
 	// ListAgentModelConfigs request
 	ListAgentModelConfigs(ctx context.Context, orgName string, projName string, agentName string, params *ListAgentModelConfigsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -808,11 +800,6 @@ type ClientInterface interface {
 
 	// GetAgentRoles request
 	GetAgentRoles(ctx context.Context, orgName string, projName string, agentName string, params *GetAgentRolesParams, reqEditors ...RequestEditorFn) (*http.Response, error)
-
-	// FilterAgentRuntimeLogsWithBody request with any body
-	FilterAgentRuntimeLogsWithBody(ctx context.Context, orgName string, projName string, agentName string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
-
-	FilterAgentRuntimeLogs(ctx context.Context, orgName string, projName string, agentName string, body FilterAgentRuntimeLogsJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetAgentTraceScores request
 	GetAgentTraceScores(ctx context.Context, orgName string, projName string, agentName string, params *GetAgentTraceScoresParams, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -3075,18 +3062,6 @@ func (c *Client) GetBuild(ctx context.Context, orgName string, projName string, 
 	return c.Client.Do(req)
 }
 
-func (c *Client) GetBuildLogs(ctx context.Context, orgName string, projName string, agentName string, buildName string, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewGetBuildLogsRequest(c.Server, orgName, projName, agentName, buildName)
-	if err != nil {
-		return nil, err
-	}
-	req = req.WithContext(ctx)
-	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
-		return nil, err
-	}
-	return c.Client.Do(req)
-}
-
 func (c *Client) GetAgentConfigurations(ctx context.Context, orgName string, projName string, agentName string, params *GetAgentConfigurationsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetAgentConfigurationsRequest(c.Server, orgName, projName, agentName, params)
 	if err != nil {
@@ -3555,30 +3530,6 @@ func (c *Client) RotateMCPConfigAPIKey(ctx context.Context, orgName string, proj
 	return c.Client.Do(req)
 }
 
-func (c *Client) GetAgentMetricsWithBody(ctx context.Context, orgName string, projName string, agentName string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewGetAgentMetricsRequestWithBody(c.Server, orgName, projName, agentName, contentType, body)
-	if err != nil {
-		return nil, err
-	}
-	req = req.WithContext(ctx)
-	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
-		return nil, err
-	}
-	return c.Client.Do(req)
-}
-
-func (c *Client) GetAgentMetrics(ctx context.Context, orgName string, projName string, agentName string, body GetAgentMetricsJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewGetAgentMetricsRequest(c.Server, orgName, projName, agentName, body)
-	if err != nil {
-		return nil, err
-	}
-	req = req.WithContext(ctx)
-	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
-		return nil, err
-	}
-	return c.Client.Do(req)
-}
-
 func (c *Client) ListAgentModelConfigs(ctx context.Context, orgName string, projName string, agentName string, params *ListAgentModelConfigsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewListAgentModelConfigsRequest(c.Server, orgName, projName, agentName, params)
 	if err != nil {
@@ -4013,30 +3964,6 @@ func (c *Client) UpdateAgentResourceConfigs(ctx context.Context, orgName string,
 
 func (c *Client) GetAgentRoles(ctx context.Context, orgName string, projName string, agentName string, params *GetAgentRolesParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetAgentRolesRequest(c.Server, orgName, projName, agentName, params)
-	if err != nil {
-		return nil, err
-	}
-	req = req.WithContext(ctx)
-	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
-		return nil, err
-	}
-	return c.Client.Do(req)
-}
-
-func (c *Client) FilterAgentRuntimeLogsWithBody(ctx context.Context, orgName string, projName string, agentName string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewFilterAgentRuntimeLogsRequestWithBody(c.Server, orgName, projName, agentName, contentType, body)
-	if err != nil {
-		return nil, err
-	}
-	req = req.WithContext(ctx)
-	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
-		return nil, err
-	}
-	return c.Client.Do(req)
-}
-
-func (c *Client) FilterAgentRuntimeLogs(ctx context.Context, orgName string, projName string, agentName string, body FilterAgentRuntimeLogsJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewFilterAgentRuntimeLogsRequest(c.Server, orgName, projName, agentName, body)
 	if err != nil {
 		return nil, err
 	}
@@ -11479,61 +11406,6 @@ func NewGetBuildRequest(server string, orgName string, projName string, agentNam
 	return req, nil
 }
 
-// NewGetBuildLogsRequest generates requests for GetBuildLogs
-func NewGetBuildLogsRequest(server string, orgName string, projName string, agentName string, buildName string) (*http.Request, error) {
-	var err error
-
-	var pathParam0 string
-
-	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "orgName", orgName, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
-	if err != nil {
-		return nil, err
-	}
-
-	var pathParam1 string
-
-	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "projName", projName, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
-	if err != nil {
-		return nil, err
-	}
-
-	var pathParam2 string
-
-	pathParam2, err = runtime.StyleParamWithOptions("simple", false, "agentName", agentName, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
-	if err != nil {
-		return nil, err
-	}
-
-	var pathParam3 string
-
-	pathParam3, err = runtime.StyleParamWithOptions("simple", false, "buildName", buildName, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
-	if err != nil {
-		return nil, err
-	}
-
-	serverURL, err := url.Parse(server)
-	if err != nil {
-		return nil, err
-	}
-
-	operationPath := fmt.Sprintf("/orgs/%s/projects/%s/agents/%s/builds/%s/build-logs", pathParam0, pathParam1, pathParam2, pathParam3)
-	if operationPath[0] == '/' {
-		operationPath = "." + operationPath
-	}
-
-	queryURL, err := serverURL.Parse(operationPath)
-	if err != nil {
-		return nil, err
-	}
-
-	req, err := http.NewRequest("GET", queryURL.String(), nil)
-	if err != nil {
-		return nil, err
-	}
-
-	return req, nil
-}
-
 // NewGetAgentConfigurationsRequest generates requests for GetAgentConfigurations
 func NewGetAgentConfigurationsRequest(server string, orgName string, projName string, agentName string, params *GetAgentConfigurationsParams) (*http.Request, error) {
 	var err error
@@ -13338,67 +13210,6 @@ func NewRotateMCPConfigAPIKeyRequestWithBody(server string, orgName string, proj
 	}
 
 	req, err := http.NewRequest("PUT", queryURL.String(), body)
-	if err != nil {
-		return nil, err
-	}
-
-	req.Header.Add("Content-Type", contentType)
-
-	return req, nil
-}
-
-// NewGetAgentMetricsRequest calls the generic GetAgentMetrics builder with application/json body
-func NewGetAgentMetricsRequest(server string, orgName string, projName string, agentName string, body GetAgentMetricsJSONRequestBody) (*http.Request, error) {
-	var bodyReader io.Reader
-	buf, err := json.Marshal(body)
-	if err != nil {
-		return nil, err
-	}
-	bodyReader = bytes.NewReader(buf)
-	return NewGetAgentMetricsRequestWithBody(server, orgName, projName, agentName, "application/json", bodyReader)
-}
-
-// NewGetAgentMetricsRequestWithBody generates requests for GetAgentMetrics with any type of body
-func NewGetAgentMetricsRequestWithBody(server string, orgName string, projName string, agentName string, contentType string, body io.Reader) (*http.Request, error) {
-	var err error
-
-	var pathParam0 string
-
-	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "orgName", orgName, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
-	if err != nil {
-		return nil, err
-	}
-
-	var pathParam1 string
-
-	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "projName", projName, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
-	if err != nil {
-		return nil, err
-	}
-
-	var pathParam2 string
-
-	pathParam2, err = runtime.StyleParamWithOptions("simple", false, "agentName", agentName, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
-	if err != nil {
-		return nil, err
-	}
-
-	serverURL, err := url.Parse(server)
-	if err != nil {
-		return nil, err
-	}
-
-	operationPath := fmt.Sprintf("/orgs/%s/projects/%s/agents/%s/metrics", pathParam0, pathParam1, pathParam2)
-	if operationPath[0] == '/' {
-		operationPath = "." + operationPath
-	}
-
-	queryURL, err := serverURL.Parse(operationPath)
-	if err != nil {
-		return nil, err
-	}
-
-	req, err := http.NewRequest("POST", queryURL.String(), body)
 	if err != nil {
 		return nil, err
 	}
@@ -15387,67 +15198,6 @@ func NewGetAgentRolesRequest(server string, orgName string, projName string, age
 	return req, nil
 }
 
-// NewFilterAgentRuntimeLogsRequest calls the generic FilterAgentRuntimeLogs builder with application/json body
-func NewFilterAgentRuntimeLogsRequest(server string, orgName string, projName string, agentName string, body FilterAgentRuntimeLogsJSONRequestBody) (*http.Request, error) {
-	var bodyReader io.Reader
-	buf, err := json.Marshal(body)
-	if err != nil {
-		return nil, err
-	}
-	bodyReader = bytes.NewReader(buf)
-	return NewFilterAgentRuntimeLogsRequestWithBody(server, orgName, projName, agentName, "application/json", bodyReader)
-}
-
-// NewFilterAgentRuntimeLogsRequestWithBody generates requests for FilterAgentRuntimeLogs with any type of body
-func NewFilterAgentRuntimeLogsRequestWithBody(server string, orgName string, projName string, agentName string, contentType string, body io.Reader) (*http.Request, error) {
-	var err error
-
-	var pathParam0 string
-
-	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "orgName", orgName, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
-	if err != nil {
-		return nil, err
-	}
-
-	var pathParam1 string
-
-	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "projName", projName, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
-	if err != nil {
-		return nil, err
-	}
-
-	var pathParam2 string
-
-	pathParam2, err = runtime.StyleParamWithOptions("simple", false, "agentName", agentName, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
-	if err != nil {
-		return nil, err
-	}
-
-	serverURL, err := url.Parse(server)
-	if err != nil {
-		return nil, err
-	}
-
-	operationPath := fmt.Sprintf("/orgs/%s/projects/%s/agents/%s/runtime-logs", pathParam0, pathParam1, pathParam2)
-	if operationPath[0] == '/' {
-		operationPath = "." + operationPath
-	}
-
-	queryURL, err := serverURL.Parse(operationPath)
-	if err != nil {
-		return nil, err
-	}
-
-	req, err := http.NewRequest("POST", queryURL.String(), body)
-	if err != nil {
-		return nil, err
-	}
-
-	req.Header.Add("Content-Type", contentType)
-
-	return req, nil
-}
-
 // NewGetAgentTraceScoresRequest generates requests for GetAgentTraceScores
 func NewGetAgentTraceScoresRequest(server string, orgName string, projName string, agentName string, params *GetAgentTraceScoresParams) (*http.Request, error) {
 	var err error
@@ -17024,9 +16774,6 @@ type ClientWithResponsesInterface interface {
 	// GetBuildWithResponse request
 	GetBuildWithResponse(ctx context.Context, orgName string, projName string, agentName string, buildName string, reqEditors ...RequestEditorFn) (*GetBuildResp, error)
 
-	// GetBuildLogsWithResponse request
-	GetBuildLogsWithResponse(ctx context.Context, orgName string, projName string, agentName string, buildName string, reqEditors ...RequestEditorFn) (*GetBuildLogsResp, error)
-
 	// GetAgentConfigurationsWithResponse request
 	GetAgentConfigurationsWithResponse(ctx context.Context, orgName string, projName string, agentName string, params *GetAgentConfigurationsParams, reqEditors ...RequestEditorFn) (*GetAgentConfigurationsResp, error)
 
@@ -17133,11 +16880,6 @@ type ClientWithResponsesInterface interface {
 
 	RotateMCPConfigAPIKeyWithResponse(ctx context.Context, orgName string, projName string, agentName string, configId openapi_types.UUID, envName string, keyName string, body RotateMCPConfigAPIKeyJSONRequestBody, reqEditors ...RequestEditorFn) (*RotateMCPConfigAPIKeyResp, error)
 
-	// GetAgentMetricsWithBodyWithResponse request with any body
-	GetAgentMetricsWithBodyWithResponse(ctx context.Context, orgName string, projName string, agentName string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*GetAgentMetricsResp, error)
-
-	GetAgentMetricsWithResponse(ctx context.Context, orgName string, projName string, agentName string, body GetAgentMetricsJSONRequestBody, reqEditors ...RequestEditorFn) (*GetAgentMetricsResp, error)
-
 	// ListAgentModelConfigsWithResponse request
 	ListAgentModelConfigsWithResponse(ctx context.Context, orgName string, projName string, agentName string, params *ListAgentModelConfigsParams, reqEditors ...RequestEditorFn) (*ListAgentModelConfigsResp, error)
 
@@ -17239,11 +16981,6 @@ type ClientWithResponsesInterface interface {
 
 	// GetAgentRolesWithResponse request
 	GetAgentRolesWithResponse(ctx context.Context, orgName string, projName string, agentName string, params *GetAgentRolesParams, reqEditors ...RequestEditorFn) (*GetAgentRolesResp, error)
-
-	// FilterAgentRuntimeLogsWithBodyWithResponse request with any body
-	FilterAgentRuntimeLogsWithBodyWithResponse(ctx context.Context, orgName string, projName string, agentName string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*FilterAgentRuntimeLogsResp, error)
-
-	FilterAgentRuntimeLogsWithResponse(ctx context.Context, orgName string, projName string, agentName string, body FilterAgentRuntimeLogsJSONRequestBody, reqEditors ...RequestEditorFn) (*FilterAgentRuntimeLogsResp, error)
 
 	// GetAgentTraceScoresWithResponse request
 	GetAgentTraceScoresWithResponse(ctx context.Context, orgName string, projName string, agentName string, params *GetAgentTraceScoresParams, reqEditors ...RequestEditorFn) (*GetAgentTraceScoresResp, error)
@@ -20709,30 +20446,6 @@ func (r GetBuildResp) StatusCode() int {
 	return 0
 }
 
-type GetBuildLogsResp struct {
-	Body         []byte
-	HTTPResponse *http.Response
-	JSON200      *LogsResponse
-	JSON404      *ErrorResponse
-	JSON500      *ErrorResponse
-}
-
-// Status returns HTTPResponse.Status
-func (r GetBuildLogsResp) Status() string {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.Status
-	}
-	return http.StatusText(0)
-}
-
-// StatusCode returns HTTPResponse.StatusCode
-func (r GetBuildLogsResp) StatusCode() int {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.StatusCode
-	}
-	return 0
-}
-
 type GetAgentConfigurationsResp struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -21440,31 +21153,6 @@ func (r RotateMCPConfigAPIKeyResp) StatusCode() int {
 	return 0
 }
 
-type GetAgentMetricsResp struct {
-	Body         []byte
-	HTTPResponse *http.Response
-	JSON200      *MetricsResponse
-	JSON400      *ErrorResponse
-	JSON404      *ErrorResponse
-	JSON500      *ErrorResponse
-}
-
-// Status returns HTTPResponse.Status
-func (r GetAgentMetricsResp) Status() string {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.Status
-	}
-	return http.StatusText(0)
-}
-
-// StatusCode returns HTTPResponse.StatusCode
-func (r GetAgentMetricsResp) StatusCode() int {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.StatusCode
-	}
-	return 0
-}
-
 type ListAgentModelConfigsResp struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -22157,31 +21845,6 @@ func (r GetAgentRolesResp) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r GetAgentRolesResp) StatusCode() int {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.StatusCode
-	}
-	return 0
-}
-
-type FilterAgentRuntimeLogsResp struct {
-	Body         []byte
-	HTTPResponse *http.Response
-	JSON200      *LogsResponse
-	JSON400      *ErrorResponse
-	JSON404      *ErrorResponse
-	JSON500      *ErrorResponse
-}
-
-// Status returns HTTPResponse.Status
-func (r FilterAgentRuntimeLogsResp) Status() string {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.Status
-	}
-	return http.StatusText(0)
-}
-
-// StatusCode returns HTTPResponse.StatusCode
-func (r FilterAgentRuntimeLogsResp) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -24197,15 +23860,6 @@ func (c *ClientWithResponses) GetBuildWithResponse(ctx context.Context, orgName 
 	return ParseGetBuildResp(rsp)
 }
 
-// GetBuildLogsWithResponse request returning *GetBuildLogsResp
-func (c *ClientWithResponses) GetBuildLogsWithResponse(ctx context.Context, orgName string, projName string, agentName string, buildName string, reqEditors ...RequestEditorFn) (*GetBuildLogsResp, error) {
-	rsp, err := c.GetBuildLogs(ctx, orgName, projName, agentName, buildName, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseGetBuildLogsResp(rsp)
-}
-
 // GetAgentConfigurationsWithResponse request returning *GetAgentConfigurationsResp
 func (c *ClientWithResponses) GetAgentConfigurationsWithResponse(ctx context.Context, orgName string, projName string, agentName string, params *GetAgentConfigurationsParams, reqEditors ...RequestEditorFn) (*GetAgentConfigurationsResp, error) {
 	rsp, err := c.GetAgentConfigurations(ctx, orgName, projName, agentName, params, reqEditors...)
@@ -24546,23 +24200,6 @@ func (c *ClientWithResponses) RotateMCPConfigAPIKeyWithResponse(ctx context.Cont
 	return ParseRotateMCPConfigAPIKeyResp(rsp)
 }
 
-// GetAgentMetricsWithBodyWithResponse request with arbitrary body returning *GetAgentMetricsResp
-func (c *ClientWithResponses) GetAgentMetricsWithBodyWithResponse(ctx context.Context, orgName string, projName string, agentName string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*GetAgentMetricsResp, error) {
-	rsp, err := c.GetAgentMetricsWithBody(ctx, orgName, projName, agentName, contentType, body, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseGetAgentMetricsResp(rsp)
-}
-
-func (c *ClientWithResponses) GetAgentMetricsWithResponse(ctx context.Context, orgName string, projName string, agentName string, body GetAgentMetricsJSONRequestBody, reqEditors ...RequestEditorFn) (*GetAgentMetricsResp, error) {
-	rsp, err := c.GetAgentMetrics(ctx, orgName, projName, agentName, body, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseGetAgentMetricsResp(rsp)
-}
-
 // ListAgentModelConfigsWithResponse request returning *ListAgentModelConfigsResp
 func (c *ClientWithResponses) ListAgentModelConfigsWithResponse(ctx context.Context, orgName string, projName string, agentName string, params *ListAgentModelConfigsParams, reqEditors ...RequestEditorFn) (*ListAgentModelConfigsResp, error) {
 	rsp, err := c.ListAgentModelConfigs(ctx, orgName, projName, agentName, params, reqEditors...)
@@ -24885,23 +24522,6 @@ func (c *ClientWithResponses) GetAgentRolesWithResponse(ctx context.Context, org
 		return nil, err
 	}
 	return ParseGetAgentRolesResp(rsp)
-}
-
-// FilterAgentRuntimeLogsWithBodyWithResponse request with arbitrary body returning *FilterAgentRuntimeLogsResp
-func (c *ClientWithResponses) FilterAgentRuntimeLogsWithBodyWithResponse(ctx context.Context, orgName string, projName string, agentName string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*FilterAgentRuntimeLogsResp, error) {
-	rsp, err := c.FilterAgentRuntimeLogsWithBody(ctx, orgName, projName, agentName, contentType, body, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseFilterAgentRuntimeLogsResp(rsp)
-}
-
-func (c *ClientWithResponses) FilterAgentRuntimeLogsWithResponse(ctx context.Context, orgName string, projName string, agentName string, body FilterAgentRuntimeLogsJSONRequestBody, reqEditors ...RequestEditorFn) (*FilterAgentRuntimeLogsResp, error) {
-	rsp, err := c.FilterAgentRuntimeLogs(ctx, orgName, projName, agentName, body, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseFilterAgentRuntimeLogsResp(rsp)
 }
 
 // GetAgentTraceScoresWithResponse request returning *GetAgentTraceScoresResp
@@ -31330,46 +30950,6 @@ func ParseGetBuildResp(rsp *http.Response) (*GetBuildResp, error) {
 	return response, nil
 }
 
-// ParseGetBuildLogsResp parses an HTTP response from a GetBuildLogsWithResponse call
-func ParseGetBuildLogsResp(rsp *http.Response) (*GetBuildLogsResp, error) {
-	bodyBytes, err := io.ReadAll(rsp.Body)
-	defer func() { _ = rsp.Body.Close() }()
-	if err != nil {
-		return nil, err
-	}
-
-	response := &GetBuildLogsResp{
-		Body:         bodyBytes,
-		HTTPResponse: rsp,
-	}
-
-	switch {
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest LogsResponse
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON200 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
-		var dest ErrorResponse
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON404 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
-		var dest ErrorResponse
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON500 = &dest
-
-	}
-
-	return response, nil
-}
-
 // ParseGetAgentConfigurationsResp parses an HTTP response from a GetAgentConfigurationsWithResponse call
 func ParseGetAgentConfigurationsResp(rsp *http.Response) (*GetAgentConfigurationsResp, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -32735,53 +32315,6 @@ func ParseRotateMCPConfigAPIKeyResp(rsp *http.Response) (*RotateMCPConfigAPIKeyR
 	return response, nil
 }
 
-// ParseGetAgentMetricsResp parses an HTTP response from a GetAgentMetricsWithResponse call
-func ParseGetAgentMetricsResp(rsp *http.Response) (*GetAgentMetricsResp, error) {
-	bodyBytes, err := io.ReadAll(rsp.Body)
-	defer func() { _ = rsp.Body.Close() }()
-	if err != nil {
-		return nil, err
-	}
-
-	response := &GetAgentMetricsResp{
-		Body:         bodyBytes,
-		HTTPResponse: rsp,
-	}
-
-	switch {
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest MetricsResponse
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON200 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
-		var dest ErrorResponse
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON400 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
-		var dest ErrorResponse
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON404 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
-		var dest ErrorResponse
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON500 = &dest
-
-	}
-
-	return response, nil
-}
-
 // ParseListAgentModelConfigsResp parses an HTTP response from a ListAgentModelConfigsWithResponse call
 func ParseListAgentModelConfigsResp(rsp *http.Response) (*ListAgentModelConfigsResp, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -34064,53 +33597,6 @@ func ParseGetAgentRolesResp(rsp *http.Response) (*GetAgentRolesResp, error) {
 			return nil, err
 		}
 		response.JSON401 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
-		var dest ErrorResponse
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON404 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
-		var dest ErrorResponse
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON500 = &dest
-
-	}
-
-	return response, nil
-}
-
-// ParseFilterAgentRuntimeLogsResp parses an HTTP response from a FilterAgentRuntimeLogsWithResponse call
-func ParseFilterAgentRuntimeLogsResp(rsp *http.Response) (*FilterAgentRuntimeLogsResp, error) {
-	bodyBytes, err := io.ReadAll(rsp.Body)
-	defer func() { _ = rsp.Body.Close() }()
-	if err != nil {
-		return nil, err
-	}
-
-	response := &FilterAgentRuntimeLogsResp{
-		Body:         bodyBytes,
-		HTTPResponse: rsp,
-	}
-
-	switch {
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest LogsResponse
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON200 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
-		var dest ErrorResponse
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON400 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
 		var dest ErrorResponse

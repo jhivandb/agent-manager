@@ -23,7 +23,7 @@ import (
 	"github.com/spf13/cobra"
 
 	amsvc "github.com/wso2/agent-manager/cli/pkg/clients/amsvc/gen"
-	"github.com/wso2/agent-manager/cli/pkg/clients/traceobssvc"
+	"github.com/wso2/agent-manager/cli/pkg/clients/observersvc"
 	"github.com/wso2/agent-manager/cli/pkg/clierr"
 	"github.com/wso2/agent-manager/cli/pkg/cmdutil"
 	"github.com/wso2/agent-manager/cli/pkg/iostreams"
@@ -31,11 +31,11 @@ import (
 )
 
 type CreateOptions struct {
-	IO            *iostreams.IOStreams
-	Client        func(context.Context) (*amsvc.ClientWithResponses, error)
-	TraceObserver func(context.Context) (*traceobssvc.Client, error)
-	ResolveScope  func(*cobra.Command, bool, bool) (string, string, error)
-	MakeScope     func(string, string) render.Scope
+	IO           *iostreams.IOStreams
+	Client       func(context.Context) (*amsvc.ClientWithResponses, error)
+	Observer     func(context.Context) (*observersvc.Client, error)
+	ResolveScope func(*cobra.Command, bool, bool) (string, string, error)
+	MakeScope    func(string, string) render.Scope
 
 	Org   string
 	Proj  string
@@ -80,11 +80,11 @@ type CreateOptions struct {
 
 func NewCreateCmd(f *cmdutil.Factory) *cobra.Command {
 	opts := &CreateOptions{
-		IO:            f.IOStreams,
-		Client:        f.AgentManager,
-		TraceObserver: f.TraceObserver,
-		ResolveScope:  f.ResolveOrgProject,
-		MakeScope:     f.Scope,
+		IO:           f.IOStreams,
+		Client:       f.AgentManager,
+		Observer:     f.Observer,
+		ResolveScope: f.ResolveOrgProject,
+		MakeScope:    f.Scope,
 	}
 
 	cmd := &cobra.Command{
@@ -211,7 +211,7 @@ func runCreate(ctx context.Context, opts *CreateOptions, req amsvc.CreateAgentRe
 	}
 
 	// The agent is already created server-side, so a post-create failure (token
-	// mint, trace-observer discovery) is a warning, not an error — otherwise the
+	// mint, observer discovery) is a warning, not an error — otherwise the
 	// user retries and hits 409.
 	if err := runExternalPostCreate(ctx, opts, resp.JSON202, client); err != nil {
 		fmt.Fprintf(opts.IO.ErrOut, "warning: agent created but failed to generate token: %v\n", err)

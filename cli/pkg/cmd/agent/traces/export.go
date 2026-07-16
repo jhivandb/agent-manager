@@ -22,7 +22,7 @@ import (
 	"github.com/spf13/cobra"
 
 	amsvc "github.com/wso2/agent-manager/cli/pkg/clients/amsvc/gen"
-	"github.com/wso2/agent-manager/cli/pkg/clients/traceobssvc"
+	"github.com/wso2/agent-manager/cli/pkg/clients/observersvc"
 	"github.com/wso2/agent-manager/cli/pkg/cmdutil"
 	"github.com/wso2/agent-manager/cli/pkg/iostreams"
 	"github.com/wso2/agent-manager/cli/pkg/render"
@@ -30,7 +30,7 @@ import (
 
 type ExportTracesOptions struct {
 	IO           *iostreams.IOStreams
-	TraceClient  func(context.Context) (*traceobssvc.Client, error)
+	TraceClient  func(context.Context) (*observersvc.Client, error)
 	AMClient     func(context.Context) (*amsvc.ClientWithResponses, error)
 	ResolveScope func(*cobra.Command, bool, bool) (string, string, error)
 	ResolveAgent func([]string) (string, []string, error)
@@ -51,7 +51,7 @@ type ExportTracesOptions struct {
 func NewExportCmd(f *cmdutil.Factory) *cobra.Command {
 	opts := &ExportTracesOptions{
 		IO:           f.IOStreams,
-		TraceClient:  f.TraceObserver,
+		TraceClient:  f.Observer,
 		AMClient:     f.AgentManager,
 		ResolveScope: f.ResolveOrgProject,
 		ResolveAgent: f.ResolveAgent,
@@ -123,7 +123,7 @@ func runExportTraces(ctx context.Context, o *ExportTracesOptions) error {
 
 	limit := o.Limit
 	sortOrder := o.SortOrder
-	resp, err := client.ExportTraces(ctx, &traceobssvc.ExportTracesParams{
+	resp, err := client.ExportTraces(ctx, &observersvc.ExportTracesParams{
 		Organization: o.Org,
 		Project:      o.Proj,
 		Agent:        o.AgentName,
@@ -134,7 +134,7 @@ func runExportTraces(ctx context.Context, o *ExportTracesOptions) error {
 		SortOrder:    &sortOrder,
 	})
 	if err != nil {
-		return render.Error(o.IO, o.Scope, cmdutil.TraceObserverErrorFromResponse(err))
+		return render.Error(o.IO, o.Scope, cmdutil.ObserverErrorFromResponse(err))
 	}
 
 	return render.JSONSuccess(o.IO, o.Scope, resp)

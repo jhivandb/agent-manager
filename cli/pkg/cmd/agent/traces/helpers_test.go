@@ -26,12 +26,12 @@ import (
 	"testing"
 
 	amsvc "github.com/wso2/agent-manager/cli/pkg/clients/amsvc/gen"
-	"github.com/wso2/agent-manager/cli/pkg/clients/traceobssvc"
+	"github.com/wso2/agent-manager/cli/pkg/clients/observersvc"
 	"github.com/wso2/agent-manager/cli/pkg/iostreams"
 	"github.com/wso2/agent-manager/cli/pkg/render"
 )
 
-func newTraceTestClient(t *testing.T, status int, body any) (func(context.Context) (*traceobssvc.Client, error), func()) {
+func newTraceTestClient(t *testing.T, status int, body any) (func(context.Context) (*observersvc.Client, error), func()) {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -42,12 +42,12 @@ func newTraceTestClient(t *testing.T, status int, body any) (func(context.Contex
 			}
 		}
 	}))
-	client, err := traceobssvc.NewClient(server.URL)
+	client, err := observersvc.NewClient(server.URL)
 	if err != nil {
 		server.Close()
 		t.Fatalf("new client: %v", err)
 	}
-	return func(context.Context) (*traceobssvc.Client, error) { return client, nil }, server.Close
+	return func(context.Context) (*observersvc.Client, error) { return client, nil }, server.Close
 }
 
 func traceBaseScope() render.Scope {

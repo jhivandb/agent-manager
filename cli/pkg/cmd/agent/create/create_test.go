@@ -31,7 +31,7 @@ import (
 	"github.com/spf13/cobra"
 
 	amsvc "github.com/wso2/agent-manager/cli/pkg/clients/amsvc/gen"
-	"github.com/wso2/agent-manager/cli/pkg/clients/traceobssvc"
+	"github.com/wso2/agent-manager/cli/pkg/clients/observersvc"
 	"github.com/wso2/agent-manager/cli/pkg/clierr"
 	"github.com/wso2/agent-manager/cli/pkg/cmdutil"
 	"github.com/wso2/agent-manager/cli/pkg/config"
@@ -132,16 +132,16 @@ func newTestIO(jsonMode bool) (*iostreams.IOStreams, *bytes.Buffer, *bytes.Buffe
 	return ios, out, errOut
 }
 
-func testCreateCmd(t *testing.T, ios *iostreams.IOStreams, clientFn func(context.Context) (*amsvc.ClientWithResponses, error), traceObsURL string) *cobra.Command {
+func testCreateCmd(t *testing.T, ios *iostreams.IOStreams, clientFn func(context.Context) (*amsvc.ClientWithResponses, error), observerURL string) *cobra.Command {
 	t.Helper()
 	f := &cmdutil.Factory{
 		IOStreams:    ios,
 		AgentManager: clientFn,
-		TraceObserver: func(context.Context) (*traceobssvc.Client, error) {
-			if traceObsURL == "" {
+		Observer: func(context.Context) (*observersvc.Client, error) {
+			if observerURL == "" {
 				return nil, nil
 			}
-			return traceobssvc.NewClient(traceObsURL)
+			return observersvc.NewClient(observerURL)
 		},
 		Config: func() (*config.Config, error) {
 			return &config.Config{

@@ -29,7 +29,7 @@ import (
 
 	"github.com/wso2/agent-manager/cli/pkg/clients"
 	amsvc "github.com/wso2/agent-manager/cli/pkg/clients/amsvc/gen"
-	"github.com/wso2/agent-manager/cli/pkg/clients/traceobssvc"
+	"github.com/wso2/agent-manager/cli/pkg/clients/observersvc"
 	"github.com/wso2/agent-manager/cli/pkg/clierr"
 	"github.com/wso2/agent-manager/cli/pkg/config"
 	"github.com/wso2/agent-manager/cli/pkg/iostreams"
@@ -39,17 +39,17 @@ import (
 const refreshBuffer = 5 * time.Minute
 
 type Factory struct {
-	Config        func() (*config.Config, error)
-	IOStreams     *iostreams.IOStreams
-	Prompter      prompter.Prompter
-	HTTPClient    func() *http.Client
-	AgentManager  func(ctx context.Context) (*amsvc.ClientWithResponses, error)
-	TraceObserver func(ctx context.Context) (*traceobssvc.Client, error)
-	Token         func(ctx context.Context) (string, error)
+	Config       func() (*config.Config, error)
+	IOStreams    *iostreams.IOStreams
+	Prompter     prompter.Prompter
+	HTTPClient   func() *http.Client
+	AgentManager func(ctx context.Context) (*amsvc.ClientWithResponses, error)
+	Observer     func(ctx context.Context) (*observersvc.Client, error)
+	Token        func(ctx context.Context) (string, error)
 
-	traceObsOnce sync.Once
-	traceObsURL  string
-	traceObsErr  error
+	observerOnce sync.Once
+	observerURL  string
+	observerErr  error
 }
 
 func NewFactory(cfg *config.Config, io *iostreams.IOStreams) *Factory {
@@ -66,8 +66,8 @@ func NewFactory(cfg *config.Config, io *iostreams.IOStreams) *Factory {
 	f.Token = func(ctx context.Context) (string, error) {
 		return f.currentAccessToken(ctx)
 	}
-	f.TraceObserver = func(ctx context.Context) (*traceobssvc.Client, error) {
-		return f.traceObserver(ctx)
+	f.Observer = func(ctx context.Context) (*observersvc.Client, error) {
+		return f.observer(ctx)
 	}
 	return f
 }
@@ -84,8 +84,8 @@ func (f *Factory) currentAccessToken(ctx context.Context) (string, error) {
 	return f.ensureFreshToken(ctx, cfg, inst)
 }
 
-func (f *Factory) traceObserver(ctx context.Context) (*traceobssvc.Client, error) {
-	obsURL, err := f.discoverTraceObserverURL(ctx)
+func (f *Factory) observer(ctx context.Context) (*observersvc.Client, error) {
+	obsURL, err := f.discoverObserverURL(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -95,40 +95,40 @@ func (f *Factory) traceObserver(ctx context.Context) (*traceobssvc.Client, error
 		return nil, err
 	}
 
-	return traceobssvc.NewClient(
+	return observersvc.NewClient(
 		strings.TrimRight(obsURL, "/"),
-		traceobssvc.WithHTTPClient(f.HTTPClient()),
-		traceobssvc.WithRequestEditor(func(_ context.Context, req *http.Request) error {
+		observersvc.WithHTTPClient(f.HTTPClient()),
+		observersvc.WithRequestEditor(func(_ context.Context, req *http.Request) error {
 			req.Header.Set("Authorization", "Bearer "+token)
 			return nil
 		}),
 	)
 }
 
-func (f *Factory) discoverTraceObserverURL(ctx context.Context) (string, error) {
-	f.traceObsOnce.Do(func() {
+func (f *Factory) discoverObserverURL(ctx context.Context) (string, error) {
+	f.observerOnce.Do(func() {
 		amClient, err := f.AgentManager(ctx)
 		if err != nil {
-			f.traceObsErr = err
+			f.observerErr = err
 			return
 		}
 		resp, err := amClient.GetConfigWithResponse(ctx)
 		if err != nil {
-			f.traceObsErr = clierr.Newf(clierr.Transport, "discover trace observer URL: %v", err)
+			f.observerErr = clierr.Newf(clierr.Transport, "discover observer URL: %v", err)
 			return
 		}
 		if resp.JSON200 == nil {
-			f.traceObsErr = ErrorFromServer(resp.HTTPResponse, nil)
+			f.observerErr = ErrorFromServer(resp.HTTPResponse, nil)
 			return
 		}
-		raw := resp.JSON200.TraceObserverBaseUrl
+		raw := resp.JSON200.ObserverBaseUrl
 		if raw == "" {
-			f.traceObsErr = clierr.New(clierr.ServerInvalid, "server returned empty traceObserverBaseUrl")
+			f.observerErr = clierr.New(clierr.ServerInvalid, "server returned empty observerBaseUrl")
 			return
 		}
-		f.traceObsURL = rewriteDockerHost(raw)
+		f.observerURL = rewriteDockerHost(raw)
 	})
-	return f.traceObsURL, f.traceObsErr
+	return f.observerURL, f.observerErr
 }
 
 // rewriteDockerHost swaps host.docker.internal for localhost — the server may

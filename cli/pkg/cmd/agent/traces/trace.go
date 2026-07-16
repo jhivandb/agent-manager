@@ -26,7 +26,7 @@ import (
 	"github.com/spf13/cobra"
 
 	amsvc "github.com/wso2/agent-manager/cli/pkg/clients/amsvc/gen"
-	"github.com/wso2/agent-manager/cli/pkg/clients/traceobssvc"
+	"github.com/wso2/agent-manager/cli/pkg/clients/observersvc"
 	"github.com/wso2/agent-manager/cli/pkg/cmdutil"
 	"github.com/wso2/agent-manager/cli/pkg/iostreams"
 	"github.com/wso2/agent-manager/cli/pkg/render"
@@ -35,7 +35,7 @@ import (
 
 type TraceOptions struct {
 	IO           *iostreams.IOStreams
-	TraceClient  func(context.Context) (*traceobssvc.Client, error)
+	TraceClient  func(context.Context) (*observersvc.Client, error)
 	AMClient     func(context.Context) (*amsvc.ClientWithResponses, error)
 	ResolveScope func(*cobra.Command, bool, bool) (string, string, error)
 	ResolveAgent func([]string) (string, []string, error)
@@ -57,7 +57,7 @@ type TraceOptions struct {
 func NewTraceCmd(f *cmdutil.Factory) *cobra.Command {
 	opts := &TraceOptions{
 		IO:           f.IOStreams,
-		TraceClient:  f.TraceObserver,
+		TraceClient:  f.Observer,
 		AMClient:     f.AgentManager,
 		ResolveScope: f.ResolveOrgProject,
 		ResolveAgent: f.ResolveAgent,
@@ -137,7 +137,7 @@ func runTrace(ctx context.Context, o *TraceOptions) error {
 	}
 
 	limit := o.Limit
-	resp, err := client.GetTraceSpans(ctx, o.TraceID, &traceobssvc.GetTraceSpansParams{
+	resp, err := client.GetTraceSpans(ctx, o.TraceID, &observersvc.GetTraceSpansParams{
 		Organization: o.Org,
 		StartTime:    parseTimeOrZero(o.StartTime),
 		EndTime:      parseTimeOrZero(o.EndTime),
@@ -147,7 +147,7 @@ func runTrace(ctx context.Context, o *TraceOptions) error {
 		Limit:        &limit,
 	})
 	if err != nil {
-		return render.Error(o.IO, o.Scope, cmdutil.TraceObserverErrorFromResponse(err))
+		return render.Error(o.IO, o.Scope, cmdutil.ObserverErrorFromResponse(err))
 	}
 
 	if o.IO.JSON {
@@ -194,7 +194,7 @@ func runSpanDetail(ctx context.Context, o *TraceOptions) error {
 
 	span, err := client.GetSpanDetail(ctx, o.TraceID, o.SpanID)
 	if err != nil {
-		return render.Error(o.IO, o.Scope, cmdutil.TraceObserverErrorFromResponse(err))
+		return render.Error(o.IO, o.Scope, cmdutil.ObserverErrorFromResponse(err))
 	}
 
 	if o.IO.JSON {
@@ -204,7 +204,7 @@ func runSpanDetail(ctx context.Context, o *TraceOptions) error {
 	return printSpanDetail(o.IO, span)
 }
 
-func printSpanDetail(io *iostreams.IOStreams, s *traceobssvc.Span) error {
+func printSpanDetail(io *iostreams.IOStreams, s *observersvc.Span) error {
 	parent := s.ParentSpanID
 	if parent == "" {
 		parent = "-"

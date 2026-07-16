@@ -24,7 +24,7 @@ import (
 	"github.com/spf13/cobra"
 
 	amsvc "github.com/wso2/agent-manager/cli/pkg/clients/amsvc/gen"
-	"github.com/wso2/agent-manager/cli/pkg/clierr"
+	"github.com/wso2/agent-manager/cli/pkg/clients/observersvc"
 	"github.com/wso2/agent-manager/cli/pkg/cmdutil"
 	"github.com/wso2/agent-manager/cli/pkg/iostreams"
 	"github.com/wso2/agent-manager/cli/pkg/render"
@@ -33,6 +33,7 @@ import (
 type LogsOptions struct {
 	IO           *iostreams.IOStreams
 	Client       func(context.Context) (*amsvc.ClientWithResponses, error)
+	Observer     func(context.Context) (*observersvc.Client, error)
 	ResolveScope func(*cobra.Command, bool, bool) (string, string, error)
 	ResolveAgent func([]string) (string, []string, error)
 	ResolveEnv   func(*cobra.Command) (string, error)
@@ -46,15 +47,16 @@ type LogsOptions struct {
 	StartTime string
 	EndTime   string
 	Limit     *int
-	SortOrder *amsvc.LogFilterRequestSortOrder
-	LogLevels *[]amsvc.LogFilterRequestLogLevels
-	Grep      *string
+	SortOrder string
+	LogLevels []string
+	Grep      string
 }
 
 func NewLogsCmd(f *cmdutil.Factory) *cobra.Command {
 	opts := &LogsOptions{
 		IO:           f.IOStreams,
 		Client:       f.AgentManager,
+		Observer:     f.Observer,
 		ResolveScope: f.ResolveOrgProject,
 		ResolveAgent: f.ResolveAgent,
 		ResolveEnv:   f.ResolveEnvironment,
@@ -98,20 +100,9 @@ func NewLogsCmd(f *cmdutil.Factory) *cobra.Command {
 				}
 				opts.Limit = &limit
 			}
-			if sort != "" {
-				s := amsvc.LogFilterRequestSortOrder(sort)
-				opts.SortOrder = &s
-			}
-			if len(levels) > 0 {
-				ll := make([]amsvc.LogFilterRequestLogLevels, len(levels))
-				for i, l := range levels {
-					ll[i] = amsvc.LogFilterRequestLogLevels(l)
-				}
-				opts.LogLevels = &ll
-			}
-			if grep != "" {
-				opts.Grep = &grep
-			}
+			opts.SortOrder = sort
+			opts.LogLevels = levels
+			opts.Grep = grep
 
 			return runLogs(cmd.Context(), opts)
 		},
@@ -143,30 +134,32 @@ func runLogs(ctx context.Context, o *LogsOptions) error {
 		return render.Error(o.IO, o.Scope, err)
 	}
 
-	resp, err := client.FilterAgentRuntimeLogsWithResponse(ctx, o.Org, o.Proj, o.AgentName,
-		amsvc.LogFilterRequest{
-			EnvironmentName: o.Env,
-			StartTime:       o.StartTime,
-			EndTime:         o.EndTime,
-			Limit:           o.Limit,
-			SortOrder:       o.SortOrder,
-			LogLevels:       o.LogLevels,
-			SearchPhrase:    o.Grep,
-		},
-	)
+	observer, err := o.Observer(ctx)
 	if err != nil {
-		return render.Error(o.IO, o.Scope, clierr.Newf(clierr.Transport, "%v", err))
+		return render.Error(o.IO, o.Scope, err)
 	}
-	if resp.JSON200 == nil {
-		return render.Error(o.IO, o.Scope, cmdutil.ErrorFromServer(resp.HTTPResponse,
-			cmdutil.FirstNonNil(resp.JSON400, resp.JSON404, resp.JSON500)))
+
+	resp, err := observer.GetRuntimeLogs(ctx, observersvc.RuntimeLogsParams{
+		Organization: o.Org,
+		Project:      o.Proj,
+		Agent:        o.AgentName,
+		Environment:  o.Env,
+		StartTime:    o.StartTime,
+		EndTime:      o.EndTime,
+		SearchPhrase: o.Grep,
+		SortOrder:    o.SortOrder,
+		LogLevels:    o.LogLevels,
+		Limit:        o.Limit,
+	})
+	if err != nil {
+		return render.Error(o.IO, o.Scope, cmdutil.ObserverErrorFromResponse(err))
 	}
 
 	if o.IO.JSON {
-		return render.JSONSuccess(o.IO, o.Scope, resp.JSON200)
+		return render.JSONSuccess(o.IO, o.Scope, resp)
 	}
 
-	for _, entry := range resp.JSON200.Logs {
+	for _, entry := range resp.Logs {
 		fmt.Fprintf(o.IO.Out, "%s  %-5s  %s\n",
 			entry.Timestamp.Format(time.RFC3339),
 			entry.LogLevel,

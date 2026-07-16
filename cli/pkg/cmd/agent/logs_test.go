@@ -23,25 +23,27 @@ import (
 	"testing"
 	"time"
 
-	amsvc "github.com/wso2/agent-manager/cli/pkg/clients/amsvc/gen"
+	"github.com/wso2/agent-manager/cli/pkg/clients/observersvc"
 	"github.com/wso2/agent-manager/cli/pkg/iostreams"
 )
 
 func TestLogs_TextOutput(t *testing.T) {
 	ios, _, out, _ := iostreams.Test()
 	ios.JSON = false
-	client, _, closeFn := newTestClient(t, http.StatusOK, amsvc.LogsResponse{
-		Logs: []amsvc.LogEntry{
+	amClient, _, amCloseFn := newTestClient(t, http.StatusOK, nil)
+	defer amCloseFn()
+	observer, obsCloseFn := newObserverTestClient(t, http.StatusOK, observersvc.LogsResponse{
+		Logs: []observersvc.LogEntry{
 			{Timestamp: time.Date(2026, 5, 13, 10, 23, 1, 0, time.UTC), LogLevel: "INFO", Log: "Agent initialized"},
 			{Timestamp: time.Date(2026, 5, 13, 10, 23, 5, 0, time.UTC), LogLevel: "ERROR", Log: "Failed to invoke tool"},
 		},
 		TotalCount: 2,
 		TookMs:     12.5,
 	})
-	defer closeFn()
+	defer obsCloseFn()
 
 	err := runLogs(context.Background(), &LogsOptions{
-		IO: ios, Client: client, Scope: baseScope(),
+		IO: ios, Client: amClient, Observer: observer, Scope: baseScope(),
 		Org: "acme", Proj: "triage", AgentName: "my-agent", Env: "dev",
 		StartTime: "2026-05-12T00:00:00Z", EndTime: "2026-05-13T00:00:00Z",
 	})
@@ -64,7 +66,7 @@ func TestLogs_RejectsExternalAgent(t *testing.T) {
 	defer closeFn()
 
 	err := runLogs(context.Background(), &LogsOptions{
-		IO: ios, Client: client, Scope: baseScope(),
+		IO: ios, Client: client, Observer: unreachableObserverClient, Scope: baseScope(),
 		Org: "acme", Proj: "triage", AgentName: "ext-agent", Env: "dev",
 		StartTime: "2026-05-12T00:00:00Z", EndTime: "2026-05-13T00:00:00Z",
 	})
@@ -78,15 +80,17 @@ func TestLogs_RejectsExternalAgent(t *testing.T) {
 
 func TestLogs_JSONOutput(t *testing.T) {
 	ios, out, _ := newTestIO(true)
-	client, _, closeFn := newTestClient(t, http.StatusOK, amsvc.LogsResponse{
-		Logs:       []amsvc.LogEntry{{Timestamp: time.Now(), LogLevel: "INFO", Log: "test"}},
+	amClient, _, amCloseFn := newTestClient(t, http.StatusOK, nil)
+	defer amCloseFn()
+	observer, obsCloseFn := newObserverTestClient(t, http.StatusOK, observersvc.LogsResponse{
+		Logs:       []observersvc.LogEntry{{Timestamp: time.Now(), LogLevel: "INFO", Log: "test"}},
 		TotalCount: 1,
 		TookMs:     5,
 	})
-	defer closeFn()
+	defer obsCloseFn()
 
 	err := runLogs(context.Background(), &LogsOptions{
-		IO: ios, Client: client, Scope: baseScope(),
+		IO: ios, Client: amClient, Observer: observer, Scope: baseScope(),
 		Org: "acme", Proj: "triage", AgentName: "my-agent", Env: "dev",
 		StartTime: "2026-05-12T00:00:00Z", EndTime: "2026-05-13T00:00:00Z",
 	})

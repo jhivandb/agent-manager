@@ -31,11 +31,11 @@ import (
 const externalTokenExpiresIn = "8760h"
 
 func runExternalPostCreate(ctx context.Context, opts *CreateOptions, agent *amsvc.AgentResponse, client *amsvc.ClientWithResponses) error {
-	tc, err := opts.TraceObserver(ctx)
+	oc, err := opts.Observer(ctx)
 	if err != nil {
 		return err
 	}
-	traceObsURL := tc.URL()
+	observerURL := oc.URL()
 
 	// The token's environment claim must name a real environment. Resolve the
 	// lowest (entry) environment of the project's deployment pipeline — the same
@@ -57,7 +57,7 @@ func runExternalPostCreate(ctx context.Context, opts *CreateOptions, agent *amsv
 		return cmdutil.ErrorFromServer(tokenResp.HTTPResponse, cmdutil.FirstNonNil(tokenResp.JSON400, tokenResp.JSON401, tokenResp.JSON404))
 	}
 
-	endpoint := otelIngestEndpoint(traceObsURL)
+	endpoint := otelIngestEndpoint(observerURL)
 	instructions := buildPythonInstructions(endpoint, tokenResp.JSON200.Token)
 
 	if opts.IO.JSON {
