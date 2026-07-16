@@ -24,6 +24,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"time"
 )
 
@@ -79,7 +80,7 @@ func (c *clientImpl) QueryTraces(ctx context.Context, req TracesQueryRequest) (*
 
 func (c *clientImpl) QueryTraceSpans(ctx context.Context, traceID string, req TracesQueryRequest) (*TraceSpansQueryResponse, error) {
 	var result TraceSpansQueryResponse
-	path := fmt.Sprintf("/api/v1alpha1/traces/%s/spans/query", traceID)
+	path := "/api/v1alpha1/traces/" + url.PathEscape(traceID) + "/spans/query"
 	if err := c.doPost(ctx, path, req, &result); err != nil {
 		return nil, fmt.Errorf("observer.QueryTraceSpans: %w", err)
 	}
@@ -88,7 +89,7 @@ func (c *clientImpl) QueryTraceSpans(ctx context.Context, traceID string, req Tr
 
 func (c *clientImpl) GetSpanDetails(ctx context.Context, traceID, spanID string) (*SpanDetailsResponse, error) {
 	var result SpanDetailsResponse
-	path := fmt.Sprintf("/api/v1alpha1/traces/%s/spans/%s", traceID, spanID)
+	path := "/api/v1alpha1/traces/" + url.PathEscape(traceID) + "/spans/" + url.PathEscape(spanID)
 	if err := c.doGet(ctx, path, &result); err != nil {
 		return nil, fmt.Errorf("observer.GetSpanDetails: %w", err)
 	}

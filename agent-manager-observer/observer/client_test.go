@@ -175,6 +175,51 @@ func TestQueryLogs_WorkflowSearchScope(t *testing.T) {
 	}
 }
 
+func TestQueryTraceSpans_EscapesTraceID(t *testing.T) {
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.EscapedPath()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"spans": []}`))
+	}))
+	defer srv.Close()
+
+	client := newTestClient(t, srv)
+
+	traceID := "../../etc/passwd"
+	if _, err := client.QueryTraceSpans(context.Background(), traceID, TracesQueryRequest{}); err != nil {
+		t.Fatalf("QueryTraceSpans returned error: %v", err)
+	}
+
+	const want = "/api/v1alpha1/traces/..%2F..%2Fetc%2Fpasswd/spans/query"
+	if gotPath != want {
+		t.Errorf("expected escaped path %q, got %q", want, gotPath)
+	}
+}
+
+func TestGetSpanDetails_EscapesTraceAndSpanID(t *testing.T) {
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.EscapedPath()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	client := newTestClient(t, srv)
+
+	traceID := "trace/../escape"
+	spanID := "span?evil=1"
+	if _, err := client.GetSpanDetails(context.Background(), traceID, spanID); err != nil {
+		t.Fatalf("GetSpanDetails returned error: %v", err)
+	}
+
+	const want = "/api/v1alpha1/traces/trace%2F..%2Fescape/spans/span%3Fevil=1"
+	if gotPath != want {
+		t.Errorf("expected escaped path %q, got %q", want, gotPath)
+	}
+}
+
 func TestQueryMetrics(t *testing.T) {
 	var gotMethod, gotPath string
 	var gotReq MetricsQueryRequest
