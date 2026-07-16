@@ -25,11 +25,10 @@ import (
 )
 
 type Toolsets struct {
-	ProjectToolset       ProjectToolsetHandler
-	AgentToolset         AgentToolsetHandler
-	BuildToolset         BuildToolsetHandler
-	DeploymentToolset    DeploymentToolsetHandler
-	ObservabilityToolset ObservabilityToolsetHandler
+	ProjectToolset    ProjectToolsetHandler
+	AgentToolset      AgentToolsetHandler
+	BuildToolset      BuildToolsetHandler
+	DeploymentToolset DeploymentToolsetHandler
 }
 
 type ProjectToolsetHandler interface {
@@ -54,11 +53,4 @@ type DeploymentToolsetHandler interface {
 	GetAgentDeployments(ctx context.Context, ouID string, projectName string, agentName string) ([]*models.DeploymentResponse, error)
 	DeployAgent(ctx context.Context, ouID string, projectName string, agentName string, req *spec.DeployAgentRequest) (string, error)
 	UpdateDeploymentState(ctx context.Context, ouID string, projectName string, agentName string, environment string, state string) error
-}
-
-type ObservabilityToolsetHandler interface {
-	ListTraces(ctx context.Context, ouID string, projectName string, agentName string, environment string, startTime string, endTime string, sortOrder string, limit int) (map[string]any, error)
-	ExportTraces(ctx context.Context, ouID string, projectName string, agentName string, environment string, startTime string, endTime string, sortOrder string, limit int) (map[string]any, error)
-	GetTraceDetails(ctx context.Context, ouID string, projectName string, agentName string, traceID string, environment string, startTime string, endTime string, limit int) (map[string]any, error)
-	GetSpanDetails(ctx context.Context, ouID string, projectName string, agentName string, traceID string, spanID string, environment string) (map[string]any, error)
 }

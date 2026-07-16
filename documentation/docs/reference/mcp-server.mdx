@@ -1,6 +1,6 @@
 # MCP Server
 
-WSO2 Agent Manager (AMP) ships a Model Context Protocol (MCP) server that lets MCP-capable AI assistants — Claude Code, Codex, Cursor, and others — drive the platform directly from the developer's terminal. Through the server, an assistant can list projects, register agents, trigger builds, deploy images, and inspect runtime traces without leaving the conversation.
+WSO2 Agent Manager (AMP) ships a Model Context Protocol (MCP) server that lets MCP-capable AI assistants — Claude Code, Codex, Cursor, and others — drive the platform directly from the developer's terminal. Through the server, an assistant can list projects, register agents, trigger builds, and deploy images without leaving the conversation.
 
 ## Overview
 
@@ -10,7 +10,7 @@ A single OAuth client (`am-mcp`) is pre-registered in Thunder out of the box, so
 
 ## Available Tools
 
-The MCP server provides **16 tools** organized into five toolsets covering the agent lifecycle — from creating a project through observing a deployed agent's traces.
+The MCP server provides **12 tools** organized into four toolsets covering the agent lifecycle — from creating a project through deploying an agent. Trace, log, and metrics tools live on a separate server; see [Observer MCP Server](./observer-mcp-server.mdx).
 
 <details>
 <summary><strong>Project Toolset (3 tools)</strong></summary>
@@ -47,16 +47,6 @@ Internal agents only — external agents are never built by the platform.
 - `list_deployments` — An agent's deployments across all environments, keyed by environment name, with current state (`active`, `in-progress`, `failed`, `not-deployed`, or `suspended`) and image.
 - `deploy_agent` — Deploy a built image to the lowest environment in the deployment pipeline. Accepts runtime environment variables (plain values, sensitive flags, or references to existing secrets) and an `enable_auto_instrumentation` toggle.
 - `update_deployment_state` — Transition a deployment in a specific environment: `redeploy` (fresh rollout of the current deployment) or `undeploy` (remove the deployment from that environment).
-
-</details>
-
-<details>
-<summary><strong>Observability Toolset (4 tools)</strong></summary>
-
-- `list_traces` — Summary view of recent traces for an agent (trace ID, root span, duration, span count, token usage, status). Optional `include_io` flag attaches input/output payloads.
-- `get_traces` — Traces with full span details. Supports server-side condition filters: `error_status`, `high_latency`, `high_token_usage`, `tool_call_fails`, and `excessive_steps` — each with a tunable threshold parameter.
-- `get_trace_details` — Metadata and span list for a single trace by trace ID.
-- `get_span_details` — Full execution details for a single span: timing, inputs, outputs, attributes — useful for inspecting one LLM call, tool invocation, or retriever lookup inside a trace.
 
 </details>
 
@@ -140,5 +130,6 @@ Restart Codex (or start a new session). On the first tool call, `mcp-remote` ope
 
 ## Next Steps
 
-- Try a few prompts in Claude Code, e.g. *"List the projects in my org"*, *"Create a new Python agent from this repo"*, *"Show me the last 10 traces for agent X"*.
+- Try a few prompts in Claude Code, e.g. *"List the projects in my org"*, *"Create a new Python agent from this repo"*, *"Deploy the latest build of agent X"*.
+- See [Observer MCP Server](./observer-mcp-server.mdx) to let the same assistant inspect runtime logs, metrics, and traces for a deployed agent.
 - See [Observe Your First Agent](../tutorials/observe-first-agent.mdx) for an end-to-end walkthrough of registering and instrumenting an agent — the same flow the MCP `create_external_agent` tool automates.

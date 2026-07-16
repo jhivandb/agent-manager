@@ -7,7 +7,6 @@ import (
 	"context"
 	"sync"
 
-	"github.com/wso2/agent-manager/agent-manager-service/clients/observersvc"
 	"github.com/wso2/agent-manager/agent-manager-service/models"
 )
 
@@ -17,20 +16,8 @@ import (
 //
 //		// make and configure a mocked observersvc.ObserverSvcClient
 //		mockedObserverSvcClient := &ObserverSvcClientMock{
-//			ExportTracesFunc: func(ctx context.Context, params observersvc.TraceListParams) (map[string]any, error) {
-//				panic("mock out the ExportTraces method")
-//			},
-//			GetSpanFunc: func(ctx context.Context, params observersvc.SpanDetailsParams) (map[string]any, error) {
-//				panic("mock out the GetSpan method")
-//			},
-//			GetTraceFunc: func(ctx context.Context, params observersvc.TraceDetailsParams) (map[string]any, error) {
-//				panic("mock out the GetTrace method")
-//			},
 //			GetWorkflowRunLogsFunc: func(ctx context.Context, organization string, workflowRunName string) (*models.LogsResponse, error) {
 //				panic("mock out the GetWorkflowRunLogs method")
-//			},
-//			ListTracesFunc: func(ctx context.Context, params observersvc.TraceListParams) (map[string]any, error) {
-//				panic("mock out the ListTraces method")
 //			},
 //		}
 //
@@ -39,44 +26,11 @@ import (
 //
 //	}
 type ObserverSvcClientMock struct {
-	// ExportTracesFunc mocks the ExportTraces method.
-	ExportTracesFunc func(ctx context.Context, params observersvc.TraceListParams) (map[string]any, error)
-
-	// GetSpanFunc mocks the GetSpan method.
-	GetSpanFunc func(ctx context.Context, params observersvc.SpanDetailsParams) (map[string]any, error)
-
-	// GetTraceFunc mocks the GetTrace method.
-	GetTraceFunc func(ctx context.Context, params observersvc.TraceDetailsParams) (map[string]any, error)
-
 	// GetWorkflowRunLogsFunc mocks the GetWorkflowRunLogs method.
 	GetWorkflowRunLogsFunc func(ctx context.Context, organization string, workflowRunName string) (*models.LogsResponse, error)
 
-	// ListTracesFunc mocks the ListTraces method.
-	ListTracesFunc func(ctx context.Context, params observersvc.TraceListParams) (map[string]any, error)
-
 	// calls tracks calls to the methods.
 	calls struct {
-		// ExportTraces holds details about calls to the ExportTraces method.
-		ExportTraces []struct {
-			// Ctx is the ctx argument value.
-			Ctx context.Context
-			// Params is the params argument value.
-			Params observersvc.TraceListParams
-		}
-		// GetSpan holds details about calls to the GetSpan method.
-		GetSpan []struct {
-			// Ctx is the ctx argument value.
-			Ctx context.Context
-			// Params is the params argument value.
-			Params observersvc.SpanDetailsParams
-		}
-		// GetTrace holds details about calls to the GetTrace method.
-		GetTrace []struct {
-			// Ctx is the ctx argument value.
-			Ctx context.Context
-			// Params is the params argument value.
-			Params observersvc.TraceDetailsParams
-		}
 		// GetWorkflowRunLogs holds details about calls to the GetWorkflowRunLogs method.
 		GetWorkflowRunLogs []struct {
 			// Ctx is the ctx argument value.
@@ -86,127 +40,8 @@ type ObserverSvcClientMock struct {
 			// WorkflowRunName is the workflowRunName argument value.
 			WorkflowRunName string
 		}
-		// ListTraces holds details about calls to the ListTraces method.
-		ListTraces []struct {
-			// Ctx is the ctx argument value.
-			Ctx context.Context
-			// Params is the params argument value.
-			Params observersvc.TraceListParams
-		}
 	}
-	lockExportTraces       sync.RWMutex
-	lockGetSpan            sync.RWMutex
-	lockGetTrace           sync.RWMutex
 	lockGetWorkflowRunLogs sync.RWMutex
-	lockListTraces         sync.RWMutex
-}
-
-// ExportTraces calls ExportTracesFunc.
-func (mock *ObserverSvcClientMock) ExportTraces(ctx context.Context, params observersvc.TraceListParams) (map[string]any, error) {
-	if mock.ExportTracesFunc == nil {
-		panic("ObserverSvcClientMock.ExportTracesFunc: method is nil but ObserverSvcClient.ExportTraces was just called")
-	}
-	callInfo := struct {
-		Ctx    context.Context
-		Params observersvc.TraceListParams
-	}{
-		Ctx:    ctx,
-		Params: params,
-	}
-	mock.lockExportTraces.Lock()
-	mock.calls.ExportTraces = append(mock.calls.ExportTraces, callInfo)
-	mock.lockExportTraces.Unlock()
-	return mock.ExportTracesFunc(ctx, params)
-}
-
-// ExportTracesCalls gets all the calls that were made to ExportTraces.
-// Check the length with:
-//
-//	len(mockedObserverSvcClient.ExportTracesCalls())
-func (mock *ObserverSvcClientMock) ExportTracesCalls() []struct {
-	Ctx    context.Context
-	Params observersvc.TraceListParams
-} {
-	var calls []struct {
-		Ctx    context.Context
-		Params observersvc.TraceListParams
-	}
-	mock.lockExportTraces.RLock()
-	calls = mock.calls.ExportTraces
-	mock.lockExportTraces.RUnlock()
-	return calls
-}
-
-// GetSpan calls GetSpanFunc.
-func (mock *ObserverSvcClientMock) GetSpan(ctx context.Context, params observersvc.SpanDetailsParams) (map[string]any, error) {
-	if mock.GetSpanFunc == nil {
-		panic("ObserverSvcClientMock.GetSpanFunc: method is nil but ObserverSvcClient.GetSpan was just called")
-	}
-	callInfo := struct {
-		Ctx    context.Context
-		Params observersvc.SpanDetailsParams
-	}{
-		Ctx:    ctx,
-		Params: params,
-	}
-	mock.lockGetSpan.Lock()
-	mock.calls.GetSpan = append(mock.calls.GetSpan, callInfo)
-	mock.lockGetSpan.Unlock()
-	return mock.GetSpanFunc(ctx, params)
-}
-
-// GetSpanCalls gets all the calls that were made to GetSpan.
-// Check the length with:
-//
-//	len(mockedObserverSvcClient.GetSpanCalls())
-func (mock *ObserverSvcClientMock) GetSpanCalls() []struct {
-	Ctx    context.Context
-	Params observersvc.SpanDetailsParams
-} {
-	var calls []struct {
-		Ctx    context.Context
-		Params observersvc.SpanDetailsParams
-	}
-	mock.lockGetSpan.RLock()
-	calls = mock.calls.GetSpan
-	mock.lockGetSpan.RUnlock()
-	return calls
-}
-
-// GetTrace calls GetTraceFunc.
-func (mock *ObserverSvcClientMock) GetTrace(ctx context.Context, params observersvc.TraceDetailsParams) (map[string]any, error) {
-	if mock.GetTraceFunc == nil {
-		panic("ObserverSvcClientMock.GetTraceFunc: method is nil but ObserverSvcClient.GetTrace was just called")
-	}
-	callInfo := struct {
-		Ctx    context.Context
-		Params observersvc.TraceDetailsParams
-	}{
-		Ctx:    ctx,
-		Params: params,
-	}
-	mock.lockGetTrace.Lock()
-	mock.calls.GetTrace = append(mock.calls.GetTrace, callInfo)
-	mock.lockGetTrace.Unlock()
-	return mock.GetTraceFunc(ctx, params)
-}
-
-// GetTraceCalls gets all the calls that were made to GetTrace.
-// Check the length with:
-//
-//	len(mockedObserverSvcClient.GetTraceCalls())
-func (mock *ObserverSvcClientMock) GetTraceCalls() []struct {
-	Ctx    context.Context
-	Params observersvc.TraceDetailsParams
-} {
-	var calls []struct {
-		Ctx    context.Context
-		Params observersvc.TraceDetailsParams
-	}
-	mock.lockGetTrace.RLock()
-	calls = mock.calls.GetTrace
-	mock.lockGetTrace.RUnlock()
-	return calls
 }
 
 // GetWorkflowRunLogs calls GetWorkflowRunLogsFunc.
@@ -246,41 +81,5 @@ func (mock *ObserverSvcClientMock) GetWorkflowRunLogsCalls() []struct {
 	mock.lockGetWorkflowRunLogs.RLock()
 	calls = mock.calls.GetWorkflowRunLogs
 	mock.lockGetWorkflowRunLogs.RUnlock()
-	return calls
-}
-
-// ListTraces calls ListTracesFunc.
-func (mock *ObserverSvcClientMock) ListTraces(ctx context.Context, params observersvc.TraceListParams) (map[string]any, error) {
-	if mock.ListTracesFunc == nil {
-		panic("ObserverSvcClientMock.ListTracesFunc: method is nil but ObserverSvcClient.ListTraces was just called")
-	}
-	callInfo := struct {
-		Ctx    context.Context
-		Params observersvc.TraceListParams
-	}{
-		Ctx:    ctx,
-		Params: params,
-	}
-	mock.lockListTraces.Lock()
-	mock.calls.ListTraces = append(mock.calls.ListTraces, callInfo)
-	mock.lockListTraces.Unlock()
-	return mock.ListTracesFunc(ctx, params)
-}
-
-// ListTracesCalls gets all the calls that were made to ListTraces.
-// Check the length with:
-//
-//	len(mockedObserverSvcClient.ListTracesCalls())
-func (mock *ObserverSvcClientMock) ListTracesCalls() []struct {
-	Ctx    context.Context
-	Params observersvc.TraceListParams
-} {
-	var calls []struct {
-		Ctx    context.Context
-		Params observersvc.TraceListParams
-	}
-	mock.lockListTraces.RLock()
-	calls = mock.calls.ListTraces
-	mock.lockListTraces.RUnlock()
 	return calls
 }

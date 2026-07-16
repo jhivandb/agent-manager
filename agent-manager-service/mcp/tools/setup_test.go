@@ -42,11 +42,10 @@ func setupTestServer(t *testing.T) (*gomcp.ClientSession, *MockToolsetHandler) {
 	// records every method call so tests can verify wiring after a tool invocation.
 	mock := NewMockToolsetHandler()
 	toolsets := &Toolsets{
-		ProjectToolset:       mock,
-		AgentToolset:         mock,
-		BuildToolset:         mock,
-		DeploymentToolset:    mock,
-		ObservabilityToolset: mock,
+		ProjectToolset:    mock,
+		AgentToolset:      mock,
+		BuildToolset:      mock,
+		DeploymentToolset: mock,
 	}
 	return setupTestServerWithToolsets(t, toolsets), mock
 }
@@ -94,7 +93,7 @@ type toolTestSpec struct {
 	name string
 
 	// Toolset group names, used by partial-registration tests
-	toolset string // "project", "agent", "build", "deployment, observability"
+	toolset string // "project", "agent", "build", "deployment"
 
 	// Description validation.
 	descriptionKeywords []string
@@ -117,6 +116,5 @@ var allToolSpecs = func() []toolTestSpec {
 	specs = append(specs, agentToolSpecs()...)
 	specs = append(specs, buildToolSpecs()...)
 	specs = append(specs, deploymentToolSpecs()...)
-	specs = append(specs, observabilityToolSpecs()...)
 	return specs
 }()
