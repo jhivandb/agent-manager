@@ -88,12 +88,6 @@ const (
 	MinOffset     = 0
 )
 
-// Log filter constants
-const (
-	SortOrderAsc  = "asc"
-	SortOrderDesc = "desc"
-)
-
 // Deployment state constants
 const (
 	DeploymentStateActive   = "Active"
