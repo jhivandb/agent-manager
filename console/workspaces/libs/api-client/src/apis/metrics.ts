@@ -16,42 +16,41 @@
  * under the License.
  */
 
-import { cloneDeep } from "lodash";
-import { httpPOST, SERVICE_BASE } from "../utils";
-import type {
-  GetAgentMetricsPathParams,
-  MetricsFilterRequest,
-  MetricsResponse,
-} from "@agent-management-platform/types";
+import { httpGETObserver } from "../utils";
+import type { MetricsResponse } from "@agent-management-platform/types";
+
+export interface ObserverMetricsParams {
+  organization: string;
+  project: string;
+  agent: string;
+  environment: string;
+  startTime?: string;
+  endTime?: string;
+}
+
+function assertRequired(value: string, field: string): void {
+  if (!value?.trim()) throw new Error(`Missing required parameters: ${field}`);
+}
 
 export async function getAgentMetrics(
-  params: GetAgentMetricsPathParams,
-  body: MetricsFilterRequest,
+  params: ObserverMetricsParams,
   getToken?: () => Promise<string>,
 ): Promise<MetricsResponse> {
-  const { orgName = "default", projName = "default", agentName } = params;
+  const { organization, project, agent, environment } = params;
+  assertRequired(organization, "organization");
+  assertRequired(project, "project");
+  assertRequired(agent, "agent");
+  assertRequired(environment, "environment");
 
-  if (!agentName) {
-    throw new Error("agentName is required");
-  }
-  const bodyClone = cloneDeep(body);
   const now = new Date();
-  if (!bodyClone?.endTime) {
-    bodyClone.endTime = now.toISOString();
-  }
-  if (!bodyClone?.startTime) {
-    bodyClone.startTime = new Date(now.getTime() - 1000 * 10).toISOString();
-  }
+  const endTime = params.endTime ?? now.toISOString();
+  const startTime = params.startTime ?? new Date(now.getTime() - 1000 * 10).toISOString();
+
   const token = getToken ? await getToken() : undefined;
-  const res = await httpPOST(
-    `${SERVICE_BASE}/orgs/${encodeURIComponent(
-      orgName
-    )}/projects/${encodeURIComponent(projName)}/agents/${encodeURIComponent(
-      agentName
-    )}/metrics`,
-    bodyClone,
-    { token }
-  );
-  if (!res.ok) throw await res.json();
+  const searchParams: Record<string, string> = {
+    organization, project, agent, environment, startTime, endTime,
+  };
+
+  const res = await httpGETObserver("/api/v1/metrics", { searchParams, token });
   return res.json();
 }

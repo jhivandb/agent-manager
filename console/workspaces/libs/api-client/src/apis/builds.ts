@@ -16,7 +16,7 @@
  * under the License.
  */
 
-import { httpGET, httpPOST, SERVICE_BASE } from "../utils";
+import { httpGET, httpGETObserver, httpPOST, SERVICE_BASE } from "../utils";
 import type {
   BuildAgentPathParams,
   BuildAgentQuery,
@@ -126,30 +126,17 @@ export async function getBuildLogs(
   params: GetBuildLogsPathParams,
   getToken?: () => Promise<string>
 ): Promise<BuildLogEntry[]> {
-  const {
-    orgName = "default",
-    projName = "default",
-    agentName,
-    buildName,
-  } = params;
-  
-  if (!agentName) {
-    throw new Error("agentName is required");
-  }
+  const { orgName = "default", buildName } = params;
+
   if (!buildName) {
     throw new Error("buildName is required");
   }
-  
+
   const token = getToken ? await getToken() : undefined;
-  const res = await httpGET(
-    `${SERVICE_BASE}/orgs/${encodeURIComponent(
-      orgName
-    )}/projects/${encodeURIComponent(projName)}/agents/${encodeURIComponent(
-      agentName
-    )}/builds/${encodeURIComponent(buildName)}/build-logs`,
-    { token }
-  );
-  if (!res.ok) throw await res.json();
+  const res = await httpGETObserver("/api/v1/build-logs", {
+    searchParams: { organization: orgName, buildName },
+    token,
+  });
   const resultJson = await res.json();
   return resultJson.logs ?? [];
 }

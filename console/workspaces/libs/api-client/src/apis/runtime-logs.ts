@@ -16,35 +16,47 @@
  * under the License.
  */
 
-import { cloneDeep } from "lodash";
-import { httpPOST, SERVICE_BASE } from "../utils";
-import type {
-  FilterAgentRuntimeLogsPathParams,
-  LogFilterRequest,
-  LogsResponse,
-} from "@agent-management-platform/types";
+import { httpGETObserver } from "../utils";
+import type { LogsResponse } from "@agent-management-platform/types";
 
-export async function filterAgentRuntimeLogs(
-  params: FilterAgentRuntimeLogsPathParams,
-  body: LogFilterRequest,
+export interface ObserverRuntimeLogsParams {
+  organization: string;
+  project: string;
+  agent: string;
+  environment: string;
+  startTime: string;
+  endTime: string;
+  searchPhrase?: string;
+  logLevels?: string[];
+  limit?: number;
+  sortOrder?: "asc" | "desc";
+}
+
+function assertRequired(value: string, field: string): void {
+  if (!value?.trim()) throw new Error(`Missing required parameters: ${field}`);
+}
+
+export async function getAgentRuntimeLogs(
+  params: ObserverRuntimeLogsParams,
   getToken?: () => Promise<string>,
 ): Promise<LogsResponse> {
-  const { orgName = "default", projName = "default", agentName } = params;
-
-  if (!agentName) {
-    throw new Error("agentName is required");
-  }
+  const { organization, project, agent, environment, startTime, endTime } = params;
+  assertRequired(organization, "organization");
+  assertRequired(project, "project");
+  assertRequired(agent, "agent");
+  assertRequired(environment, "environment");
+  assertRequired(startTime, "startTime");
+  assertRequired(endTime, "endTime");
 
   const token = getToken ? await getToken() : undefined;
-  const res = await httpPOST(
-    `${SERVICE_BASE}/orgs/${encodeURIComponent(
-      orgName
-    )}/projects/${encodeURIComponent(projName)}/agents/${encodeURIComponent(
-      agentName
-    )}/runtime-logs`,
-    cloneDeep(body),
-    { token }
-  );
-  if (!res.ok) throw await res.json();
+  const searchParams: Record<string, string> = {
+    organization, project, agent, environment, startTime, endTime,
+  };
+  if (params.searchPhrase) searchParams.searchPhrase = params.searchPhrase;
+  if (params.logLevels?.length) searchParams.logLevels = params.logLevels.join(",");
+  if (params.limit !== undefined) searchParams.limit = params.limit.toString();
+  if (params.sortOrder) searchParams.sortOrder = params.sortOrder;
+
+  const res = await httpGETObserver("/api/v1/logs", { searchParams, token });
   return res.json();
 }

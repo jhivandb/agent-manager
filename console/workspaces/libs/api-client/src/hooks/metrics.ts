@@ -47,7 +47,15 @@ export function useGetAgentMetrics(
         ? getTimeRange(options!.timeRange!)
         : { startTime: body.startTime, endTime: body.endTime };
       return getAgentMetrics(
-        params, { environmentName: body.environmentName, startTime, endTime }, getToken,
+        {
+          organization: params.orgName ?? "default",
+          project: params.projName ?? "default",
+          agent: params.agentName!,
+          environment: body.environmentName,
+          startTime,
+          endTime,
+        },
+        getToken,
       );
     },
     refetchInterval: options?.enableAutoRefresh ? SLOW_POLL_INTERVAL : undefined,

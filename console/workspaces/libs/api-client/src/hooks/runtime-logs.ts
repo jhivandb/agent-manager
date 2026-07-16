@@ -17,7 +17,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { filterAgentRuntimeLogs } from "../apis";
+import { getAgentRuntimeLogs, type ObserverRuntimeLogsParams } from "../apis";
 import { useAuthHooks } from "@agent-management-platform/auth";
 import {
   type FilterAgentRuntimeLogsPathParams,
@@ -83,6 +83,25 @@ export function useAgentRuntimeLogs(
     endTime: string;
   } | null>(null);
 
+  // Maps the hook's path/body params onto the observer's flat query-param shape.
+  // Only invoked once scopeParams is defined (queryFn is gated by `enabled`;
+  // loadOlder/loadNewer early-return otherwise), so the agentName assertion is safe.
+  const buildObserverParams = useCallback(
+    (range: { startTime: string; endTime: string }): ObserverRuntimeLogsParams => ({
+      organization: orgName ?? "default",
+      project: projName ?? "default",
+      agent: agentName!,
+      environment: bodyWithoutTime.environmentName,
+      startTime: range.startTime,
+      endTime: range.endTime,
+      searchPhrase: bodyWithoutTime.searchPhrase,
+      logLevels: bodyWithoutTime.logLevels,
+      limit: pageSize,
+      sortOrder: bodyWithoutTime.sortOrder,
+    }),
+    [orgName, projName, agentName, bodyWithoutTime, pageSize],
+  );
+
   const queryResult = useApiQuery({
     queryKey: [
       "agent-runtime-logs",
@@ -104,11 +123,7 @@ export function useAgentRuntimeLogs(
 
       lastFetchedRangeRef.current = range;
 
-      return filterAgentRuntimeLogs(
-        params,
-        { ...bodyWithoutTime, ...range, limit: pageSize },
-        getToken,
-      );
+      return getAgentRuntimeLogs(buildObserverParams(range), getToken);
     },
     enabled:
       (options?.enabled ?? true) &&
@@ -174,9 +189,8 @@ export function useAgentRuntimeLogs(
 
     setIsLoadingOlder(true);
     try {
-      const response = await filterAgentRuntimeLogs(
-        params,
-        { ...bodyWithoutTime, ...range, endTime: oldest.timestamp, limit: pageSize },
+      const response = await getAgentRuntimeLogs(
+        buildObserverParams({ ...range, endTime: oldest.timestamp }),
         getToken,
       );
       if (response.logs?.length) {
@@ -192,9 +206,7 @@ export function useAgentRuntimeLogs(
   }, [scopeParams,
     allLogs,
     isLoadingOlder,
-    params,
-    bodyWithoutTime,
-    pageSize,
+    buildObserverParams,
     getToken,
     mergeLogs]);
 
@@ -208,14 +220,11 @@ export function useAgentRuntimeLogs(
 
     setIsLoadingNewer(true);
     try {
-      const response = await filterAgentRuntimeLogs(
-        params,
-        {
-          ...bodyWithoutTime,
+      const response = await getAgentRuntimeLogs(
+        buildObserverParams({
           startTime: newest.timestamp,
           endTime: hasCustomRange ? range.endTime : new Date().toISOString(),
-          limit: pageSize,
-        },
+        }),
         getToken,
       );
       if (response.logs?.length) {
@@ -230,7 +239,7 @@ export function useAgentRuntimeLogs(
     }
   }, [
     scopeParams, allLogs, isLoadingNewer, hasCustomRange,
-    params, bodyWithoutTime, pageSize, getToken, mergeLogs]);
+    buildObserverParams, getToken, mergeLogs]);
 
   // Stable refs so the interval always calls the latest versions without
   // being torn down and recreated on every render.
