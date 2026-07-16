@@ -38,6 +38,12 @@ type Client interface {
 	// GetSpanDetails fetches the full details (including OTEL attributes) for a single span.
 	GetSpanDetails(ctx context.Context, traceID, spanID string) (*SpanDetailsResponse, error)
 
+	// QueryLogs fetches log entries matching the given request.
+	QueryLogs(ctx context.Context, req LogsQueryRequest) (*LogsQueryResponse, error)
+
+	// QueryMetrics fetches a resource metrics time series for the given request.
+	QueryMetrics(ctx context.Context, req MetricsQueryRequest) (*ResourceMetricsTimeSeries, error)
+
 	// NamespaceFor resolves the namespace a trace query is scoped to.
 	NamespaceFor(organization string) string
 }
@@ -85,6 +91,22 @@ func (c *clientImpl) GetSpanDetails(ctx context.Context, traceID, spanID string)
 	path := fmt.Sprintf("/api/v1alpha1/traces/%s/spans/%s", traceID, spanID)
 	if err := c.doGet(ctx, path, &result); err != nil {
 		return nil, fmt.Errorf("observer.GetSpanDetails: %w", err)
+	}
+	return &result, nil
+}
+
+func (c *clientImpl) QueryLogs(ctx context.Context, req LogsQueryRequest) (*LogsQueryResponse, error) {
+	var result LogsQueryResponse
+	if err := c.doPost(ctx, "/api/v1/logs/query", req, &result); err != nil {
+		return nil, fmt.Errorf("observer.QueryLogs: %w", err)
+	}
+	return &result, nil
+}
+
+func (c *clientImpl) QueryMetrics(ctx context.Context, req MetricsQueryRequest) (*ResourceMetricsTimeSeries, error) {
+	var result ResourceMetricsTimeSeries
+	if err := c.doPost(ctx, "/api/v1/metrics/query", req, &result); err != nil {
+		return nil, fmt.Errorf("observer.QueryMetrics: %w", err)
 	}
 	return &result, nil
 }

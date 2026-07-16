@@ -109,3 +109,61 @@ type SpanDetailsResponse struct {
 	Attributes         map[string]interface{} `json:"attributes"`
 	ResourceAttributes map[string]interface{} `json:"resourceAttributes"`
 }
+
+// WorkflowSearchScope scopes a logs query to an Argo workflow run.
+type WorkflowSearchScope struct {
+	Namespace       string  `json:"namespace"`
+	WorkflowRunName *string `json:"workflowRunName,omitempty"`
+}
+
+// LogsQueryRequest is the upstream Observer logs query. SearchScope takes either
+// a ComponentSearchScope or a WorkflowSearchScope (upstream oneOf).
+type LogsQueryRequest struct {
+	StartTime    time.Time `json:"startTime"`
+	EndTime      time.Time `json:"endTime"`
+	Limit        *int      `json:"limit,omitempty"`
+	LogLevels    []string  `json:"logLevels,omitempty"`
+	SearchPhrase *string   `json:"searchPhrase,omitempty"`
+	SortOrder    *string   `json:"sortOrder,omitempty"`
+	SearchScope  any       `json:"searchScope"`
+}
+
+// LogEntry decodes both component log entries (level+log+timestamp) and
+// workflow log entries (log+timestamp) from the upstream Observer.
+type LogEntry struct {
+	Timestamp *time.Time `json:"timestamp,omitempty"`
+	Log       *string    `json:"log,omitempty"`
+	Level     *string    `json:"level,omitempty"`
+}
+
+// LogsQueryResponse is the response from POST /api/v1/logs/query.
+type LogsQueryResponse struct {
+	Logs   []LogEntry `json:"logs"`
+	Total  *int       `json:"total,omitempty"`
+	TookMs *int       `json:"tookMs,omitempty"`
+}
+
+// MetricsQueryRequest queries resource metrics for a component.
+type MetricsQueryRequest struct {
+	StartTime   time.Time            `json:"startTime"`
+	EndTime     time.Time            `json:"endTime"`
+	Metric      string               `json:"metric"` // always "resource"
+	SearchScope ComponentSearchScope `json:"searchScope"`
+}
+
+// MetricsTimeSeriesItem is a single timestamped point in a resource metrics
+// time series.
+type MetricsTimeSeriesItem struct {
+	Timestamp *time.Time `json:"timestamp,omitempty"`
+	Value     *float64   `json:"value,omitempty"`
+}
+
+// ResourceMetricsTimeSeries is the response from POST /api/v1/metrics/query.
+type ResourceMetricsTimeSeries struct {
+	CpuUsage       *[]MetricsTimeSeriesItem `json:"cpuUsage,omitempty"`
+	CpuRequests    *[]MetricsTimeSeriesItem `json:"cpuRequests,omitempty"`
+	CpuLimits      *[]MetricsTimeSeriesItem `json:"cpuLimits,omitempty"`
+	MemoryUsage    *[]MetricsTimeSeriesItem `json:"memoryUsage,omitempty"`
+	MemoryRequests *[]MetricsTimeSeriesItem `json:"memoryRequests,omitempty"`
+	MemoryLimits   *[]MetricsTimeSeriesItem `json:"memoryLimits,omitempty"`
+}

@@ -67,6 +67,14 @@ func (f *fakeObserverClient) NamespaceFor(_ string) string {
 	return f.defaultNamespace
 }
 
+func (f *fakeObserverClient) QueryLogs(_ context.Context, _ observer.LogsQueryRequest) (*observer.LogsQueryResponse, error) {
+	return &observer.LogsQueryResponse{}, nil
+}
+
+func (f *fakeObserverClient) QueryMetrics(_ context.Context, _ observer.MetricsQueryRequest) (*observer.ResourceMetricsTimeSeries, error) {
+	return &observer.ResourceMetricsTimeSeries{}, nil
+}
+
 func (f *fakeObserverClient) GetSpanDetails(_ context.Context, _, spanID string) (*observer.SpanDetailsResponse, error) {
 	atomic.AddInt32(&f.getSpanDetailsCalls, 1)
 	if f.rootSpan != nil && spanID == f.rootSpan.SpanID {
