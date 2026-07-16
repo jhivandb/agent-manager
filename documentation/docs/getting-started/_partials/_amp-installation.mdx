@@ -96,7 +96,7 @@ helm install amp \
   --set console.config.auth.signInRedirectURL="${CONSOLE_PUBLIC_URL}/login" \
   --set console.config.auth.signOutRedirectURL="${CONSOLE_PUBLIC_URL}/login" \
   --set console.config.apiBaseUrl="${API_PUBLIC_URL}" \
-  --set console.config.obsApiBaseUrl="${OBS_API_PUBLIC_URL}" \
+  --set agentManagerService.config.amObserverPublicURL="${OBS_API_PUBLIC_URL}" \
   --set console.ocIngress.hostname="${CONSOLE_PUBLIC_HOST}" \
   --set agentManagerService.ocIngress.hostname="${API_PUBLIC_HOST}" \
   --set agentManagerService.config.serverPublicURL="${API_PUBLIC_URL}" \
@@ -197,11 +197,11 @@ helm install amp-observability-traces \
   oci://${HELM_CHART_REGISTRY}/wso2-amp-observability-extension \
   --version ${VERSION} \
   --namespace ${OBSERVABILITY_NS} \
-  --set tracesObserver.ocIngress.hostname="${OBS_API_PUBLIC_HOST}" \
+  --set amObserver.ocIngress.hostname="${OBS_API_PUBLIC_HOST}" \
   --timeout 1800s
 
 kubectl wait --for=condition=Available \
-  deployment/amp-traces-observer -n ${OBSERVABILITY_NS} --timeout=600s
+  deployment/amp-observer -n ${OBSERVABILITY_NS} --timeout=600s
 ```
 
 #### Step 5: Evaluation Extension

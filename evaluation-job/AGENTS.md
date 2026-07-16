@@ -23,7 +23,7 @@ A Dockerized Python **job** (not a library) that runs Monitor-mode evaluations a
 | `--evaluators='[{…}]'` | JSON array of `{name, …config}`; each becomes a builtin evaluator via `builtin(name, **config)` |
 | `--sampling-rate` | float, default 1.0 |
 | `--trace-start`, `--trace-end` | ISO-8601 window |
-| `--traces-api-endpoint` | e.g. `http://traces-observer:8080` |
+| `--traces-api-endpoint` | e.g. `http://amp-observer:8080` |
 | `--publisher-endpoint` | agent-manager internal API base for score publishing (e.g. `http://agent-manager-internal:8081`) |
 
 OAuth2 client credentials for publisher authentication are read from the environment (via `OAuth2TokenManager`), not passed as CLI flags.
@@ -51,4 +51,4 @@ Config: ruff/mypy target **py311**, line-length 120.
 - Page size (10) is not a flag — change it in the source if needed.
 - For local iteration on the evaluator code, use `make docker-build-dev` so it picks up your local `../libs/amp-evaluation` instead of the published version.
 
-Depends on `../libs/amp-evaluation/AGENTS.md` (evaluators + `Monitor`) and hits `../traces-observer-service/AGENTS.md` for traces.
+Depends on `../libs/amp-evaluation/AGENTS.md` (evaluators + `Monitor`) and hits `../agent-manager-observer/AGENTS.md` for traces.

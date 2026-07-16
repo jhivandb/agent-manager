@@ -5,7 +5,7 @@ sidebar_label: Agent
 
 # amctl agent
 
-Manage agents in a project — create, build, deploy, inspect, and observe.
+Manage agents in a project — create, build, deploy, inspect, and observe. Runtime logs, metrics, and build logs are served by the observer, which the CLI discovers automatically from the agent-manager API — no separate endpoint to configure.
 
 ```
 amctl agent [command]
@@ -23,9 +23,9 @@ amctl agent [command]
 | [`build create`](#amctl-agent-build-create) | Trigger a build |
 | [`build get`](#amctl-agent-build-get) | Show details of a build |
 | [`build list`](#amctl-agent-build-list) | List builds for an agent |
-| [`build logs`](#amctl-agent-build-logs) | Show build logs |
-| [`logs`](#amctl-agent-logs) | Fetch runtime logs for a deployed agent |
-| [`metrics`](#amctl-agent-metrics) | Show CPU and memory metrics |
+| [`build logs`](#amctl-agent-build-logs) | Show build logs (via the observer) |
+| [`logs`](#amctl-agent-logs) | Fetch runtime logs for a deployed agent (via the observer) |
+| [`metrics`](#amctl-agent-metrics) | Show CPU and memory metrics (via the observer) |
 | [`traces`](#amctl-agent-traces) | List runtime traces |
 | [`traces export`](#amctl-agent-traces-export) | Export a full trace payload |
 | [`trace`](#amctl-agent-trace) | Show span detail for a single trace |

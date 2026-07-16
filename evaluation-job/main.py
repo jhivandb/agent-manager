@@ -31,7 +31,7 @@ Usage:
         --sampling-rate=1.0 \
         --trace-start=2026-01-01T00:00:00Z \
         --trace-end=2026-01-02T00:00:00Z \
-        --traces-api-endpoint=http://traces-observer:8080
+        --traces-api-endpoint=http://amp-observer:8080
 """
 
 import argparse
@@ -212,7 +212,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--traces-api-endpoint",
         required=True,
-        help="Traces API endpoint (e.g., http://traces-observer-service:8080)",
+        help="Traces API endpoint (e.g., http://amp-observer:8080)",
     )
 
     parser.add_argument(

@@ -1,6 +1,6 @@
 # MCP Server
 
-WSO2 Agent Manager (AMP) ships a Model Context Protocol (MCP) server that lets MCP-capable AI assistants — Claude Code, Codex, Cursor, and others — drive the platform directly from the developer's terminal. Through the server, an assistant can list projects, register agents, trigger builds, deploy images, and inspect runtime traces and logs without leaving the conversation.
+WSO2 Agent Manager (AMP) ships a Model Context Protocol (MCP) server that lets MCP-capable AI assistants — Claude Code, Codex, Cursor, and others — drive the platform directly from the developer's terminal. Through the server, an assistant can list projects, register agents, trigger builds, deploy images, and inspect runtime traces without leaving the conversation.
 
 ## Overview
 
@@ -10,7 +10,7 @@ A single OAuth client (`am-mcp`) is pre-registered in Thunder out of the box, so
 
 ## Available Tools
 
-The MCP server provides **19 tools** organized into five toolsets covering the agent lifecycle — from creating a project through observing a deployed agent's traces.
+The MCP server provides **16 tools** organized into five toolsets covering the agent lifecycle — from creating a project through observing a deployed agent's traces.
 
 <details>
 <summary><strong>Project Toolset (3 tools)</strong></summary>
@@ -31,13 +31,12 @@ The MCP server provides **19 tools** organized into five toolsets covering the a
 </details>
 
 <details>
-<summary><strong>Build Toolset (4 tools)</strong></summary>
+<summary><strong>Build Toolset (3 tools)</strong></summary>
 
 Internal agents only — external agents are never built by the platform.
 
 - `list_builds` — Paginated list of builds for an agent, including status, image ID, and timestamps. Includes a `retry_after_seconds` hint when a build is still in progress.
 - `get_build_details` — Detailed view of a single build: steps, durations, commit, and build parameters.
-- `get_build_logs` — Step-by-step stdout/stderr produced while packaging the agent source into a runnable image.
 - `build_agent` — Trigger a fresh build from a specific commit (defaults to the latest commit on the configured branch). Returns immediately — successful builds trigger deployment automatically, so the assistant only needs to poll `get_build_details` for completion.
 
 </details>
@@ -52,10 +51,8 @@ Internal agents only — external agents are never built by the platform.
 </details>
 
 <details>
-<summary><strong>Observability Toolset (6 tools)</strong></summary>
+<summary><strong>Observability Toolset (4 tools)</strong></summary>
 
-- `get_runtime_logs` — Application logs emitted by a deployed agent. Filter by time window (RFC3339, max 14 days), log levels (`DEBUG`, `INFO`, `WARN`, `ERROR`), sort order, and free-text search.
-- `get_metrics` — CPU and memory usage, request, and limit metrics for a deployment over a time range.
 - `list_traces` — Summary view of recent traces for an agent (trace ID, root span, duration, span count, token usage, status). Optional `include_io` flag attaches input/output payloads.
 - `get_traces` — Traces with full span details. Supports server-side condition filters: `error_status`, `high_latency`, `high_token_usage`, `tool_call_fails`, and `excessive_steps` — each with a tunable threshold parameter.
 - `get_trace_details` — Metadata and span list for a single trace by trace ID.

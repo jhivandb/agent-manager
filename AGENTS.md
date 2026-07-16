@@ -12,7 +12,7 @@ This repo is a **multi-aspect monorepo**. Each aspect has its own `AGENTS.md` wi
 | **Web console** | `console/` | React 19, TS, Vite, Rush/pnpm, Oxygen UI (MUI 7), TanStack Query | [`console/AGENTS.md`](console/AGENTS.md) |
 | **Oxygen UI library** | `console/.ai/oxygen-ui/` | WSO2 React component lib | [`console/.ai/oxygen-ui/AGENTS.md`](console/.ai/oxygen-ui/AGENTS.md) |
 | **CLI (`amctl`)** | `cli/` | Go, cobra-style, factory-injected deps | [`cli/AGENTS.md`](cli/AGENTS.md) |
-| **Trace/observability API** | `traces-observer-service/` | Go, stdlib `net/http`, `slog` | [`traces-observer-service/AGENTS.md`](traces-observer-service/AGENTS.md) |
+| **Trace/observability API** | `agent-manager-observer/` | Go, stdlib `net/http`, `slog` | [`agent-manager-observer/AGENTS.md`](agent-manager-observer/AGENTS.md) |
 | **Instrumentation lib** | `libs/amp-instrumentation/` | Python, OpenTelemetry / Traceloop | [`libs/amp-instrumentation/AGENTS.md`](libs/amp-instrumentation/AGENTS.md) |
 | **Evaluation lib** | `libs/amp-evaluation/` | Python, Pydantic v2 | [`libs/amp-evaluation/AGENTS.md`](libs/amp-evaluation/AGENTS.md) |
 | **Evaluation job** | `evaluation-job/` | Python (Dockerized Argo job) | [`evaluation-job/AGENTS.md`](evaluation-job/AGENTS.md) |
@@ -40,14 +40,14 @@ console ──HTTP──▶ agent-manager-service ──▶ OpenChoreo / Postgre
    │                       └─ orchestrates agent deploys; agents are auto-instrumented by
    │                          python-instrumentation-provider (ships amp-instrumentation)
    │                                                     │
-   └──HTTP──▶ traces-observer-service ──▶ Observer ──▶ OTel traces from instrumented agents
+   └──HTTP──▶ agent-manager-observer ──▶ Observer ──▶ OTel traces from instrumented agents
                                                      │
                           evaluation-job ──uses amp-evaluation──▶ fetches those traces, scores them
 cli (amctl) ──HTTP──▶ agent-manager-service   (same API as the console)
 ```
 
 - **`agent-manager-service`** is the hub — the REST/gRPC/WS API the console and CLI both call.
-- **Instrumented agents** emit OTel traces (via `amp-instrumentation`, injected by `python-instrumentation-provider`); `traces-observer-service` serves them to the console; `evaluation-job` scores them via `amp-evaluation`.
+- **Instrumented agents** emit OTel traces (via `amp-instrumentation`, injected by `python-instrumentation-provider`); `agent-manager-observer` serves them to the console; `evaluation-job` scores them via `amp-evaluation`.
 
 ## Local dev environment (from repo root)
 
