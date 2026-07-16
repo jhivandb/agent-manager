@@ -19,6 +19,7 @@ package agent
 import (
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -48,9 +49,6 @@ func WaitForRuntimeLog(client *framework.AMPClient, params *WaitForRuntimeLogPar
 		timeout = 3 * time.Minute
 	}
 
-	path := fmt.Sprintf("/api/v1/orgs/%s/projects/%s/agents/%s/runtime-logs",
-		params.OrgName, params.ProjectName, params.AgentName)
-
 	scope := fmt.Sprintf("org=%s project=%s agent=%s env=%s search=%q",
 		params.OrgName, params.ProjectName, params.AgentName, params.Environment, params.SearchText)
 
@@ -61,15 +59,19 @@ func WaitForRuntimeLog(client *framework.AMPClient, params *WaitForRuntimeLogPar
 	attempt := 0
 	Eventually(func(g Gomega) {
 		attempt++
-		req := framework.LogFilterRequest{
-			EnvironmentName: params.Environment,
-			StartTime:       time.Now().Add(-10 * time.Minute).UTC().Format(time.RFC3339),
-			EndTime:         time.Now().Add(1 * time.Minute).UTC().Format(time.RFC3339),
-			Limit:           100,
-			SortOrder:       "desc",
-		}
+		q := url.Values{}
+		q.Set("organization", params.OrgName)
+		q.Set("project", params.ProjectName)
+		q.Set("agent", params.AgentName)
+		q.Set("environment", params.Environment)
+		q.Set("startTime", time.Now().Add(-10*time.Minute).UTC().Format(time.RFC3339))
+		q.Set("endTime", time.Now().Add(1*time.Minute).UTC().Format(time.RFC3339))
+		q.Set("limit", "100")
+		q.Set("sortOrder", "desc")
 
-		resp, err := client.Post(path, req)
+		logsURL := fmt.Sprintf("%s/api/v1/logs?%s", client.Cfg().ObserverBaseURL, q.Encode())
+
+		resp, err := client.DoRaw("GET", logsURL)
 		g.Expect(err).NotTo(HaveOccurred(), "runtime logs request failed (%s)", scope)
 		defer resp.Body.Close()
 
@@ -97,20 +99,21 @@ func WaitForRuntimeLog(client *framework.AMPClient, params *WaitForRuntimeLogPar
 	return result
 }
 
-// GetRuntimeLogs fetches runtime logs for an agent.
+// GetRuntimeLogs fetches runtime logs for an agent from the observer.
 func GetRuntimeLogs(g Gomega, client *framework.AMPClient, orgName, projName, agentName, environment string) framework.LogsResponse {
-	path := fmt.Sprintf("/api/v1/orgs/%s/projects/%s/agents/%s/runtime-logs",
-		orgName, projName, agentName)
+	q := url.Values{}
+	q.Set("organization", orgName)
+	q.Set("project", projName)
+	q.Set("agent", agentName)
+	q.Set("environment", environment)
+	q.Set("startTime", time.Now().Add(-10*time.Minute).UTC().Format(time.RFC3339))
+	q.Set("endTime", time.Now().Add(1*time.Minute).UTC().Format(time.RFC3339))
+	q.Set("limit", "100")
+	q.Set("sortOrder", "desc")
 
-	req := framework.LogFilterRequest{
-		EnvironmentName: environment,
-		StartTime:       time.Now().Add(-10 * time.Minute).UTC().Format(time.RFC3339),
-		EndTime:         time.Now().Add(1 * time.Minute).UTC().Format(time.RFC3339),
-		Limit:           100,
-		SortOrder:       "desc",
-	}
+	logsURL := fmt.Sprintf("%s/api/v1/logs?%s", client.Cfg().ObserverBaseURL, q.Encode())
 
-	resp, err := client.Post(path, req)
+	resp, err := client.DoRaw("GET", logsURL)
 	g.Expect(err).NotTo(HaveOccurred(), "runtime logs request failed")
 	defer resp.Body.Close()
 	framework.ExpectStatus(g, resp, 200)

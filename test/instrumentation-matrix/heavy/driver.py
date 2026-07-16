@@ -2,7 +2,7 @@
 
 Picks the heavy-tier subset, deploys each cell against the live AMP stack
 via agent-manager-service's REST API, invokes the agent, polls
-traces-observer-service for the resulting spans, validates against the
+agent-manager-observer for the resulting spans, validates against the
 contract, and writes a per-cell report. Failures fall into the same
 taxonomy the emission tier uses (categorize.FailureCategory).
 
@@ -55,11 +55,11 @@ HERE = Path(__file__).resolve().parent.parent
 # secrets are the LLM keys, which are forwarded into the deployed agent.
 _DEFAULTS = {
     # The dev `make setup` bring-up port-forwards these to localhost:
-    # API 9000 (compose 9000:8080), traces-observer 9098, Thunder IDP 8090.
+    # API 9000 (compose 9000:8080), amp-observer 9098, Thunder IDP 8090.
     # (The quick-start/e2e topology routes Thunder via thunder.amp.localhost
     # :8080 with a Host-header trick — that's NOT what the heavy tier uses.)
     "AMP_API_BASE_URL": "http://localhost:9000",
-    "TRACES_OBSERVER_BASE_URL": "http://localhost:9098",
+    "AM_OBSERVER_BASE_URL": "http://localhost:9098",
     "IDP_TOKEN_URL": "http://localhost:8090/oauth2/token",
     "IDP_CLIENT_ID": "amp-api-client",
     "IDP_CLIENT_SECRET": "amp-api-client-secret",
@@ -135,7 +135,7 @@ def main() -> int:
             client_secret=_env("IDP_CLIENT_SECRET"),
         ),
     )
-    observer_base_url = _env("TRACES_OBSERVER_BASE_URL")
+    observer_base_url = _env("AM_OBSERVER_BASE_URL")
     agent_env = {k: os.environ[k] for k in _AGENT_SECRET_ENV_KEYS if os.environ.get(k)}
 
     reports_dir = HERE / "reports" / "heavy"

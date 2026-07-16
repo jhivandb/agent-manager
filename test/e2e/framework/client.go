@@ -113,7 +113,7 @@ func (c *AMPClient) Delete(path string) (*http.Response, error) {
 }
 
 // DoRaw sends an authenticated request to an absolute URL (not relative to baseURL).
-// Useful for calling other services like traces-observer-service.
+// Useful for calling other services like agent-manager-observer.
 func (c *AMPClient) DoRaw(method, absoluteURL string) (*http.Response, error) {
 	req, err := http.NewRequest(method, absoluteURL, nil)
 	if err != nil {

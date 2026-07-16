@@ -23,11 +23,11 @@ import (
 
 // Config holds all configuration for the e2e test suite.
 type Config struct {
-	AMPBaseURL      string
-	TracesBaseURL   string
-	IDPTokenURL     string
-	IDPClientID     string
-	IDPClientSecret string
+	AMPBaseURL       string
+	ObserverBaseURL  string
+	IDPTokenURL      string
+	IDPClientID      string
+	IDPClientSecret  string
 	DefaultOrg       string
 	DefaultProject   string
 	DefaultEnv       string
@@ -41,7 +41,7 @@ type Config struct {
 func LoadConfig() *Config {
 	return &Config{
 		AMPBaseURL:       envOrDefault("AMP_API_BASE_URL", "http://api.amp.localhost:8080"),
-		TracesBaseURL:    envOrDefault("TRACES_OBSERVER_BASE_URL", "http://traces.amp.localhost:11080"),
+		ObserverBaseURL:  envOrDefault("AM_OBSERVER_BASE_URL", "http://traces.amp.localhost:11080"),
 		IDPTokenURL:      envOrDefault("IDP_TOKEN_URL", "http://thunder.amp.localhost:8080/oauth2/token"),
 		IDPClientID:      envOrDefault("IDP_CLIENT_ID", "amp-api-client"),
 		IDPClientSecret:  envOrDefault("IDP_CLIENT_SECRET", "amp-api-client-secret"),

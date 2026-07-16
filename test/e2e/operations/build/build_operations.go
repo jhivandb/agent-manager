@@ -19,6 +19,7 @@ package build
 import (
 	"fmt"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/onsi/ginkgo/v2"
@@ -103,12 +104,15 @@ func WaitForBuildSuccess(client *framework.AMPClient, params *WaitForBuildParams
 	return buildName
 }
 
-// GetBuildLogs retrieves the build logs for a specific build.
+// GetBuildLogs retrieves the build logs for a specific build from the observer.
 func GetBuildLogs(g Gomega, client *framework.AMPClient, orgName, projName, agentName, buildName string) framework.LogsResponse {
-	path := fmt.Sprintf("/api/v1/orgs/%s/projects/%s/agents/%s/builds/%s/build-logs",
-		orgName, projName, agentName, buildName)
+	q := url.Values{}
+	q.Set("organization", orgName)
+	q.Set("buildName", buildName)
 
-	resp, err := client.Get(path)
+	buildLogsURL := fmt.Sprintf("%s/api/v1/build-logs?%s", client.Cfg().ObserverBaseURL, q.Encode())
+
+	resp, err := client.DoRaw("GET", buildLogsURL)
 	g.Expect(err).NotTo(HaveOccurred(), "get build logs request failed")
 	defer resp.Body.Close()
 	framework.ExpectStatus(g, resp, 200)

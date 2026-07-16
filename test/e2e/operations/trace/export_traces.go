@@ -52,7 +52,7 @@ func ExportTraces(g Gomega, client *framework.AMPClient, params *ExportTracesPar
 		q.Set("sortOrder", "desc")
 	}
 
-	exportURL := fmt.Sprintf("%s/api/v1/traces/export?%s", client.Cfg().TracesBaseURL, q.Encode())
+	exportURL := fmt.Sprintf("%s/api/v1/traces/export?%s", client.Cfg().ObserverBaseURL, q.Encode())
 
 	resp, err := client.DoRaw("GET", exportURL)
 	g.Expect(err).NotTo(HaveOccurred(), "export traces request failed")

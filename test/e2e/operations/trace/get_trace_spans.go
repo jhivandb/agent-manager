@@ -20,7 +20,7 @@ type GetTraceSpansParams struct {
 	EndTime     string // ISO 8601
 }
 
-// GetTraceSpans returns spans for a specific trace from the traces-observer-service.
+// GetTraceSpans returns spans for a specific trace from agent-manager-observer.
 func GetTraceSpans(g Gomega, client *framework.AMPClient, params *GetTraceSpansParams) framework.SpanSummaryListResponse {
 	q := url.Values{}
 	q.Set("namespace", params.Namespace)
@@ -31,7 +31,7 @@ func GetTraceSpans(g Gomega, client *framework.AMPClient, params *GetTraceSpansP
 	q.Set("endTime", params.EndTime)
 
 	tracesURL := fmt.Sprintf("%s/api/v1/traces/%s/spans?%s",
-		client.Cfg().TracesBaseURL, params.TraceID, q.Encode())
+		client.Cfg().ObserverBaseURL, params.TraceID, q.Encode())
 
 	resp, err := client.DoRaw("GET", tracesURL)
 	g.Expect(err).NotTo(HaveOccurred(), "get trace spans request failed")

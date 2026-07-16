@@ -1,11 +1,11 @@
-name: Traces Observer Service
+name: Agent Manager Observer
 
 on:
   pull_request:
     branches: ["main"]
     paths:
-      - "traces-observer-service/**"
-      - ".github/workflows/traces-observer-service-pr-checks.yaml"
+      - "agent-manager-observer/**"
+      - ".github/workflows/agent-manager-observer-pr-checks.yaml"
 
 permissions:
   contents: read
@@ -25,7 +25,7 @@ jobs:
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
-          working-directory: traces-observer-service
+          working-directory: agent-manager-observer
 
   test:
     name: Test
@@ -40,18 +40,18 @@ jobs:
         uses: ./.github/actions/setup-go
 
       - name: Create test .env file
-        working-directory: ./traces-observer-service
+        working-directory: ./agent-manager-observer
         run: |
           cat > .env << EOF
           OPENSEARCH_ADDRESS=http://localhost:9200
           OPENSEARCH_USERNAME=admin
           OPENSEARCH_PASSWORD=admin
-          TRACES_OBSERVER_PORT=9098
+          AM_OBSERVER_PORT=9098
           LOG_LEVEL=INFO
           EOF
 
       - name: Run tests
-        working-directory: ./traces-observer-service
+        working-directory: ./agent-manager-observer
         run: make test
 
       - name: Upload test logs on failure
@@ -59,7 +59,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: test-logs
-          path: traces-observer-service/data/test_output.log
+          path: agent-manager-observer/data/test_output.log
           retention-days: 7
 
   build:
@@ -76,10 +76,10 @@ jobs:
       - name: Build Docker image
         uses: docker/build-push-action@v6
         with:
-          context: ./traces-observer-service
-          file: ./traces-observer-service/Dockerfile
+          context: ./agent-manager-observer
+          file: ./agent-manager-observer/Dockerfile
           push: false
-          tags: traces-observer-service:pr-check
+          tags: agent-manager-observer:pr-check
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -95,7 +95,7 @@ jobs:
         uses: ./.github/actions/setup-go
 
       - name: Check formatting
-        working-directory: ./traces-observer-service
+        working-directory: ./agent-manager-observer
         run: |
           make fmt
           if [ -n "$(git status --porcelain)" ]; then

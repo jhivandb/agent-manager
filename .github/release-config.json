@@ -12,8 +12,8 @@
       "dir": "agent-manager-service"
     },
     {
-      "name": "amp-traces-observer",
-      "dir": "traces-observer-service"
+      "name": "amp-observer",
+      "dir": "agent-manager-observer"
     },
     {
       "name": "amp-quick-start",

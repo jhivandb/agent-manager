@@ -39,7 +39,7 @@ type ListTracesParams struct {
 	Limit        int
 }
 
-// ListTraces attempts to list traces from the traces-observer-service.
+// ListTraces attempts to list traces from agent-manager-observer.
 // Returns the response and an error on failure, allowing callers to decide
 // whether to retry or fail.
 func ListTraces(client *framework.AMPClient, params *ListTracesParams) (framework.TraceOverviewListResponse, error) {
@@ -55,7 +55,7 @@ func ListTraces(client *framework.AMPClient, params *ListTracesParams) (framewor
 	}
 	q.Set("sortOrder", "desc")
 
-	tracesURL := fmt.Sprintf("%s/api/v1/traces?%s", client.Cfg().TracesBaseURL, q.Encode())
+	tracesURL := fmt.Sprintf("%s/api/v1/traces?%s", client.Cfg().ObserverBaseURL, q.Encode())
 
 	resp, err := client.DoRaw("GET", tracesURL)
 	if err != nil {

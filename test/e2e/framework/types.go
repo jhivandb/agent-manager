@@ -936,7 +936,7 @@ type AgentModelConfigListResponse struct {
 }
 
 // ---------------------------------------------------------------------------
-// Traces (traces-observer-service)
+// Traces (agent-manager-observer)
 // ---------------------------------------------------------------------------
 
 type TraceOverview struct {

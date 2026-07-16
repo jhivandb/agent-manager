@@ -1,6 +1,6 @@
 """Trace-observer query helpers for the heavy-tier driver.
 
-After an agent is invoked, its spans land in traces-observer-service. We
+After an agent is invoked, its spans land in agent-manager-observer. We
 fetch them in three steps, mirroring the Go e2e suite
 (`test/e2e/operations/trace/`):
 
@@ -8,7 +8,7 @@ fetch them in three steps, mirroring the Go e2e suite
   2. list span summaries per trace  GET /api/v1/traces/{traceId}/spans?...
   3. fetch each span's detail        GET /api/v1/traces/{traceId}/spans/{spanId}
 
-Step 3 returns `opensearch.Span` (traces-observer-service/opensearch/types.go),
+Step 3 returns `opensearch.Span` (agent-manager-observer/opensearch/types.go),
 which carries `name`, `kind`, `attributes` (raw gen_ai.* map), `resource`,
 and the trace/span/parent ids — exactly the shape the emission-tier
 ContractValidator + classify_span already consume, so no separate heavy

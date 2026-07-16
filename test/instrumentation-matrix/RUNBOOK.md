@@ -223,7 +223,7 @@ Pair every `known-broken` entry with an `F-NNN` entry in `FINDINGS.md` so the
 
 The heavy tier (`nox -s heavy`, `heavy/driver.py`) is a **pipeline test**: it
 deploys a real agent against a real AMP stack on k3d, invokes it, polls
-`traces-observer-service`, and checks that the spans survive the full path
+`agent-manager-observer`, and checks that the spans survive the full path
 (auto-instrumentation → gateway → collector → OpenSearch → observer) and
 validate against the `traceloop/v1` contract.
 
@@ -254,7 +254,7 @@ heavy axis.
 The CI heavy job stands up AMP from the **working tree** via the dev
 `make setup` chain, wrapped in the `.github/actions/amp-dev-stack` composite:
 `setup-k3d` → `setup-openchoreo` (builds + `k3d image import`s the
-traces-observer + python-instrumentation-provider images from source) →
+amp-observer + python-instrumentation-provider images from source) →
 `setup-platform` (agent-manager-service via docker-compose) → migrate →
 port-forward → gateway.
 
@@ -273,7 +273,7 @@ values the dev bring-up exposes (overridable, never required):
 | `OPENAI_API_KEY` | **secret** | forwarded into each deployed agent so it can make real calls |
 | `ANTHROPIC_API_KEY` | **secret** | for the anthropic-direct cell |
 | `AMP_API_BASE_URL` | default | `http://localhost:9000` |
-| `TRACES_OBSERVER_BASE_URL` | default | `http://localhost:9098` |
+| `AM_OBSERVER_BASE_URL` | default | `http://localhost:9098` |
 | `IDP_TOKEN_URL` | default | `http://thunder.amp.localhost:8080/oauth2/token` |
 | `IDP_CLIENT_ID` | default | `amp-api-client` |
 | `IDP_CLIENT_SECRET` | default | `amp-api-client-secret` |
@@ -312,7 +312,7 @@ first-run-tunable:
 1. **The `amp-dev-stack` bring-up** — the `make setup` chain hasn't run on a
    CI runner; watch `setup-platform.sh`'s Node check, the (unneeded) console
    in docker-compose, and the port-forwards exposing the API (`:9000`),
-   traces-observer (`:9098`), and Thunder IDP (`:8090`).
+   amp-observer (`:9098`), and Thunder IDP (`:8090`).
 2. **Endpoints the driver assumes** — IDP token URL (`localhost:8090`), the
    agent's `/chat` route + `{session_id, message}` body, and reading the
    endpoint URL from the deployments response (the e2e suite reads it from
@@ -324,7 +324,7 @@ first-run-tunable:
 ## 8. Where the schemas come from
 
 The JSON-schema contract under `contracts/traceloop/v1/` is **generated from
-`traces-observer-service`'s parsers**, not hand-written:
+`agent-manager-observer`'s parsers**, not hand-written:
 
 ```bash
 make gen-instrumentation-contract     # regenerate schemas from the observer

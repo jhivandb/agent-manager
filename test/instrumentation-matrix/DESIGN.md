@@ -48,7 +48,7 @@ to onboard" should be **a single CI run**, not a triage epic.
 
 - Detect regressions in `(provider × provider-version × framework × framework-version × python-version)` combinations.
 - Validate emitted spans against a versioned JSON-schema contract that is itself
-  generated from `traces-observer-service`'s parsers (no hand-maintained schema docs).
+  generated from `agent-manager-observer`'s parsers (no hand-maintained schema docs).
 - Cover both auto- and manual-instrumentation paths using the *same* contract.
 - Make adding a new framework, a new framework-version, or a new Traceloop
   version a one-line manifest change.
@@ -91,7 +91,7 @@ A Python-based, manifest-driven, two-tier compatibility harness at
    │  per-cell venv        │               │  build AMP from source     │
    │  + provider bootstrap │               │  on k3d (make setup)       │
    │  + VCR cassette       │               │  deploy agent → /chat      │
-   │  → InMemoryExporter   │               │  → traces-observer poll    │
+   │  → InMemoryExporter   │               │  → amp-observer    poll    │
    └──────────┬───────────┘               └──────────────┬─────────────┘
               │            captured spans                 │
               └───────────────┬────────────────────────────┘
@@ -114,18 +114,18 @@ heavy asks "do they survive the real pipeline and enrich correctly?"
 | Tier        | Question it answers                                                              | Per-cell cost | Where it runs                                                                            |
 | ---         | ---                                                                              | ---           | ---                                                                                      |
 | Emission    | Does the instrumentation provider still emit conforming spans for this combo?    | 5–15 s        | In-process, per-cell `venv`, `InMemorySpanExporter`, VCR cassette for LLM HTTP.          |
-| Heavy       | Do conforming spans flow through Obs Gateway → Collector → OpenSearch → traces-observer-service and arrive as well-formed `AmpAttributes`? | 15–20 min     | k3d in CI (AMP built from source via `make setup`), restricted to a representative cell subset. |
+| Heavy       | Do conforming spans flow through Obs Gateway → Collector → OpenSearch → agent-manager-observer and arrive as well-formed `AmpAttributes`? | 15–20 min     | k3d in CI (AMP built from source via `make setup`), restricted to a representative cell subset. |
 
 ### 3.2 What each tier covers and misses
 
 - The **emission tier** exercises the SDK and the contract. It does not
   exercise the prod `sitecustomize.py`, the OTLP exporter, Obs Gateway JWT
   validation, OTel Collector batching, OpenSearch index typing, or
-  `traces-observer-service` enrichment. Emission failures point at the
+  `agent-manager-observer` enrichment. Emission failures point at the
   provider or the framework.
 - The **heavy tier** runs the unmodified prod `sitecustomize.py` against a real
   AMP stack and asserts on the `AmpAttributes` returned by
-  `traces-observer-service`. It does cover everything the emission tier
+  `agent-manager-observer`. It does cover everything the emission tier
   misses, at the cost of full-cluster spin-up. Heavy failures distinguish
   between "spans never arrived" (pipeline issue) and "spans arrived but
   enrichment was wrong" (observer regression).
@@ -148,7 +148,7 @@ heavy asks "do they survive the real pipeline and enrich correctly?"
 | `agent-manager-service/instrumentation/baseline.json` | Embedded server-side catalog of known versions.  | Unchanged. Generated from `release-config.json` as today.                                        |
 | `python-instrumentation-provider/sitecustomize.py`| Production auto-instrumentation entrypoint.          | Unchanged. The test harness uses a small forked variant; a contract test prevents config drift.  |
 | `samples/manual-instrumentation-agent/`           | Published reference for manual contract.             | Becomes the source for the manual cell sample. Drift surfaces as a matrix failure.               |
-| `traces-observer-service/opensearch/process.go`   | Parses raw OTel spans into `AmpAttributes`.          | Schema is *generated from this code* (see §6). The observer and the contract become one unit.    |
+| `agent-manager-observer/opensearch/process.go`    | Parses raw OTel spans into `AmpAttributes`.          | Schema is *generated from this code* (see §6). The observer and the contract become one unit.    |
 | `.github/workflows/traceloop-release-watch.yaml`  | Opens an issue + Chat message on new Traceloop releases. | Unchanged. Becomes the natural trigger for the manual matrix workflow (§10).                 |
 
 ## 4. Matrix manifest
@@ -475,7 +475,7 @@ production.
 
 ### 6.5 Schema source of truth
 
-Schemas are **generated from `traces-observer-service`'s parsing code**, not
+Schemas are **generated from `agent-manager-observer`'s parsing code**, not
 hand-written.
 
 ```
@@ -750,7 +750,7 @@ nox -s emission
 - OTel Collector batching / serialization at OTLP wire level.
 - OpenSearch index mapping (a span that's valid JSON but has a field type the
   index doesn't accept gets silently dropped — emission tier never sees this).
-- `traces-observer-service` enrichment — the `AmpAttributes` shape AMP's
+- `agent-manager-observer` enrichment — the `AmpAttributes` shape AMP's
   consumers actually read.
 
 ### 9.2 Cell subset
@@ -794,7 +794,7 @@ k3d on a GHA-hosted runner (default) with a self-hosted-runner escape hatch.
 │                                                                      │
 │ ┌─ k3d cluster (built from source via `make setup` / amp-dev-stack)┐│
 │ │  • agent-manager-service        • Thunder IDP                    ││
-│ │  • traces-observer-service      • Obs Gateway                    ││
+│ │  • agent-manager-observer       • Obs Gateway                    ││
 │ │  • OTel Collector               • OpenSearch                     ││
 │ │  • <agent pods under test, deployed per cell via REST API>       ││
 │ └────────────────────────────────────────────────────────────────────┘│
@@ -827,7 +827,7 @@ records the deployed agent's `(org, project, agent, environment)` on a
 `GET /api/v1/traces` requires.
 
 Auth is OAuth2 `client_credentials` against Thunder IDP. The service URLs
-(`AMP_API_BASE_URL`, `TRACES_OBSERVER_BASE_URL`) and IDP creds
+(`AMP_API_BASE_URL`, `AM_OBSERVER_BASE_URL`) and IDP creds
 (`IDP_TOKEN_URL`, `IDP_CLIENT_ID`, `IDP_CLIENT_SECRET`) **default** to the
 values the dev bring-up exposes (the same defaults the e2e config uses) —
 they're overridable but never required. The only real secrets are the LLM
@@ -850,7 +850,7 @@ real provider calls.
 The heavy CI job stands up AMP from the **working tree** via the dev
 `make setup` chain, wrapped in the `.github/actions/amp-dev-stack`
 composite action: `setup-k3d` → `setup-openchoreo` (which builds the
-traces-observer + python-instrumentation-provider images from source and
+amp-observer + python-instrumentation-provider images from source and
 `k3d image import`s them) → `setup-platform` (agent-manager-service via
 docker-compose) → migrate → port-forward → gateway.
 
@@ -961,7 +961,7 @@ on:
       - 'samples/manual-instrumentation-agent/**'
       - '.github/release-config.json'
       - 'test/instrumentation-matrix/**'
-      - 'traces-observer-service/**'
+      - 'agent-manager-observer/**'
   push:
     branches: [main]
     paths: <same as above>
@@ -1083,7 +1083,7 @@ triage starts with "what kind of failure am I looking at," not "which cell."
 | `missing-span-kind`     | Some spans captured, but a declared kind is absent.                              | Provider — partial instrumentation broke.                 |
 | `schema-violation`      | All kinds present, but one or more attributes fail JSON-schema validation.       | Provider OR observer — see §12.2.                         |
 | `cassette-miss`         | A recorded interaction no longer matches.                                        | Sample or provider — upstream changed what's sent.        |
-| `pipeline-error` (heavy) | Spans emitted, pipeline returned 5xx, malformed `AmpAttributes`, or timed out.   | `traces-observer-service` or infra.                       |
+| `pipeline-error` (heavy) | Spans emitted, pipeline returned 5xx, malformed `AmpAttributes`, or timed out.   | `agent-manager-observer` or infra.                        |
 | `infra-error` (heavy)   | k3d / helm / OpenSearch didn't come up.                                          | Suite infra — auto-retried once.                          |
 
 ### 12.2 Likely-cause heuristics
@@ -1198,7 +1198,7 @@ test/instrumentation-matrix/
 ├── heavy/                                 # heavy-tier driver (§9; deploy contract in RUNBOOK.md §7)
 │   ├── driver.py                          # orchestrator
 │   ├── amp_client.py                      # agent-manager-service REST client
-│   ├── observer.py                        # traces-observer-service query
+│   ├── observer.py                        # agent-manager-observer query
 │   └── k3d.py                             # per-cell OpenSearch index reset
 ├── scripts/
 │   ├── record_cassette.py                 # one-shot cassette recorder (§7.4)

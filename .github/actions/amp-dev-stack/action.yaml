@@ -1,7 +1,7 @@
 name: Bring up AMP dev stack (build-from-source)
 description: >
   Stands up the full AMP platform on k3d from the working tree — building the
-  agent-manager-service, traces-observer-service, and
+  agent-manager-service, agent-manager-observer, and
   python-instrumentation-provider images from source and loading them into
   k3d (NOT the released images quick-start/install.sh uses). This is what
   lets the instrumentation matrix's heavy tier validate the *current* PR's
@@ -44,7 +44,7 @@ runs:
         set -euo pipefail
         # k3d cluster + prerequisites (Gateway API, cert-manager, …)
         make setup-k3d
-        # OpenChoreo + builds & loads traces-observer + instrumentation images
+        # OpenChoreo + builds & loads amp-observer + instrumentation images
         # from source into k3d.
         make setup-openchoreo
         # Build + start the core platform (agent-manager-service via compose).
@@ -63,7 +63,7 @@ runs:
         # Now that migrations have run, restart it so it boots cleanly. (Locally
         # this is masked by a pre-populated postgres volume.)
         docker compose -f deployments/docker-compose.yml restart agent-manager-service
-        # Expose AMP API (9000) + traces-observer (9098). Bind 0.0.0.0 so the
+        # Expose AMP API (9000) + amp-observer (9098). Bind 0.0.0.0 so the
         # agent-manager container can reach the forwards via the bridge gateway
         # (a 127.0.0.1-only forward is unreachable from inside the container).
         (cd deployments/setup && PORT_FORWARD_ADDRESS=0.0.0.0 ./port-forward.sh --platform --background)

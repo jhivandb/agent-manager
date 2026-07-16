@@ -68,7 +68,7 @@ reused, so removed numbers just leave a gap.)
   it to `CrewAITaskData.Name` — leaving `Name` empty in practice.
 - **Suspected cause**: CrewAI Tasks are identified by `description` (the
   natural-language prompt), not by a `name` field. The `name` key was carried
-  into the contract from `traces-observer-service/opensearch/types.go` comments
+  into the contract from `agent-manager-observer/opensearch/types.go` comments
   without verifying it had an upstream emitter. Schema fabricated a requirement.
 - **Mitigation**: dropped `crewai.task.name` from the crewaitask schema.
   Replaced with required `crewai.task.description` (which IS emitted) so the

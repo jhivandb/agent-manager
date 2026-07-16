@@ -18,6 +18,7 @@ package agent
 
 import (
 	"fmt"
+	"net/url"
 	"time"
 
 	. "github.com/onsi/gomega"
@@ -25,18 +26,19 @@ import (
 	"github.com/wso2/agent-manager/test/e2e/framework"
 )
 
-// GetMetrics fetches resource metrics for a deployed agent.
+// GetMetrics fetches resource metrics for a deployed agent from the observer.
 func GetMetrics(g Gomega, client *framework.AMPClient, orgName, projName, agentName, environment string) framework.MetricsResponse {
-	path := fmt.Sprintf("/api/v1/orgs/%s/projects/%s/agents/%s/metrics",
-		orgName, projName, agentName)
+	q := url.Values{}
+	q.Set("organization", orgName)
+	q.Set("project", projName)
+	q.Set("agent", agentName)
+	q.Set("environment", environment)
+	q.Set("startTime", time.Now().Add(-10*time.Minute).UTC().Format(time.RFC3339))
+	q.Set("endTime", time.Now().Add(1*time.Minute).UTC().Format(time.RFC3339))
 
-	req := framework.MetricsFilterRequest{
-		EnvironmentName: environment,
-		StartTime:       time.Now().Add(-10 * time.Minute).UTC().Format(time.RFC3339),
-		EndTime:         time.Now().Add(1 * time.Minute).UTC().Format(time.RFC3339),
-	}
+	metricsURL := fmt.Sprintf("%s/api/v1/metrics?%s", client.Cfg().ObserverBaseURL, q.Encode())
 
-	resp, err := client.Post(path, req)
+	resp, err := client.DoRaw("GET", metricsURL)
 	g.Expect(err).NotTo(HaveOccurred(), "metrics request failed")
 	defer resp.Body.Close()
 	framework.ExpectStatus(g, resp, 200)
