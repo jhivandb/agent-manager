@@ -1,11 +1,11 @@
-# Traces Observer Service config
-tracesObserver:
+# Agent Manager Observer Service config
+amObserver:
   enabled: true
   developmentMode: false
-  name: amp-traces-observer
+  name: amp-observer
   replicaCount: 1
   image:
-    repository: ghcr.io/wso2/amp-traces-observer
+    repository: ghcr.io/wso2/amp-observer
     tag: "0.0.0-dev"
     pullPolicy: IfNotPresent
   port: 9098
@@ -19,7 +19,7 @@ tracesObserver:
   # set type to LoadBalancer to restore a dedicated external endpoint.
   service:
     type: ClusterIP
-  # Exposes the Traces Observer through the observability-plane kgateway
+  # Exposes the Agent Manager Observer through the observability-plane kgateway
   # (gateway-default) so it does not need its own LoadBalancer service.
   ocIngress:
     enabled: true
@@ -36,14 +36,19 @@ tracesObserver:
   # JWT authentication — must match the agent-manager keyManager config so the
   # same user token issued by Thunder is accepted by both services. Thunder
   # (v0.45+) stamps the resource-server identifier "amp" as the token audience,
-  # so query tokens (console/CLI) carry aud=amp. Publisher tokens (aud
-  # amp-publisher-*) are matched by a separate regex in the observer's auth
-  # middleware and do not need to be listed here.
+  # so query tokens (console/CLI) carry aud=amp. The agent-manager-service's own
+  # amp-api-client client-credentials token (used for the monitor-run-logs
+  # server-to-server call) requests the full amp:* scope set and resolves to the
+  # same "amp" resource-server audience; "amp-api-client" is listed too as a
+  # defensive fallback for any client-credentials request that carries no scope
+  # (in which case Thunder falls back to the client ID as the audience).
+  # Publisher tokens (aud amp-publisher-*) are matched by a separate regex in
+  # the observer's auth middleware and do not need to be listed here.
   auth:
     isLocalDevEnv: false
     jwksUrl: "http://amp-thunder-extension-service.amp-thunder.svc.cluster.local:8090/oauth2/jwks"
     issuer: "http://thunder.amp.localhost:8080"
-    audience: "amp"
+    audience: "amp,amp-api-client"
 
 # OpenTelemetry collector extras
 otelCollector:

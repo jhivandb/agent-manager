@@ -37,7 +37,7 @@ ampEvaluation:
   useLocalRegistry: false
 
   # -- In-cluster URL for the traces observer API
-  tracesApiEndpoint: "http://amp-traces-observer.openchoreo-observability-plane.svc.cluster.local:9098"
+  tracesApiEndpoint: "http://amp-observer.openchoreo-observability-plane.svc.cluster.local:9098"
 
   # -- Publisher settings (for publishing evaluation scores to agent-manager)
   publisher:

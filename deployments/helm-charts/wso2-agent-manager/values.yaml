@@ -137,13 +137,12 @@ agentManagerService:
     corsAllowedOrigin: "*"
     # Enable RBAC enforcement on all routes
     rbacEnabled: "true"
-    observerURL: "http://observer.openchoreo-observability-plane.svc.cluster.local:8080"
     # In-cluster URL the agent-manager-service uses to query trace data server-side.
-    traceObserverURL: "http://amp-traces-observer.openchoreo-observability-plane.svc.cluster.local:9098"
-    # Externally reachable trace observer URL returned to out-of-cluster clients
-    # (e.g. the CLI) via /v1/config. Leave empty to inherit the console's URL
-    # (console.config.obsApiBaseUrl) so the CLI and console use the same endpoint.
-    traceObserverPublicURL: ""
+    amObserverURL: "http://amp-observer.openchoreo-observability-plane.svc.cluster.local:9098"
+    # Externally reachable observer URL returned to out-of-cluster clients
+    # (e.g. the CLI) via /api/v1/config. No internal fallback: unset means
+    # clients surface "observer not configured".
+    amObserverPublicURL: ""
 
 
     # TLS Configuration
@@ -375,9 +374,6 @@ console:
     # Backend API URLs (will be auto-configured if empty)
     # Routed through the OpenChoreo control-plane gateway (see ocIngress).
     apiBaseUrl: "http://api.amp.localhost:8080"
-    # Traces Observer Service URL — browser calls this directly for trace data.
-    # Routed through the OpenChoreo observability-plane gateway.
-    obsApiBaseUrl: "http://traces.amp.localhost:11080"
     # Gateway control plane URL rendered into external-gateway setup commands.
     # Routed through the OpenChoreo control-plane gateway (see
     # agentManagerService.ocIngress.gatewayMgmt); host.docker.internal lets a

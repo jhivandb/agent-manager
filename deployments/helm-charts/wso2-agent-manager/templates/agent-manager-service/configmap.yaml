@@ -6,12 +6,11 @@ metadata:
   labels:
     {{- include "agent-management-platform.agentManagerService.labels" . | nindent 4 }}
 data:
-  OBSERVER_URL: {{ .Values.agentManagerService.config.observerURL | quote }}
-  TRACE_OBSERVER_URL: {{ .Values.agentManagerService.config.traceObserverURL | quote }}
-  # Externally reachable trace observer URL handed to out-of-cluster clients
-  # (e.g. the CLI) via /v1/config. Mirrors the console's trace observer URL
-  # (console.config.obsApiBaseUrl) so both point at the same endpoint.
-  TRACE_OBSERVER_PUBLIC_URL: {{ .Values.agentManagerService.config.traceObserverPublicURL | default .Values.console.config.obsApiBaseUrl | quote }}
+  AM_OBSERVER_URL: {{ .Values.agentManagerService.config.amObserverURL | quote }}
+  # Externally reachable observer URL handed to out-of-cluster clients
+  # (console bootstrap, CLI) via /api/v1/config. No internal fallback:
+  # unset means clients surface "observer not configured".
+  AM_OBSERVER_PUBLIC_URL: {{ .Values.agentManagerService.config.amObserverPublicURL | default "" | quote }}
   SERVER_HOST: {{ .Values.agentManagerService.config.serverHost | quote }}
   SERVER_PORT: {{ .Values.agentManagerService.service.targetPort | quote }}
   LOG_LEVEL: {{ .Values.agentManagerService.config.logLevel | quote }}

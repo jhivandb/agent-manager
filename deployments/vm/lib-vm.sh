@@ -45,7 +45,7 @@ amp_helm_args() {
     "--set" "console.config.auth.signInRedirectURL=https://${AMP_HOST_CONSOLE}/login" \
     "--set" "console.config.auth.signOutRedirectURL=https://${AMP_HOST_CONSOLE}/login" \
     "--set" "console.config.apiBaseUrl=https://${AMP_HOST_API}" \
-    "--set" "console.config.obsApiBaseUrl=https://${AMP_HOST_OBSERVER}" \
+    "--set" "agentManagerService.config.amObserverPublicURL=https://${AMP_HOST_OBSERVER}" \
     "--set" "console.config.instrumentationUrl=https://${AMP_HOST_GATEWAY}/otel"
 
   # Console and API are ClusterIP behind the OC control-plane kgateway; their
@@ -127,8 +127,8 @@ build_gateway_helm_args() {
 # shellcheck disable=SC2154  # AMP_HOST_* come from the caller's scope by design.
 observability_helm_args() {
   printf '%s\n' \
-    "--set" "tracesObserver.auth.issuer=https://${AMP_HOST_THUNDER}" \
-    "--set" "tracesObserver.ocIngress.hostname=${AMP_HOST_OBSERVER}"
+    "--set" "amObserver.auth.issuer=https://${AMP_HOST_THUNDER}" \
+    "--set" "amObserver.ocIngress.hostname=${AMP_HOST_OBSERVER}"
 }
 
 # build_observability_helm_args <ip> — sslip.io-from-IP wrapper.

@@ -1,57 +1,58 @@
-{{- if .Values.tracesObserver.enabled }}
-{{- if not .Values.tracesObserver.auth.isLocalDevEnv }}
-  {{- if empty .Values.tracesObserver.auth.jwksUrl }}
-    {{- fail "tracesObserver.auth.jwksUrl must be set when isLocalDevEnv is false. Provide the JWKS endpoint of your identity provider, or set tracesObserver.auth.isLocalDevEnv=true for local development only." }}
+{{- if .Values.amObserver.enabled }}
+{{- if not .Values.amObserver.auth.isLocalDevEnv }}
+  {{- if empty .Values.amObserver.auth.jwksUrl }}
+    {{- fail "amObserver.auth.jwksUrl must be set when isLocalDevEnv is false. Provide the JWKS endpoint of your identity provider, or set amObserver.auth.isLocalDevEnv=true for local development only." }}
   {{- end }}
-  {{- if empty .Values.tracesObserver.auth.issuer }}
-    {{- fail "tracesObserver.auth.issuer must be set when isLocalDevEnv is false. Provide the token issuer URL of your identity provider, or set tracesObserver.auth.isLocalDevEnv=true for local development only." }}
+  {{- if empty .Values.amObserver.auth.issuer }}
+    {{- fail "amObserver.auth.issuer must be set when isLocalDevEnv is false. Provide the token issuer URL of your identity provider, or set amObserver.auth.isLocalDevEnv=true for local development only." }}
   {{- end }}
-  {{- if empty .Values.tracesObserver.auth.audience }}
-    {{- fail "tracesObserver.auth.audience must be set when isLocalDevEnv is false. Provide a comma-separated list of allowed audiences, or set tracesObserver.auth.isLocalDevEnv=true for local development only." }}
+  {{- if empty .Values.amObserver.auth.audience }}
+    {{- fail "amObserver.auth.audience must be set when isLocalDevEnv is false. Provide a comma-separated list of allowed audiences, or set amObserver.auth.isLocalDevEnv=true for local development only." }}
   {{- end }}
 {{- end }}
-{{- if empty .Values.tracesObserver.observer.baseUrl }}
-  {{- fail "tracesObserver.observer.baseUrl must be set. Provide the base URL of the Observer Service." }}
+{{- if empty .Values.amObserver.observer.baseUrl }}
+  {{- fail "amObserver.observer.baseUrl must be set. Provide the base URL of the Observer Service." }}
 {{- end }}
-{{- if empty .Values.tracesObserver.observer.idpTokenUrl }}
-  {{- fail "tracesObserver.observer.idpTokenUrl must be set. Provide the IDP token endpoint for Observer Service authentication." }}
+{{- if empty .Values.amObserver.observer.idpTokenUrl }}
+  {{- fail "amObserver.observer.idpTokenUrl must be set. Provide the IDP token endpoint for Observer Service authentication." }}
 {{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ .Values.tracesObserver.name }}
+  name: {{ .Values.amObserver.name }}
   namespace: {{ .Release.Namespace }}
 spec:
-  replicas: {{ .Values.tracesObserver.replicaCount }}
+  replicas: {{ .Values.amObserver.replicaCount }}
   selector:
     matchLabels:
-      app: traces-observer
+      app: amp-observer
   template:
     metadata:
       labels:
-        app: traces-observer
+        app: amp-observer
+        app.kubernetes.io/component: observer
     spec:
       containers:
-        - name: traces-observer
+        - name: observer
           # if developmentMode is true, use latest image for easier debugging
-          {{- if .Values.tracesObserver.developmentMode }}
-          image: amp-traces-observer:0.0.0-dev
+          {{- if .Values.amObserver.developmentMode }}
+          image: amp-observer:0.0.0-dev
           {{- else }}
-          image: {{ .Values.tracesObserver.image.repository }}:{{ .Values.tracesObserver.image.tag }}
+          image: {{ .Values.amObserver.image.repository }}:{{ .Values.amObserver.image.tag }}
           {{- end }}
-          imagePullPolicy: {{ .Values.tracesObserver.image.pullPolicy }}
+          imagePullPolicy: {{ .Values.amObserver.image.pullPolicy }}
           ports:
             - name: http
-              containerPort: {{ .Values.tracesObserver.port }}
+              containerPort: {{ .Values.amObserver.port }}
           env:
-            - name: TRACES_OBSERVER_PORT
-              value: "{{ .Values.tracesObserver.port }}"
-            - name: OBSERVER_BASE_URL
-              value: "{{ .Values.tracesObserver.observer.baseUrl }}"
+            - name: AM_OBSERVER_PORT
+              value: "{{ .Values.amObserver.port }}"
+            - name: OPENCHOREO_OBSERVER_URL
+              value: "{{ .Values.amObserver.observer.baseUrl }}"
             - name: IDP_TOKEN_URL
-              value: "{{ .Values.tracesObserver.observer.idpTokenUrl }}"
+              value: "{{ .Values.amObserver.observer.idpTokenUrl }}"
             - name: OBSERVER_DEFAULT_NAMESPACE
-              value: "{{ .Values.tracesObserver.observer.defaultNamespace }}"
+              value: "{{ .Values.amObserver.observer.defaultNamespace }}"
             - name: IDP_CLIENT_ID
               valueFrom:
                 secretKeyRef:
@@ -64,18 +65,18 @@ spec:
                   key: idpClientSecret
             # JWT auth — must match agent-manager keyManager config
             - name: IS_LOCAL_DEV_ENV
-              value: "{{ .Values.tracesObserver.auth.isLocalDevEnv }}"
+              value: "{{ .Values.amObserver.auth.isLocalDevEnv }}"
             - name: KEY_MANAGER_JWKS_URL
-              value: "{{ .Values.tracesObserver.auth.jwksUrl }}"
+              value: "{{ .Values.amObserver.auth.jwksUrl }}"
             - name: KEY_MANAGER_ISSUER
-              value: "{{ .Values.tracesObserver.auth.issuer }}"
+              value: "{{ .Values.amObserver.auth.issuer }}"
             - name: KEY_MANAGER_AUDIENCE
-              value: "{{ .Values.tracesObserver.auth.audience }}"
+              value: "{{ .Values.amObserver.auth.audience }}"
           resources:
             limits:
-              memory: {{ .Values.tracesObserver.resourceLimits.memory }}
-              cpu: {{ .Values.tracesObserver.resourceLimits.cpu }}
+              memory: {{ .Values.amObserver.resourceLimits.memory }}
+              cpu: {{ .Values.amObserver.resourceLimits.cpu }}
             requests:
-              memory: {{ .Values.tracesObserver.resourceRequests.memory }}
-              cpu: {{ .Values.tracesObserver.resourceRequests.cpu }}
+              memory: {{ .Values.amObserver.resourceRequests.memory }}
+              cpu: {{ .Values.amObserver.resourceRequests.cpu }}
 {{- end }}

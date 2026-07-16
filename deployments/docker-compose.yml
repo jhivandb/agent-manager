@@ -54,11 +54,10 @@ services:
       # Optional: External Service URLs (add when needed)
       # - OPENCHOREO_API_URL=http://host.docker.internal:8000
       # - OPENSEARCH_URL=http://host.docker.internal:9200
-      - OBSERVER_URL=http://host.docker.internal:8085
-      - TRACE_OBSERVER_URL=http://host.docker.internal:9098
-      # Externally reachable trace observer URL returned to the CLI via /v1/config.
-      # Mirrors the console's OBS_API_BASE_URL so the CLI and console agree.
-      - TRACE_OBSERVER_PUBLIC_URL=http://localhost:9098
+      - AM_OBSERVER_URL=http://host.docker.internal:9098
+      # Externally reachable observer URL returned to the CLI via /api/v1/config.
+      # No internal fallback: unset means clients surface "observer not configured".
+      - AM_OBSERVER_PUBLIC_URL=http://localhost:9098
       - IDP_TOKEN_URL=http://thunder.amp.localhost:8080/oauth2/token
       - IDP_CLIENT_ID=amp-api-client
       - IDP_CLIENT_SECRET=amp-api-client-secret
@@ -135,7 +134,6 @@ services:
       - DISABLE_AUTH=false
       - AUTH_SCOPES=openid profile email amp:org:view amp:org:modify-settings amp:org:invite-member amp:org:remove-member amp:org:assign-role amp:org:manage-idp amp:org:manage-service-account amp:project:create amp:project:read amp:project:update amp:project:delete amp:environment:create amp:environment:read amp:environment:update amp:environment:delete amp:gateway:create amp:gateway:read amp:gateway:update amp:gateway:delete amp:gateway:token-manage amp:data-plane:read amp:deployment-pipeline:create amp:deployment-pipeline:read amp:deployment-pipeline:update amp:deployment-pipeline:delete amp:git-secret:create amp:git-secret:read amp:git-secret:delete amp:llm-provider-template:create amp:llm-provider-template:read amp:llm-provider-template:update amp:llm-provider-template:delete amp:llm-provider:create amp:llm-provider:read amp:llm-provider:update amp:llm-provider:delete amp:llm-provider:configure-guardrail amp:llm-provider:connect amp:llm-provider:deploy amp:llm-provider:api-key-manage amp:mcp-server:create amp:mcp-server:read amp:mcp-server:update amp:mcp-server:delete amp:mcp-server:configure-guardrail amp:mcp-server:connect amp:mcp-server:api-key-manage amp:llm-proxy:create amp:llm-proxy:read amp:llm-proxy:update amp:llm-proxy:delete amp:llm-proxy:deploy amp:llm-proxy:api-key-manage amp:evaluator:create amp:evaluator:read amp:evaluator:update amp:evaluator:delete amp:agent:create amp:agent:read amp:agent:update amp:agent:delete amp:agent:build amp:agent:deploy-non-production amp:agent:deploy-production amp:agent:promote amp:agent:rollback amp:agent:suspend amp:agent:token-manage amp:agent:api-key-manage amp:monitor:create amp:monitor:read amp:monitor:update amp:monitor:delete amp:monitor:execute amp:monitor:score-read amp:monitor:score-publish amp:observability:org-dashboard amp:observability:project-dashboard amp:observability:guardrail-metric amp:observability:infra-metric amp:role:create amp:role:read amp:role:update amp:role:delete amp:group:create amp:group:read amp:group:update amp:group:delete amp:catalog:read amp:repository:read amp:agent-kind:read amp:agent-kind:create amp:agent-kind:update amp:agent-kind:delete amp:profile:read amp:profile:update-attributes amp:scope:create amp:scope:read amp:scope:update amp:scope:delete amp:agent-identity:read amp:agent-identity:create amp:agent-identity:update amp:agent-identity:delete
       - RBAC_ENABLED=${RBAC_ENABLED:-true}
-      - OBS_API_BASE_URL=http://localhost:9098
       - GATEWAY_CONTROL_PLANE_URL=http://localhost:9243
       - GATEWAY_VERSION=v0.11.0
       # Agent Manager release version — pins the deployment-script git tag (amp/vX.Y.Z).

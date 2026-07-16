@@ -489,20 +489,20 @@ fi
 # ============================================================================
 # Step 6: Install Observability Extension (Traces Observer Service)
 # ============================================================================
-echo "6️⃣  Observability Extension (Traces Observer Service)"
+echo "6️⃣  Observability Extension (Agent Manager Observer)"
 if ! helm status wso2-amp-observability-extension -n openchoreo-observability-plane &>/dev/null; then
-    echo "Building and loading Traces Observer Service Docker image into k3d cluster..."
-    make -C ${PROJECT_ROOT}/traces-observer-service docker-load-k3d
+    echo "Building and loading Agent Manager Observer Docker image into k3d cluster..."
+    make -C ${PROJECT_ROOT}/agent-manager-observer docker-load-k3d
     sleep 10
 fi
-echo "   Installing/upgrading Traces Observer (local dev: JWKS disabled, unverified JWT parse)..."
+echo "   Installing/upgrading Agent Manager Observer (local dev: JWKS disabled, unverified JWT parse)..."
 helm upgrade --install wso2-amp-observability-extension ${PROJECT_ROOT}/deployments/helm-charts/wso2-amp-observability-extension \
     --create-namespace \
     --namespace openchoreo-observability-plane \
     --timeout=10m \
-    --set tracesObserver.developmentMode=true \
-    --set tracesObserver.auth.isLocalDevEnv=true \
-    --set-string tracesObserver.auth.jwksUrl=""
+    --set amObserver.developmentMode=true \
+    --set amObserver.auth.isLocalDevEnv=true \
+    --set-string amObserver.auth.jwksUrl=""
 echo ""
 
 # ============================================================================

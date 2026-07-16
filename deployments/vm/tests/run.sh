@@ -66,9 +66,9 @@ assert_eq "amp tlsEnabled (legacy key)" \
 assert_eq "amp console apiBaseUrl" \
   "console.config.apiBaseUrl=https://api.amp.203.0.113.10.sslip.io" \
   "$(grep -F 'config.apiBaseUrl' <<<"$amp")"
-assert_eq "amp console obsApiBaseUrl" \
-  "console.config.obsApiBaseUrl=https://observer.amp.203.0.113.10.sslip.io" \
-  "$(grep -F 'obsApiBaseUrl' <<<"$amp")"
+assert_eq "amp amObserverPublicURL" \
+  "agentManagerService.config.amObserverPublicURL=https://observer.amp.203.0.113.10.sslip.io" \
+  "$(grep -F 'amObserverPublicURL' <<<"$amp")"
 assert_eq "amp console instrumentationUrl" \
   "console.config.instrumentationUrl=https://gateway.amp.203.0.113.10.sslip.io/otel" \
   "$(grep -F 'instrumentationUrl' <<<"$amp")"
@@ -114,14 +114,14 @@ assert_eq "gateway ThunderKeyManager public issuer" "yes" \
   "$(has "$km_json" '"name":"ThunderKeyManager","issuer":"https://thunder.amp.203.0.113.10.sslip.io"')"
 assert_eq "gateway no sparse/null keymanager" "no" "$(has "$km_json" 'null')"
 
-# --- build_observability_helm_args points the traces observer at the public issuer ---
+# --- build_observability_helm_args points the observer at the public issuer ---
 obs="$(build_observability_helm_args 203.0.113.10)"
-assert_eq "observability traces issuer -> public thunder" \
-  "tracesObserver.auth.issuer=https://thunder.amp.203.0.113.10.sslip.io" \
-  "$(grep -F 'tracesObserver.auth.issuer' <<<"$obs")"
-assert_eq "observability traces ocIngress hostname" \
-  "tracesObserver.ocIngress.hostname=observer.amp.203.0.113.10.sslip.io" \
-  "$(grep -F 'tracesObserver.ocIngress.hostname' <<<"$obs")"
+assert_eq "observability issuer -> public thunder" \
+  "amObserver.auth.issuer=https://thunder.amp.203.0.113.10.sslip.io" \
+  "$(grep -F 'amObserver.auth.issuer' <<<"$obs")"
+assert_eq "observability ocIngress hostname" \
+  "amObserver.ocIngress.hostname=observer.amp.203.0.113.10.sslip.io" \
+  "$(grep -F 'amObserver.ocIngress.hostname' <<<"$obs")"
 
 # --- render_dataplane_external_ingress: public host on :443, both http+https entries
 #     bound to the internal http listener (amp-api advertises the https variant) ---
