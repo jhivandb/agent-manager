@@ -10843,11 +10843,11 @@ components:
     ConfigResponse:
       type: object
       required:
-        - traceObserverBaseUrl
+        - observerBaseUrl
       properties:
-        traceObserverBaseUrl:
+        observerBaseUrl:
           type: string
-          description: Base URL for the traces observer service
+          description: Base URL for the agent-manager-observer service
 
     CreateLLMAPIKeyRequest:
       type: object

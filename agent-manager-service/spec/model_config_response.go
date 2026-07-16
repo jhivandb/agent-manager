@@ -19,17 +19,17 @@ var _ MappedNullable = &ConfigResponse{}
 
 // ConfigResponse struct for ConfigResponse
 type ConfigResponse struct {
-	// Base URL for the traces observer service
-	TraceObserverBaseUrl string `json:"traceObserverBaseUrl"`
+	// Base URL for the agent-manager-observer service
+	ObserverBaseUrl string `json:"observerBaseUrl"`
 }
 
 // NewConfigResponse instantiates a new ConfigResponse object
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewConfigResponse(traceObserverBaseUrl string) *ConfigResponse {
+func NewConfigResponse(observerBaseUrl string) *ConfigResponse {
 	this := ConfigResponse{}
-	this.TraceObserverBaseUrl = traceObserverBaseUrl
+	this.ObserverBaseUrl = observerBaseUrl
 	return &this
 }
 
@@ -41,28 +41,28 @@ func NewConfigResponseWithDefaults() *ConfigResponse {
 	return &this
 }
 
-// GetTraceObserverBaseUrl returns the TraceObserverBaseUrl field value
-func (o *ConfigResponse) GetTraceObserverBaseUrl() string {
+// GetObserverBaseUrl returns the ObserverBaseUrl field value
+func (o *ConfigResponse) GetObserverBaseUrl() string {
 	if o == nil {
 		var ret string
 		return ret
 	}
 
-	return o.TraceObserverBaseUrl
+	return o.ObserverBaseUrl
 }
 
-// GetTraceObserverBaseUrlOk returns a tuple with the TraceObserverBaseUrl field value
+// GetObserverBaseUrlOk returns a tuple with the ObserverBaseUrl field value
 // and a boolean to check if the value has been set.
-func (o *ConfigResponse) GetTraceObserverBaseUrlOk() (*string, bool) {
+func (o *ConfigResponse) GetObserverBaseUrlOk() (*string, bool) {
 	if o == nil {
 		return nil, false
 	}
-	return &o.TraceObserverBaseUrl, true
+	return &o.ObserverBaseUrl, true
 }
 
-// SetTraceObserverBaseUrl sets field value
-func (o *ConfigResponse) SetTraceObserverBaseUrl(v string) {
-	o.TraceObserverBaseUrl = v
+// SetObserverBaseUrl sets field value
+func (o *ConfigResponse) SetObserverBaseUrl(v string) {
+	o.ObserverBaseUrl = v
 }
 
 func (o ConfigResponse) MarshalJSON() ([]byte, error) {
@@ -75,7 +75,7 @@ func (o ConfigResponse) MarshalJSON() ([]byte, error) {
 
 func (o ConfigResponse) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
-	toSerialize["traceObserverBaseUrl"] = o.TraceObserverBaseUrl
+	toSerialize["observerBaseUrl"] = o.ObserverBaseUrl
 	return toSerialize, nil
 }
 

@@ -21,18 +21,30 @@ import (
 	"net/http"
 
 	"github.com/wso2/agent-manager/agent-manager-service/config"
+	"github.com/wso2/agent-manager/agent-manager-service/middleware"
 	"github.com/wso2/agent-manager/agent-manager-service/middleware/logger"
 	"github.com/wso2/agent-manager/agent-manager-service/spec"
 )
 
+// registerConfigRoutes registers the unauthenticated service-configuration
+// discovery endpoint. It is registered without a method in the pattern
+// (rather than "GET /api/v1/config") because the Go 1.22 ServeMux would
+// otherwise auto-reject OPTIONS preflight requests with a 405 before the
+// CORS middleware ever runs, breaking cross-origin GETs from the console/CLI.
+// Method enforcement is done inside the handler instead.
 func registerConfigRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/v1/config", func(w http.ResponseWriter, r *http.Request) {
+	corsWrap := middleware.CORS(config.GetConfig().CORSAllowedOrigin)
+	mux.Handle("/api/v1/config", corsWrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
 		cfg := config.GetConfig()
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(spec.ConfigResponse{
-			TraceObserverBaseUrl: cfg.TraceObserver.PublicURL,
+			ObserverBaseUrl: cfg.Observer.PublicURL,
 		}); err != nil {
 			logger.GetLogger(r.Context()).Error("failed to encode config response", "error", err)
 		}
-	})
+	})))
 }

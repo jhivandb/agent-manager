@@ -32,18 +32,18 @@ func setupConfigMux() *http.ServeMux {
 	return mux
 }
 
-func withTraceObserverURL(t *testing.T, url string) {
+func withObserverPublicURL(t *testing.T, url string) {
 	t.Helper()
 	cfg := config.GetConfig()
-	orig := cfg.TraceObserver.PublicURL
+	orig := cfg.Observer.PublicURL
 	t.Cleanup(func() {
-		cfg.TraceObserver.PublicURL = orig
+		cfg.Observer.PublicURL = orig
 	})
-	cfg.TraceObserver.PublicURL = url
+	cfg.Observer.PublicURL = url
 }
 
 func TestConfigEndpoint_HappyPath(t *testing.T) {
-	withTraceObserverURL(t, "https://observer.example.com")
+	withObserverPublicURL(t, "https://observer.example.com")
 
 	mux := setupConfigMux()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/config", nil)
@@ -61,13 +61,13 @@ func TestConfigEndpoint_HappyPath(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if body.TraceObserverBaseUrl != "https://observer.example.com" {
-		t.Errorf("traceObserverBaseUrl = %q, want %q", body.TraceObserverBaseUrl, "https://observer.example.com")
+	if body.ObserverBaseUrl != "https://observer.example.com" {
+		t.Errorf("observerBaseUrl = %q, want %q", body.ObserverBaseUrl, "https://observer.example.com")
 	}
 }
 
 func TestConfigEndpoint_EmptyURLStillReturns200(t *testing.T) {
-	withTraceObserverURL(t, "")
+	withObserverPublicURL(t, "")
 
 	mux := setupConfigMux()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/config", nil)
@@ -82,13 +82,13 @@ func TestConfigEndpoint_EmptyURLStillReturns200(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if body.TraceObserverBaseUrl != "" {
-		t.Errorf("traceObserverBaseUrl = %q, want empty", body.TraceObserverBaseUrl)
+	if body.ObserverBaseUrl != "" {
+		t.Errorf("observerBaseUrl = %q, want empty", body.ObserverBaseUrl)
 	}
 }
 
 func TestConfigEndpoint_FieldNameIsCamelCase(t *testing.T) {
-	withTraceObserverURL(t, "https://observer.example.com")
+	withObserverPublicURL(t, "https://observer.example.com")
 
 	mux := setupConfigMux()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/config", nil)
@@ -99,13 +99,13 @@ func TestConfigEndpoint_FieldNameIsCamelCase(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&raw); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if _, ok := raw["traceObserverBaseUrl"]; !ok {
-		t.Errorf("expected camelCase field traceObserverBaseUrl, got %v", raw)
+	if _, ok := raw["observerBaseUrl"]; !ok {
+		t.Errorf("expected camelCase field observerBaseUrl, got %v", raw)
 	}
 }
 
 func TestConfigEndpoint_MethodNotAllowed(t *testing.T) {
-	withTraceObserverURL(t, "https://observer.example.com")
+	withObserverPublicURL(t, "https://observer.example.com")
 
 	mux := setupConfigMux()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/config", nil)
@@ -118,7 +118,7 @@ func TestConfigEndpoint_MethodNotAllowed(t *testing.T) {
 }
 
 func TestConfigEndpoint_NoAuthRequired(t *testing.T) {
-	withTraceObserverURL(t, "https://observer.example.com")
+	withObserverPublicURL(t, "https://observer.example.com")
 
 	mux := setupConfigMux()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/config", nil)
@@ -127,5 +127,42 @@ func TestConfigEndpoint_NoAuthRequired(t *testing.T) {
 
 	if rec.Code != http.StatusOK {
 		t.Errorf("expected 200 without Authorization header, got %d", rec.Code)
+	}
+}
+
+func TestConfigEndpoint_CORSHeadersPresentForCrossOriginRequest(t *testing.T) {
+	withObserverPublicURL(t, "https://observer.example.com")
+
+	origin := config.GetConfig().CORSAllowedOrigin
+	mux := setupConfigMux()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/config", nil)
+	req.Header.Set("Origin", origin)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != origin {
+		t.Errorf("Access-Control-Allow-Origin = %q, want %q", got, origin)
+	}
+}
+
+func TestConfigEndpoint_PreflightOptionsSucceeds(t *testing.T) {
+	withObserverPublicURL(t, "https://observer.example.com")
+
+	origin := config.GetConfig().CORSAllowedOrigin
+	mux := setupConfigMux()
+	req := httptest.NewRequest(http.MethodOptions, "/api/v1/config", nil)
+	req.Header.Set("Origin", origin)
+	req.Header.Set("Access-Control-Request-Method", http.MethodGet)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code < 200 || rec.Code >= 300 {
+		t.Fatalf("expected 2xx for OPTIONS preflight, got %d", rec.Code)
+	}
+	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != origin {
+		t.Errorf("Access-Control-Allow-Origin = %q, want %q", got, origin)
 	}
 }

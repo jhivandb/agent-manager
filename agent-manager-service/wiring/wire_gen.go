@@ -8,9 +8,6 @@ package wiring
 
 import (
 	"fmt"
-	"log/slog"
-	"time"
-
 	"github.com/google/wire"
 	"github.com/wso2/agent-manager/agent-manager-service/clients/observabilitysvc"
 	"github.com/wso2/agent-manager/agent-manager-service/clients/openchoreosvc/client"
@@ -28,6 +25,8 @@ import (
 	"github.com/wso2/agent-manager/agent-manager-service/utils"
 	"github.com/wso2/agent-manager/agent-manager-service/websocket"
 	"gorm.io/gorm"
+	"log/slog"
+	"time"
 )
 
 // Injectors from wire.go:
@@ -553,7 +552,7 @@ func ProvideObservabilitySvcClient(cfg config.Config, authProvider client.AuthPr
 
 func ProvideTraceObserverClient(cfg config.Config, authProvider client.AuthProvider) (traceobserversvc.TraceObserverSvcClient, error) {
 	return traceobserversvc.NewTraceObserverClient(&traceobserversvc.Config{
-		BaseURL:      cfg.TraceObserver.URL,
+		BaseURL:      cfg.Observer.URL,
 		AuthProvider: authProvider,
 	})
 }

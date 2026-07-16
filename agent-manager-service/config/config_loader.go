@@ -127,25 +127,22 @@ func loadEnvs() {
 		ExporterEndpoint: r.readOptionalString("OTEL_EXPORTER_OTLP_ENDPOINT", "http://default-default.gateway.localhost:19080/otel"),
 	}
 
-	// Observer service configuration - temporarily use localhost for agent-manager-service to access observer service
-	config.Observer = ObserverConfig{
-		URL: r.readOptionalString("OBSERVER_URL", "http://localhost:8085"),
-	}
+	config.IsLocalDevEnv = r.readOptionalBool("IS_LOCAL_DEV_ENV", false)
 
-	// Trace Observer service configuration.
-	// URL is used server-side (in-cluster) by the agent-manager-service to
-	// query trace data. PublicURL is the externally reachable URL handed to
-	// out-of-cluster clients (e.g. the CLI) via GET /api/v1/config; it mirrors the
-	// console's trace observer URL and falls back to URL when unset.
-	traceObserverURL := r.readOptionalString("TRACE_OBSERVER_URL", "http://localhost:9098")
-	config.TraceObserver = TraceObserverConfig{
-		URL:       traceObserverURL,
-		PublicURL: r.readOptionalString("TRACE_OBSERVER_PUBLIC_URL", traceObserverURL),
+	// Observer service configuration. URL is used server-side (in-cluster) for
+	// monitor-run log fetches. PublicURL is handed to out-of-cluster clients
+	// (console, CLI) via GET /api/v1/config. It has NO internal-URL fallback:
+	// empty means "observer not configured" and clients surface that loudly.
+	publicURLDefault := ""
+	if config.IsLocalDevEnv {
+		publicURLDefault = "http://localhost:9098"
+	}
+	config.Observer = ObserverConfig{
+		URL:       r.readOptionalString("AM_OBSERVER_URL", "http://localhost:9098"),
+		PublicURL: r.readOptionalString("AM_OBSERVER_PUBLIC_URL", publicURLDefault),
 	}
 
 	config.InstrumentationURL = r.readOptionalString("INSTRUMENTATION_URL", "http://default-default.gateway.localhost:19080/otel")
-
-	config.IsLocalDevEnv = r.readOptionalBool("IS_LOCAL_DEV_ENV", false)
 	config.DefaultGatewayPort = int(r.readOptionalInt64("DEFAULT_GATEWAY_PORT", 19080))
 	config.KeyManagerConfigurations = KeyManagerConfigurations{
 		// Comma-separated list of allowed issuers and audiences
@@ -263,7 +260,7 @@ func loadEnvs() {
 	validateOAuthAuthorizationServers(config, r)
 	validateServerPublicURL(config, r)
 	validateInstrumentationURL(config, r)
-	validateTraceObserverURLs(config, r)
+	validateObserverURLs(config, r)
 	validateResourceLimitsConfig(config, r)
 	validateAgentWorkloadCORSConfig(agentWorkloadConfig, r)
 
@@ -344,7 +341,7 @@ func validateInstrumentationURL(cfg *Config, r *configReader) {
 	}
 }
 
-func validateTraceObserverURLs(cfg *Config, r *configReader) {
+func validateObserverURLs(cfg *Config, r *configReader) {
 	validate := func(envVar, raw string) {
 		if raw == "" {
 			return
@@ -361,8 +358,8 @@ func validateTraceObserverURLs(cfg *Config, r *configReader) {
 			r.errors = append(r.errors, fmt.Errorf("%s %q must have a non-empty host", envVar, raw))
 		}
 	}
-	validate("TRACE_OBSERVER_URL", cfg.TraceObserver.URL)
-	validate("TRACE_OBSERVER_PUBLIC_URL", cfg.TraceObserver.PublicURL)
+	validate("AM_OBSERVER_URL", cfg.Observer.URL)
+	validate("AM_OBSERVER_PUBLIC_URL", cfg.Observer.PublicURL)
 }
 
 func validateInternalServerConfigs(cfg *Config, r *configReader) {

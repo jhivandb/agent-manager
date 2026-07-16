@@ -281,7 +281,7 @@ func ProvideObservabilitySvcClient(cfg config.Config, authProvider occlient.Auth
 
 func ProvideTraceObserverClient(cfg config.Config, authProvider occlient.AuthProvider) (traceobserversvc.TraceObserverSvcClient, error) {
 	return traceobserversvc.NewTraceObserverClient(&traceobserversvc.Config{
-		BaseURL:      cfg.TraceObserver.URL,
+		BaseURL:      cfg.Observer.URL,
 		AuthProvider: authProvider,
 	})
 }
