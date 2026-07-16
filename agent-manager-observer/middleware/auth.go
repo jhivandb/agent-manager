@@ -63,6 +63,10 @@ var (
 	jwksHTTPClient = &http.Client{Timeout: 10 * time.Second}
 )
 
+// bearerRealm identifies this service in the WWW-Authenticate challenge, per
+// RFC 6750 section 3.
+const bearerRealm = "agent-manager-observer"
+
 func writeAuthError(w http.ResponseWriter, status int, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
@@ -70,25 +74,48 @@ func writeAuthError(w http.ResponseWriter, status int, message string) {
 	_ = json.NewEncoder(w).Encode(body)
 }
 
+// buildBearerChallenge builds a WWW-Authenticate header value per RFC 6750 /
+// RFC 9728. errorCode is included only when non-empty (e.g. "invalid_token");
+// resourceMetadataURL is included only when the service's public URL is
+// configured.
+func buildBearerChallenge(resourceMetadataURL, errorCode string) string {
+	parts := []string{`realm="` + bearerRealm + `"`}
+	if errorCode != "" {
+		parts = append(parts, `error="`+errorCode+`"`)
+	}
+	if resourceMetadataURL != "" {
+		parts = append(parts, `resource_metadata="`+resourceMetadataURL+`"`)
+	}
+	return "Bearer " + strings.Join(parts, ", ")
+}
+
 // JWTAuth returns a middleware that validates Bearer JWTs on every request.
 // Routes wrapped by this middleware require a valid token in the Authorization header.
 func JWTAuth(cfg config.AuthConfig) func(http.Handler) http.Handler {
+	resourceMetadataURL := ""
+	if cfg.ServerPublicURL != "" {
+		resourceMetadataURL = cfg.ServerPublicURL + "/.well-known/oauth-protected-resource"
+	}
+
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			authHeader := r.Header.Get("Authorization")
 			if authHeader == "" {
+				w.Header().Set("WWW-Authenticate", buildBearerChallenge(resourceMetadataURL, ""))
 				writeAuthError(w, http.StatusUnauthorized, "missing Authorization header")
 				return
 			}
 
 			tokenString := strings.TrimPrefix(authHeader, "Bearer ")
 			if tokenString == authHeader {
+				w.Header().Set("WWW-Authenticate", buildBearerChallenge(resourceMetadataURL, ""))
 				writeAuthError(w, http.StatusUnauthorized, "Authorization header must use Bearer scheme")
 				return
 			}
 
 			if err := validateJWT(r.Context(), tokenString, cfg); err != nil {
 				slog.Error("JWT validation failed", "error", err)
+				w.Header().Set("WWW-Authenticate", buildBearerChallenge(resourceMetadataURL, "invalid_token"))
 				writeAuthError(w, http.StatusUnauthorized, "invalid or expired token")
 				return
 			}

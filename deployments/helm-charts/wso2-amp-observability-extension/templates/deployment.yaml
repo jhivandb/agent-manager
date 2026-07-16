@@ -72,6 +72,13 @@ spec:
               value: "{{ .Values.amObserver.auth.issuer }}"
             - name: KEY_MANAGER_AUDIENCE
               value: "{{ .Values.amObserver.auth.audience }}"
+            # OAuth 2.0 protected-resource metadata (RFC 9728) for MCP clients
+            - name: SERVER_PUBLIC_URL
+              value: "{{ .Values.amObserver.publicUrl }}"
+            - name: OAUTH_AUTHORIZATION_SERVERS
+              value: "{{ .Values.amObserver.oauth.authorizationServers }}"
+            - name: OAUTH_SCOPES_SUPPORTED
+              value: "{{ .Values.amObserver.oauth.scopesSupported }}"
           resources:
             limits:
               memory: {{ .Values.amObserver.resourceLimits.memory }}

@@ -47,6 +47,23 @@ type AuthConfig struct {
 	Issuer        []string
 	Audience      []string
 	IsLocalDevEnv bool
+
+	// ServerPublicURL is the externally reachable base URL of this service.
+	// Used as the `resource` identifier in RFC 9728 protected resource
+	// metadata and to build the `resource_metadata` parameter of the
+	// WWW-Authenticate challenge on 401 responses. Empty by default; the
+	// well-known route serves 503 and the challenge omits resource_metadata
+	// until this is configured.
+	ServerPublicURL string
+
+	// AuthorizationServers is the list of OAuth 2.0 authorization server URLs
+	// advertised in the RFC 9728 protected resource metadata document.
+	// Required for /.well-known/oauth-protected-resource to serve.
+	AuthorizationServers []string
+
+	// ScopesSupported is the list of OAuth 2.0 scopes supported by this
+	// resource, advertised in the RFC 9728 protected resource metadata document.
+	ScopesSupported []string
 }
 
 // ServerConfig holds HTTP server configuration
@@ -69,10 +86,13 @@ func Load() (*Config, error) {
 		},
 		LogLevel: getEnv("LOG_LEVEL", "INFO"),
 		Auth: AuthConfig{
-			JWKSUrl:       getEnv("KEY_MANAGER_JWKS_URL", ""),
-			Issuer:        getEnvAsList("KEY_MANAGER_ISSUER", "Agent Management Platform Local"),
-			Audience:      getEnvAsList("KEY_MANAGER_AUDIENCE", "localhost"),
-			IsLocalDevEnv: getEnvAsBool("IS_LOCAL_DEV_ENV", false),
+			JWKSUrl:              getEnv("KEY_MANAGER_JWKS_URL", ""),
+			Issuer:               getEnvAsList("KEY_MANAGER_ISSUER", "Agent Management Platform Local"),
+			Audience:             getEnvAsList("KEY_MANAGER_AUDIENCE", "localhost"),
+			IsLocalDevEnv:        getEnvAsBool("IS_LOCAL_DEV_ENV", false),
+			ServerPublicURL:      getEnv("SERVER_PUBLIC_URL", ""),
+			AuthorizationServers: getEnvAsOptionalList("OAUTH_AUTHORIZATION_SERVERS"),
+			ScopesSupported:      getEnvAsOptionalList("OAUTH_SCOPES_SUPPORTED"),
 		},
 	}
 
@@ -159,6 +179,27 @@ func getEnvAsList(key, defaultValue string) []string {
 	value := os.Getenv(key)
 	if value == "" {
 		return []string{defaultValue}
+	}
+	parts := strings.Split(value, ",")
+	result := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if trimmed := strings.TrimSpace(p); trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	return result
+}
+
+// getEnvAsOptionalList reads a comma-separated environment variable into a
+// []string slice, trimming whitespace around each entry and dropping empty
+// entries. Unlike getEnvAsList, it returns nil (rather than a default value)
+// when the variable is unset — used for OAuth discovery fields that are
+// legitimately optional (the well-known route 503s when unconfigured instead
+// of failing config load).
+func getEnvAsOptionalList(key string) []string {
+	value := os.Getenv(key)
+	if value == "" {
+		return nil
 	}
 	parts := strings.Split(value, ",")
 	result := make([]string, 0, len(parts))

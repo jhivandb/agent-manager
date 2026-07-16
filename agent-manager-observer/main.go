@@ -85,6 +85,10 @@ func main() {
 		_, _ = fmt.Fprintf(w, `{"status":"healthy","timestamp":"%s"}`, time.Now().Format(time.RFC3339))
 	})
 
+	// OAuth 2.0 protected resource metadata (RFC 9728) - no authentication
+	// required; consumed by MCP clients to discover the authorization server.
+	handlers.RegisterWellKnownRoutes(mux, cfg.Auth)
+
 	// Authenticated API routes
 	apiMux := http.NewServeMux()
 
