@@ -32,7 +32,23 @@ import (
 const (
 	defaultLimit = 10
 	maxLimit     = 1000
+
+	// maxLogLimit is the maximum number of log lines that can be requested
+	// from /api/v1/logs, matching the observability service's own cap.
+	maxLogLimit = 10000
+	// maxLogRangeDays is the maximum startTime..endTime span accepted by
+	// /api/v1/logs, ported from agent-manager-service/utils/constants.go.
+	maxLogRangeDays = 14
 )
+
+// validLogLevels are the log levels accepted (case-insensitively) by the
+// logLevels query parameter on /api/v1/logs.
+var validLogLevels = map[string]bool{
+	"INFO":  true,
+	"DEBUG": true,
+	"WARN":  true,
+	"ERROR": true,
+}
 
 // ErrorResponse is the standard error body for all endpoints.
 type ErrorResponse struct {
@@ -40,14 +56,15 @@ type ErrorResponse struct {
 	Message string `json:"message"`
 }
 
-// Handler handles HTTP requests for the tracing API.
+// Handler handles HTTP requests for the tracing and observability APIs.
 type Handler struct {
 	controller *controllers.TracingController
+	obs        *controllers.ObservabilityController
 }
 
 // NewHandler creates a new Handler.
-func NewHandler(controller *controllers.TracingController) *Handler {
-	return &Handler{controller: controller}
+func NewHandler(controller *controllers.TracingController, obs *controllers.ObservabilityController) *Handler {
+	return &Handler{controller: controller, obs: obs}
 }
 
 // GetTraceOverviews handles GET /api/v1/traces
@@ -292,6 +309,194 @@ func (h *Handler) GetSpanDetail(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
+// GetLogs handles GET /api/v1/logs
+func (h *Handler) GetLogs(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	log := logger.GetLogger(r.Context())
+	query := r.URL.Query()
+
+	organization := query.Get("organization")
+	if organization == "" {
+		writeError(w, http.StatusBadRequest, "organization is required")
+		return
+	}
+
+	project := query.Get("project")
+	if project == "" {
+		writeError(w, http.StatusBadRequest, "project is required")
+		return
+	}
+
+	agent := query.Get("agent")
+	if agent == "" {
+		writeError(w, http.StatusBadRequest, "agent is required")
+		return
+	}
+
+	environment := query.Get("environment")
+	if environment == "" {
+		writeError(w, http.StatusBadRequest, "environment is required")
+		return
+	}
+
+	startTime, err := parseRFC3339(query.Get("startTime"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid startTime: %v", err))
+		return
+	}
+
+	endTime, err := parseRFC3339(query.Get("endTime"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid endTime: %v", err))
+		return
+	}
+
+	if err := validateLogTimeRange(startTime, endTime); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	logLevels, err := parseLogLevels(query.Get("logLevels"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	limit, err := parseOptionalLimit(query.Get("limit"), maxLogLimit)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	sortOrder, err := parseSortOrder(query.Get("sortOrder"), "")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	params := controllers.LogsQueryParams{
+		Organization: organization,
+		Project:      project,
+		Agent:        agent,
+		Environment:  environment,
+		StartTime:    startTime,
+		EndTime:      endTime,
+		LogLevels:    logLevels,
+		Limit:        limit,
+		SortOrder:    sortOrder,
+	}
+
+	result, err := h.obs.GetLogs(r.Context(), params)
+	if err != nil {
+		log.Error("Failed to get logs", "error", err)
+		writeError(w, http.StatusBadGateway, "failed to query upstream observer")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
+}
+
+// GetBuildLogs handles GET /api/v1/build-logs
+func (h *Handler) GetBuildLogs(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	log := logger.GetLogger(r.Context())
+	query := r.URL.Query()
+
+	organization := query.Get("organization")
+	if organization == "" {
+		writeError(w, http.StatusBadRequest, "organization is required")
+		return
+	}
+
+	buildName := query.Get("buildName")
+	if buildName == "" {
+		writeError(w, http.StatusBadRequest, "buildName is required")
+		return
+	}
+
+	result, err := h.obs.GetBuildLogs(r.Context(), organization, buildName)
+	if err != nil {
+		log.Error("Failed to get build logs", "buildName", buildName, "error", err)
+		writeError(w, http.StatusBadGateway, "failed to query upstream observer")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
+}
+
+// GetMetrics handles GET /api/v1/metrics
+func (h *Handler) GetMetrics(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	log := logger.GetLogger(r.Context())
+	query := r.URL.Query()
+
+	organization := query.Get("organization")
+	if organization == "" {
+		writeError(w, http.StatusBadRequest, "organization is required")
+		return
+	}
+
+	project := query.Get("project")
+	if project == "" {
+		writeError(w, http.StatusBadRequest, "project is required")
+		return
+	}
+
+	agent := query.Get("agent")
+	if agent == "" {
+		writeError(w, http.StatusBadRequest, "agent is required")
+		return
+	}
+
+	environment := query.Get("environment")
+	if environment == "" {
+		writeError(w, http.StatusBadRequest, "environment is required")
+		return
+	}
+
+	startTime, err := parseRFC3339(query.Get("startTime"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid startTime: %v", err))
+		return
+	}
+
+	endTime, err := parseRFC3339(query.Get("endTime"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid endTime: %v", err))
+		return
+	}
+
+	params := controllers.MetricsQueryParams{
+		Organization: organization,
+		Project:      project,
+		Agent:        agent,
+		Environment:  environment,
+		StartTime:    startTime,
+		EndTime:      endTime,
+	}
+
+	result, err := h.obs.GetMetrics(r.Context(), params)
+	if err != nil {
+		log.Error("Failed to get metrics", "error", err)
+		writeError(w, http.StatusBadGateway, "failed to query upstream observer")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
+}
+
 // parseTraceSpanIDs extracts traceId and spanId from
 // /api/v1/traces/{traceId}/spans/{spanId}
 func parseTraceSpanIDs(path string) (traceID, spanID string) {
@@ -360,6 +565,60 @@ func parseSortOrder(s, defaultVal string) (string, error) {
 		return "", fmt.Errorf("sortOrder must be 'asc' or 'desc'")
 	}
 	return s, nil
+}
+
+// validateLogTimeRange ports validateTimes from
+// agent-manager-service/utils/utils.go: startTime must not be in the future,
+// endTime must not be before startTime, and the range must not exceed
+// maxLogRangeDays. Format validation is already handled by parseRFC3339.
+func validateLogTimeRange(start, end time.Time) error {
+	if start.After(time.Now()) {
+		return fmt.Errorf("startTime cannot be in the future")
+	}
+	if end.Before(start) {
+		return fmt.Errorf("endTime must not be before startTime")
+	}
+	maxDuration := time.Duration(maxLogRangeDays) * 24 * time.Hour
+	if end.Sub(start) > maxDuration {
+		return fmt.Errorf("time range cannot exceed %d days", maxLogRangeDays)
+	}
+	return nil
+}
+
+// parseLogLevels splits a comma-separated logLevels value, uppercases each
+// entry, and validates it against the accepted set. An empty string yields a
+// nil slice (no filtering).
+func parseLogLevels(s string) ([]string, error) {
+	if s == "" {
+		return nil, nil
+	}
+	parts := strings.Split(s, ",")
+	levels := make([]string, 0, len(parts))
+	for _, p := range parts {
+		level := strings.ToUpper(strings.TrimSpace(p))
+		if !validLogLevels[level] {
+			return nil, fmt.Errorf("invalid logLevels value %q: must be one of INFO, DEBUG, WARN, ERROR", p)
+		}
+		levels = append(levels, level)
+	}
+	return levels, nil
+}
+
+// parseOptionalLimit parses an optional limit query parameter for /api/v1/logs:
+// empty input returns a nil pointer (upstream default applies), otherwise the
+// value must be a positive integer not exceeding maxVal.
+func parseOptionalLimit(s string, maxVal int) (*int, error) {
+	if s == "" {
+		return nil, nil
+	}
+	v, err := strconv.Atoi(s)
+	if err != nil || v <= 0 {
+		return nil, fmt.Errorf("limit must be a positive integer")
+	}
+	if v > maxVal {
+		return nil, fmt.Errorf("limit must not exceed %d", maxVal)
+	}
+	return &v, nil
 }
 
 func optionalStr(s string) *string {

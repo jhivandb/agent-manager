@@ -96,7 +96,8 @@ func main() {
 	)
 	observerClient := observer.NewClient(cfg.Observer.BaseURL, authProvider, cfg.Observer.DefaultNamespace)
 	controller := controllers.NewTracingController(observerClient)
-	handler := handlers.NewHandler(controller)
+	obsController := controllers.NewObservabilityController(observerClient)
+	handler := handlers.NewHandler(controller, obsController)
 
 	apiMux.HandleFunc("/api/v1/traces", handler.GetTraceOverviews)
 	apiMux.HandleFunc("/api/v1/traces/export", handler.ExportTraces)
@@ -108,6 +109,13 @@ func main() {
 			handler.GetTraceSpans(w, r)
 		}
 	})
+
+	// logs/build-logs/metrics reject publisher-audience tokens: those routes
+	// are for the console/CLI, not the amp-publisher-* service-to-service carve-out.
+	noPublisher := middleware.RejectPublisherAudience()
+	apiMux.Handle("/api/v1/logs", noPublisher(http.HandlerFunc(handler.GetLogs)))
+	apiMux.Handle("/api/v1/build-logs", noPublisher(http.HandlerFunc(handler.GetBuildLogs)))
+	apiMux.Handle("/api/v1/metrics", noPublisher(http.HandlerFunc(handler.GetMetrics)))
 
 	slog.Info("v1 observer-backed routes registered", "observerBaseURL", cfg.Observer.BaseURL)
 

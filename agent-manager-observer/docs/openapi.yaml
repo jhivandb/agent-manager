@@ -2,9 +2,10 @@ openapi: 3.0.3
 info:
   title: Agent Manager Observer API
   description: |
-    Observer Service-backed API for listing, exporting, and fetching distributed traces.
+    Observer Service-backed API for listing, exporting, and fetching distributed traces,
+    component/build logs, and resource metrics.
 
-    Endpoints use human-readable `namespace`, `project`, `component`, and `environment` identifiers.
+    Endpoints use human-readable `organization`, `project`, `agent`, and `environment` identifiers.
     Lazy loading is supported: the span list endpoint returns summaries only; individual span
     attributes are fetched on demand via the span detail endpoint.
 
@@ -29,6 +30,10 @@ tags:
     description: Liveness / readiness (unauthenticated)
   - name: traces
     description: Observer Service-backed trace data with lazy loading (requires JWT)
+  - name: logs
+    description: Observer Service-backed component and build logs (requires JWT)
+  - name: metrics
+    description: Observer Service-backed resource metrics (requires JWT)
 
 paths:
   /health:
@@ -66,9 +71,9 @@ paths:
       security:
         - bearerAuth: []
       parameters:
-        - $ref: "#/components/parameters/namespace"
+        - $ref: "#/components/parameters/organization"
         - $ref: "#/components/parameters/project"
-        - $ref: "#/components/parameters/component"
+        - $ref: "#/components/parameters/agent"
         - $ref: "#/components/parameters/environment"
         - $ref: "#/components/parameters/startTimeRequired"
         - $ref: "#/components/parameters/endTimeRequired"
@@ -108,31 +113,16 @@ paths:
         AmpAttributes (LLM data, tool calls, token usage, etc.). Response includes Content-Disposition
         for download. Export limit is capped at 1000 traces.
 
-        `namespace`, `project`, `component`, and `environment` are all required to scope the export
-        to a specific component .
+        `organization`, `project`, `agent`, and `environment` are all required to scope the export
+        to a specific agent.
       operationId: exportTraces
       security:
         - bearerAuth: []
       parameters:
-        - $ref: "#/components/parameters/namespace"
-        - name: project
-          in: query
-          required: true
-          description: Project name
-          schema:
-            type: string
-        - name: component
-          in: query
-          required: true
-          description: Component (agent) name
-          schema:
-            type: string
-        - name: environment
-          in: query
-          required: true
-          description: Environment name
-          schema:
-            type: string
+        - $ref: "#/components/parameters/organization"
+        - $ref: "#/components/parameters/project"
+        - $ref: "#/components/parameters/agent"
+        - $ref: "#/components/parameters/environment"
         - $ref: "#/components/parameters/startTimeRequired"
         - $ref: "#/components/parameters/endTimeRequired"
         - name: limit
@@ -186,9 +176,9 @@ paths:
           schema:
             type: string
             example: "3cae024cf613a5f37843e9c6eefa3020"
-        - $ref: "#/components/parameters/namespace"
+        - $ref: "#/components/parameters/organization"
         - $ref: "#/components/parameters/projectOptional"
-        - $ref: "#/components/parameters/componentOptional"
+        - $ref: "#/components/parameters/agentOptional"
         - $ref: "#/components/parameters/environmentOptional"
         - $ref: "#/components/parameters/startTimeRequired"
         - $ref: "#/components/parameters/endTimeRequired"
@@ -260,6 +250,117 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  /api/v1/logs:
+    get:
+      tags:
+        - logs
+      summary: Query component logs
+      description: |
+        Returns log entries for an agent's runtime component, scoped by organization,
+        project, agent, and environment. `startTime`/`endTime` are required and the
+        range is capped at 14 days. Not available to `amp-publisher-*` tokens.
+      operationId: queryLogs
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/organization"
+        - $ref: "#/components/parameters/project"
+        - $ref: "#/components/parameters/agent"
+        - $ref: "#/components/parameters/environment"
+        - $ref: "#/components/parameters/startTimeRequired"
+        - $ref: "#/components/parameters/endTimeRequired"
+        - $ref: "#/components/parameters/logLevels"
+        - name: limit
+          in: query
+          required: false
+          description: Max log lines to return (optional; upstream default applies when omitted, max 10000)
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 10000
+        - $ref: "#/components/parameters/sortOrder"
+      responses:
+        "200":
+          description: Log entries
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LogsResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "502":
+          $ref: "#/components/responses/UpstreamObserverError"
+
+  /api/v1/build-logs:
+    get:
+      tags:
+        - logs
+      summary: Query build (workflow) logs
+      description: |
+        Returns log entries for an Argo build workflow run, over a fixed 30-day lookback
+        window, oldest first, capped at 1000 lines. Not available to `amp-publisher-*` tokens.
+      operationId: queryBuildLogs
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/organization"
+        - $ref: "#/components/parameters/buildName"
+      responses:
+        "200":
+          description: Log entries
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LogsResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "502":
+          $ref: "#/components/responses/UpstreamObserverError"
+
+  /api/v1/metrics:
+    get:
+      tags:
+        - metrics
+      summary: Query agent resource metrics
+      description: |
+        Returns CPU and memory usage/requests/limits time series for an agent's runtime
+        component, scoped by organization, project, agent, and environment.
+        `startTime`/`endTime` are required (no range cap). Not available to
+        `amp-publisher-*` tokens.
+      operationId: queryMetrics
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/organization"
+        - $ref: "#/components/parameters/project"
+        - $ref: "#/components/parameters/agent"
+        - $ref: "#/components/parameters/environment"
+        - $ref: "#/components/parameters/startTimeRequired"
+        - $ref: "#/components/parameters/endTimeRequired"
+      responses:
+        "200":
+          description: Resource metrics time series
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MetricsResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "502":
+          $ref: "#/components/responses/UpstreamObserverError"
+
 components:
   securitySchemes:
     bearerAuth:
@@ -269,11 +370,11 @@ components:
       description: Same access token as used for Agent Manager Service API calls.
 
   parameters:
-    namespace:
-      name: namespace
+    organization:
+      name: organization
       in: query
       required: true
-      description: Kubernetes namespace
+      description: Organization name
       schema:
         type: string
         example: "default"
@@ -284,11 +385,11 @@ components:
       description: Project name
       schema:
         type: string
-    component:
-      name: component
+    agent:
+      name: agent
       in: query
       required: true
-      description: Component (agent) name
+      description: Agent name
       schema:
         type: string
     environment:
@@ -305,11 +406,11 @@ components:
       description: Project name filter
       schema:
         type: string
-    componentOptional:
-      name: component
+    agentOptional:
+      name: agent
       in: query
       required: false
-      description: Component (agent) name filter
+      description: Agent name filter
       schema:
         type: string
     environmentOptional:
@@ -319,6 +420,21 @@ components:
       description: Environment name filter
       schema:
         type: string
+    buildName:
+      name: buildName
+      in: query
+      required: true
+      description: Argo workflow run name for the build
+      schema:
+        type: string
+    logLevels:
+      name: logLevels
+      in: query
+      required: false
+      description: Comma-separated log levels to filter by
+      schema:
+        type: string
+        example: "INFO,WARN,ERROR"
     startTimeRequired:
       name: startTime
       in: query
@@ -365,6 +481,18 @@ components:
             $ref: "#/components/schemas/ErrorResponse"
     ObserverUnavailable:
       description: Observer Service not configured (OPENCHOREO_OBSERVER_URL unset)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Forbidden:
+      description: Publisher-audience (`amp-publisher-*`) tokens are not permitted on this endpoint
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    UpstreamObserverError:
+      description: The Observer Service query failed
       content:
         application/json:
           schema:
@@ -704,6 +832,90 @@ components:
       properties:
         errorCount:
           type: integer
+
+    LogEntry:
+      type: object
+      description: Single log line as returned by GET /api/v1/logs and GET /api/v1/build-logs.
+      required:
+        - timestamp
+        - log
+        - logLevel
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        log:
+          type: string
+        logLevel:
+          type: string
+          example: "INFO"
+
+    LogsResponse:
+      type: object
+      required:
+        - logs
+        - totalCount
+        - tookMs
+      properties:
+        logs:
+          type: array
+          items:
+            $ref: "#/components/schemas/LogEntry"
+        totalCount:
+          type: integer
+        tookMs:
+          type: number
+          format: float
+
+    MetricDataPoint:
+      type: object
+      description: Single timestamped value in a metrics time series.
+      required:
+        - time
+        - value
+      properties:
+        time:
+          type: string
+          format: date-time
+        value:
+          type: number
+          format: double
+
+    MetricsResponse:
+      type: object
+      description: Resource metrics time series as returned by GET /api/v1/metrics.
+      required:
+        - cpuUsage
+        - cpuRequests
+        - cpuLimits
+        - memory
+        - memoryRequests
+        - memoryLimits
+      properties:
+        cpuUsage:
+          type: array
+          items:
+            $ref: "#/components/schemas/MetricDataPoint"
+        cpuRequests:
+          type: array
+          items:
+            $ref: "#/components/schemas/MetricDataPoint"
+        cpuLimits:
+          type: array
+          items:
+            $ref: "#/components/schemas/MetricDataPoint"
+        memory:
+          type: array
+          items:
+            $ref: "#/components/schemas/MetricDataPoint"
+        memoryRequests:
+          type: array
+          items:
+            $ref: "#/components/schemas/MetricDataPoint"
+        memoryLimits:
+          type: array
+          items:
+            $ref: "#/components/schemas/MetricDataPoint"
 
 security:
   - bearerAuth: []
