@@ -57,6 +57,20 @@ func OUIDFromRequest(r *http.Request) string {
 	return org.OUID
 }
 
+// OrgHandleFromRequest returns the token's OU handle (the human-readable org
+// name/handle, as opposed to OUIDFromRequest's UUID) injected by
+// RequireOrgMatch. Returns "" (and logs) when the middleware did not run —
+// that means the route was registered without org validation and is a
+// programming error.
+func OrgHandleFromRequest(r *http.Request) string {
+	org, ok := GetResolvedOrg(r.Context())
+	if !ok {
+		slog.Error("resolved org missing from request context — RequireOrgMatch not applied", "path", r.URL.Path)
+		return ""
+	}
+	return org.OuHandle
+}
+
 // OrgResolver resolves an org handle to a Thunder OU ID.
 type OrgResolver interface {
 	ResolveOUID(ctx context.Context, orgName string) (string, error)

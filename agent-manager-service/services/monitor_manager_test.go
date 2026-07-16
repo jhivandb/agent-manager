@@ -42,8 +42,8 @@ import (
 // the call ever actually happens.
 var errUnreachable = errors.New("unreachable: mock should not have been called")
 
-func TestGetMonitorRunLogs_PassesOUIDAndRunNameToObserverClient(t *testing.T) {
-	const ouID, projectName, agentName, monitorName = "org-1", "proj-1", "agent-1", "monitor-1"
+func TestGetMonitorRunLogs_PassesOrgHandleAndRunNameToObserverClient(t *testing.T) {
+	const ouID, orgHandle, projectName, agentName, monitorName = "org-1-uuid", "org-1-handle", "proj-1", "agent-1", "monitor-1"
 	monitorID := uuid.New()
 	runID := uuid.New()
 	monitor := &models.Monitor{ID: monitorID, Name: monitorName, OUID: ouID, ProjectName: projectName, AgentName: agentName}
@@ -80,12 +80,12 @@ func TestGetMonitorRunLogs_PassesOUIDAndRunNameToObserverClient(t *testing.T) {
 		observerClient: observerClient,
 	}
 
-	got, err := s.GetMonitorRunLogs(context.Background(), ouID, projectName, agentName, monitorName, runID.String())
+	got, err := s.GetMonitorRunLogs(context.Background(), ouID, orgHandle, projectName, agentName, monitorName, runID.String())
 	if err != nil {
 		t.Fatalf("GetMonitorRunLogs returned error: %v", err)
 	}
-	if gotOrg != ouID {
-		t.Errorf("GetWorkflowRunLogs organization = %q, want ouID %q (observer resolves namespace itself now)", gotOrg, ouID)
+	if gotOrg != orgHandle {
+		t.Errorf("GetWorkflowRunLogs organization = %q, want orgHandle %q (matches every other observer consumer, not the OU UUID)", gotOrg, orgHandle)
 	}
 	if gotWorkflowRunName != run.Name {
 		t.Errorf("GetWorkflowRunLogs workflowRunName = %q, want run.Name %q", gotWorkflowRunName, run.Name)
@@ -109,7 +109,7 @@ func TestGetMonitorRunLogs_MonitorNotFoundMapsToErrMonitorNotFound(t *testing.T)
 	}
 	s := &monitorManagerService{logger: discardLogger(), monitorRepo: monitorRepo, observerClient: observerClient}
 
-	_, err := s.GetMonitorRunLogs(context.Background(), "org", "proj", "agent", "monitor", uuid.New().String())
+	_, err := s.GetMonitorRunLogs(context.Background(), "org", "org-handle", "proj", "agent", "monitor", uuid.New().String())
 	if !errors.Is(err, utils.ErrMonitorNotFound) {
 		t.Fatalf("expected ErrMonitorNotFound, got %v", err)
 	}
@@ -133,7 +133,7 @@ func TestGetMonitorRunLogs_RunNotFoundMapsToErrMonitorRunNotFound(t *testing.T) 
 	}
 	s := &monitorManagerService{logger: discardLogger(), monitorRepo: monitorRepo, observerClient: observerClient}
 
-	_, err := s.GetMonitorRunLogs(context.Background(), "org", "proj", "agent", "monitor", uuid.New().String())
+	_, err := s.GetMonitorRunLogs(context.Background(), "org", "org-handle", "proj", "agent", "monitor", uuid.New().String())
 	if !errors.Is(err, utils.ErrMonitorRunNotFound) {
 		t.Fatalf("expected ErrMonitorRunNotFound, got %v", err)
 	}
@@ -158,7 +158,7 @@ func TestGetMonitorRunLogs_ObserverClientErrorIsWrapped(t *testing.T) {
 	}
 	s := &monitorManagerService{logger: discardLogger(), monitorRepo: monitorRepo, observerClient: observerClient}
 
-	_, err := s.GetMonitorRunLogs(context.Background(), "org", "proj", "agent", "monitor", run.ID.String())
+	_, err := s.GetMonitorRunLogs(context.Background(), "org", "org-handle", "proj", "agent", "monitor", run.ID.String())
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("expected wrapped sentinel error, got %v", err)
 	}

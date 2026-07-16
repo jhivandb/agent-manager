@@ -360,12 +360,13 @@ func (c *monitorController) GetMonitorRunLogs(w http.ResponseWriter, r *http.Req
 	log := logger.GetLogger(ctx)
 
 	ouID := middleware.OUIDFromRequest(r)
+	orgHandle := middleware.OrgHandleFromRequest(r)
 	projName := r.PathValue(utils.PathParamProjName)
 	agentName := r.PathValue(utils.PathParamAgentName)
 	monitorName := r.PathValue(utils.PathParamMonitorName)
 	runID := r.PathValue(utils.PathParamRunId)
 
-	result, err := c.monitorService.GetMonitorRunLogs(ctx, ouID, projName, agentName, monitorName, runID)
+	result, err := c.monitorService.GetMonitorRunLogs(ctx, ouID, orgHandle, projName, agentName, monitorName, runID)
 	if err != nil {
 		if errors.Is(err, utils.ErrMonitorNotFound) {
 			utils.WriteErrorResponse(w, http.StatusNotFound, "Monitor not found")

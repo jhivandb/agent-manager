@@ -57,7 +57,11 @@ type MonitorManagerService interface {
 	StartMonitor(ctx context.Context, ouID, projectName, agentName, monitorName string) (*models.MonitorResponse, error)
 	ListMonitorRuns(ctx context.Context, ouID, projectName, agentName, monitorName string, limit, offset int, includeScores bool) (*models.MonitorRunsListResponse, error)
 	RerunMonitor(ctx context.Context, ouID, projectName, agentName, monitorName, runID string) (*models.MonitorRunResponse, error)
-	GetMonitorRunLogs(ctx context.Context, ouID, projectName, agentName, monitorName, runID string) (*models.LogsResponse, error)
+	// GetMonitorRunLogs retrieves logs for a specific monitor run. orgHandle is
+	// the token's OU handle (human-readable org name) — distinct from ouID
+	// (the OU UUID) — and is forwarded to the observer as the "organization"
+	// query parameter, matching every other consumer of the observer's API.
+	GetMonitorRunLogs(ctx context.Context, ouID, orgHandle, projectName, agentName, monitorName, runID string) (*models.LogsResponse, error)
 }
 
 type monitorManagerService struct {
@@ -995,7 +999,7 @@ func (s *monitorManagerService) RerunMonitor(ctx context.Context, ouID, projectN
 }
 
 // GetMonitorRunLogs retrieves logs for a specific monitor run
-func (s *monitorManagerService) GetMonitorRunLogs(ctx context.Context, ouID, projectName, agentName, monitorName, runID string) (*models.LogsResponse, error) {
+func (s *monitorManagerService) GetMonitorRunLogs(ctx context.Context, ouID, orgHandle, projectName, agentName, monitorName, runID string) (*models.LogsResponse, error) {
 	s.logger.Info("Getting monitor run logs", "ouID", ouID, "monitorName", monitorName, "runID", runID)
 
 	runUUID, err := uuid.Parse(runID)
@@ -1021,8 +1025,11 @@ func (s *monitorManagerService) GetMonitorRunLogs(ctx context.Context, ouID, pro
 		return nil, fmt.Errorf("failed to get monitor run: %w", err)
 	}
 
-	// Fetch logs from observer service using the workflow run name
-	logs, err := s.observerClient.GetWorkflowRunLogs(ctx, ouID, run.Name)
+	// Fetch logs from observer service using the workflow run name. The
+	// observer's "organization" query parameter is the org name/handle, not
+	// the OU UUID — every other consumer (console, CLI, MCP tools) sends the
+	// handle, so this s2s call does too.
+	logs, err := s.observerClient.GetWorkflowRunLogs(ctx, orgHandle, run.Name)
 	if err != nil {
 		s.logger.Error("Failed to get workflow run logs from observer service", "runID", runID, "error", err)
 		return nil, fmt.Errorf("failed to get workflow run logs: %w", err)
