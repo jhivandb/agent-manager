@@ -128,7 +128,9 @@ build_gateway_helm_args() {
 observability_helm_args() {
   printf '%s\n' \
     "--set" "amObserver.auth.issuer=https://${AMP_HOST_THUNDER}" \
-    "--set" "amObserver.ocIngress.hostname=${AMP_HOST_OBSERVER}"
+    "--set" "amObserver.ocIngress.hostname=${AMP_HOST_OBSERVER}" \
+    "--set" "amObserver.publicUrl=https://${AMP_HOST_OBSERVER}" \
+    "--set" "amObserver.oauth.authorizationServers=https://${AMP_HOST_THUNDER}"
 }
 
 # build_observability_helm_args <ip> — sslip.io-from-IP wrapper.

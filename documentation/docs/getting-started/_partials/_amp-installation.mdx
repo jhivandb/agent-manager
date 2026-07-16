@@ -198,6 +198,7 @@ helm install amp-observability-traces \
   --version ${VERSION} \
   --namespace ${OBSERVABILITY_NS} \
   --set amObserver.ocIngress.hostname="${OBS_API_PUBLIC_HOST}" \
+  --set amObserver.publicUrl="${OBS_API_PUBLIC_URL}" \
   --timeout 1800s
 
 kubectl wait --for=condition=Available \

@@ -122,6 +122,12 @@ assert_eq "observability issuer -> public thunder" \
 assert_eq "observability ocIngress hostname" \
   "amObserver.ocIngress.hostname=observer.amp.203.0.113.10.sslip.io" \
   "$(grep -F 'amObserver.ocIngress.hostname' <<<"$obs")"
+assert_eq "observability publicUrl -> public observer host" \
+  "amObserver.publicUrl=https://observer.amp.203.0.113.10.sslip.io" \
+  "$(grep -F 'amObserver.publicUrl' <<<"$obs")"
+assert_eq "observability oauth authorizationServers -> public thunder" \
+  "amObserver.oauth.authorizationServers=https://thunder.amp.203.0.113.10.sslip.io" \
+  "$(grep -F 'amObserver.oauth.authorizationServers' <<<"$obs")"
 
 # --- render_dataplane_external_ingress: public host on :443, both http+https entries
 #     bound to the internal http listener (amp-api advertises the https variant) ---

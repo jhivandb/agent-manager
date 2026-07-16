@@ -124,13 +124,13 @@ curl http://api.amp.localhost:8080/api/v1/config
 ```
 
 ```json
-{ "observerBaseUrl": "http://observer.amp.localhost:8080" }
+{ "observerBaseUrl": "http://traces.amp.localhost:11080" }
 ```
 
 Append `/mcp` to the returned `observerBaseUrl` to get the full MCP server URL, e.g.:
 
 ```
-http://observer.amp.localhost:8080/mcp
+http://traces.amp.localhost:11080/mcp
 ```
 
 If you have changed the observer's public URL from the default, substitute that value.
@@ -140,7 +140,7 @@ If you have changed the observer's public URL from the default, substitute that 
 The observer MCP server is authenticated the same way as the [main MCP server](./mcp-server.mdx#default-oauth-client) — the same pre-registered `am-mcp` OAuth client and pinned callback port `33418` apply, since both servers accept the same bearer token. Follow the [Configuring AI Assistants](./mcp-server.mdx#configuring-ai-assistants) instructions there, substituting the observer MCP server URL for the `agent-manager-service` one, for example:
 
 ```bash
-claude mcp add --transport http agent-manager-observer http://observer.amp.localhost:8080/mcp \
+claude mcp add --transport http agent-manager-observer http://traces.amp.localhost:11080/mcp \
   --client-id am-mcp \
   --callback-port 33418
 ```
