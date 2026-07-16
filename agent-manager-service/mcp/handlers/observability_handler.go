@@ -20,8 +20,8 @@ import (
 	"context"
 	"fmt"
 
+	observersvc "github.com/wso2/agent-manager/agent-manager-service/clients/observersvc"
 	occlient "github.com/wso2/agent-manager/agent-manager-service/clients/openchoreosvc/client"
-	traceobserversvc "github.com/wso2/agent-manager/agent-manager-service/clients/traceobserversvc"
 	"github.com/wso2/agent-manager/agent-manager-service/models"
 	"github.com/wso2/agent-manager/agent-manager-service/services"
 	"github.com/wso2/agent-manager/agent-manager-service/spec"
@@ -30,11 +30,11 @@ import (
 // For runtime logs and metrics
 type ObservabilityHandler struct {
 	agentSvc    services.AgentManagerService
-	traceClient traceobserversvc.TraceObserverSvcClient
+	traceClient observersvc.ObserverSvcClient
 	ocClient    occlient.OpenChoreoClient
 }
 
-func NewObservabilityHandler(agentSvc services.AgentManagerService, traceClient traceobserversvc.TraceObserverSvcClient, ocClient occlient.OpenChoreoClient) *ObservabilityHandler {
+func NewObservabilityHandler(agentSvc services.AgentManagerService, traceClient observersvc.ObserverSvcClient, ocClient occlient.OpenChoreoClient) *ObservabilityHandler {
 	return &ObservabilityHandler{agentSvc: agentSvc, traceClient: traceClient, ocClient: ocClient}
 }
 
@@ -63,7 +63,7 @@ func (h *ObservabilityHandler) ListTraces(ctx context.Context, ouID string, proj
 		return nil, err
 	}
 
-	params := traceobserversvc.TraceListParams{
+	params := observersvc.TraceListParams{
 		Organization: namespace,
 		Project:      projectName,
 		Component:    agentName,
@@ -87,7 +87,7 @@ func (h *ObservabilityHandler) ExportTraces(ctx context.Context, ouID string, pr
 		return nil, err
 	}
 
-	params := traceobserversvc.TraceListParams{
+	params := observersvc.TraceListParams{
 		Organization: namespace,
 		Project:      projectName,
 		Component:    agentName,
@@ -111,7 +111,7 @@ func (h *ObservabilityHandler) GetTraceDetails(ctx context.Context, ouID string,
 		return nil, err
 	}
 
-	params := traceobserversvc.TraceDetailsParams{
+	params := observersvc.TraceDetailsParams{
 		TraceID:      traceID,
 		Organization: namespace,
 		Project:      projectName,
@@ -135,7 +135,7 @@ func (h *ObservabilityHandler) GetSpanDetails(ctx context.Context, ouID string, 
 		return nil, err
 	}
 
-	params := traceobserversvc.SpanDetailsParams{
+	params := observersvc.SpanDetailsParams{
 		TraceID:      traceID,
 		SpanID:       spanID,
 		Organization: namespace,

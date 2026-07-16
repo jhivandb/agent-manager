@@ -50,7 +50,7 @@ func MakeHTTPHandler(params *wiring.AppParams, extraAPIRoutes func(*http.ServeMu
 		InfraResourceManager:     params.InfraResourceManager,
 		AgentManagerService:      params.AgentManagerService,
 		AgentTokenManagerService: params.AgentTokenManagerService,
-		TraceObserverSvcClient:   params.TraceObserverSvcClient,
+		ObserverSvcClient:        params.ObserverSvcClient,
 		OpenChoreoClient:         params.OpenChoreoClient,
 	}, params.AuthMiddleware)
 

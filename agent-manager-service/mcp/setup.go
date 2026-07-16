@@ -19,8 +19,8 @@ package mcp
 import (
 	"net/http"
 
+	observersvc "github.com/wso2/agent-manager/agent-manager-service/clients/observersvc"
 	occlient "github.com/wso2/agent-manager/agent-manager-service/clients/openchoreosvc/client"
-	traceobserversvc "github.com/wso2/agent-manager/agent-manager-service/clients/traceobserversvc"
 
 	"github.com/wso2/agent-manager/agent-manager-service/mcp/handlers"
 	"github.com/wso2/agent-manager/agent-manager-service/mcp/tools"
@@ -33,7 +33,7 @@ type Dependencies struct {
 	InfraResourceManager     services.InfraResourceManager
 	AgentManagerService      services.AgentManagerService
 	AgentTokenManagerService services.AgentTokenManagerService
-	TraceObserverSvcClient   traceobserversvc.TraceObserverSvcClient
+	ObserverSvcClient        observersvc.ObserverSvcClient
 	OpenChoreoClient         occlient.OpenChoreoClient
 }
 
@@ -46,7 +46,7 @@ func RegisterRoute(mux *http.ServeMux, deps Dependencies, authMiddleware func(ht
 		AgentToolset:         handlers.NewAgentHandler(deps.AgentManagerService, deps.AgentTokenManagerService),
 		BuildToolset:         handlers.NewBuildHandler(deps.AgentManagerService),
 		DeploymentToolset:    handlers.NewDeploymentHandler(deps.AgentManagerService),
-		ObservabilityToolset: handlers.NewObservabilityHandler(deps.AgentManagerService, deps.TraceObserverSvcClient, deps.OpenChoreoClient),
+		ObservabilityToolset: handlers.NewObservabilityHandler(deps.AgentManagerService, deps.ObserverSvcClient, deps.OpenChoreoClient),
 	}
 
 	handler := NewHTTPServer(toolsets)

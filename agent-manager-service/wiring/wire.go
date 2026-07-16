@@ -28,10 +28,10 @@ import (
 	"gorm.io/gorm"
 
 	observabilitysvc "github.com/wso2/agent-manager/agent-manager-service/clients/observabilitysvc"
+	observersvc "github.com/wso2/agent-manager/agent-manager-service/clients/observersvc"
 	occlient "github.com/wso2/agent-manager/agent-manager-service/clients/openchoreosvc/client"
 	"github.com/wso2/agent-manager/agent-manager-service/clients/secretmanagersvc"
 	"github.com/wso2/agent-manager/agent-manager-service/clients/thundersvc"
-	traceobserversvc "github.com/wso2/agent-manager/agent-manager-service/clients/traceobserversvc"
 	"github.com/wso2/agent-manager/agent-manager-service/config"
 	"github.com/wso2/agent-manager/agent-manager-service/controllers"
 	"github.com/wso2/agent-manager/agent-manager-service/eventhub"
@@ -52,7 +52,7 @@ var configProviderSet = wire.NewSet(
 
 var clientProviderSet = wire.NewSet(
 	ProvideObservabilitySvcClient,
-	ProvideTraceObserverClient,
+	ProvideObserverClient,
 	ProvideOCClient,
 	ProvideSecretManagementClient,
 	ProvidePublisherProvisioner,
@@ -146,7 +146,7 @@ var controllerProviderSet = wire.NewSet(
 var testClientProviderSet = wire.NewSet(
 	ProvideTestOpenChoreoClient,
 	ProvideTestObservabilitySvcClient,
-	ProvideTestTraceObserverClient,
+	ProvideTestObserverClient,
 	ProvideTestSecretManagementClient,
 	ProvidePublisherProvisioner,
 	ProvideIdentityClient,
@@ -279,8 +279,8 @@ func ProvideObservabilitySvcClient(cfg config.Config, authProvider occlient.Auth
 	})
 }
 
-func ProvideTraceObserverClient(cfg config.Config, authProvider occlient.AuthProvider) (traceobserversvc.TraceObserverSvcClient, error) {
-	return traceobserversvc.NewTraceObserverClient(&traceobserversvc.Config{
+func ProvideObserverClient(cfg config.Config, authProvider occlient.AuthProvider) (observersvc.ObserverSvcClient, error) {
+	return observersvc.NewObserverClient(&observersvc.Config{
 		BaseURL:      cfg.Observer.URL,
 		AuthProvider: authProvider,
 	})
@@ -379,8 +379,8 @@ func ProvideTestObservabilitySvcClient(testClients TestClients) observabilitysvc
 	return testClients.ObservabilitySvcClient
 }
 
-func ProvideTestTraceObserverClient(testClients TestClients) traceobserversvc.TraceObserverSvcClient {
-	return testClients.TraceObserverSvcClient
+func ProvideTestObserverClient(testClients TestClients) observersvc.ObserverSvcClient {
+	return testClients.ObserverSvcClient
 }
 
 func ProvideTestSecretManagementClient(testClients TestClients) secretmanagersvc.SecretManagementClient {

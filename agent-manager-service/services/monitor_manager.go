@@ -27,7 +27,7 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 
-	"github.com/wso2/agent-manager/agent-manager-service/clients/observabilitysvc"
+	"github.com/wso2/agent-manager/agent-manager-service/clients/observersvc"
 	"github.com/wso2/agent-manager/agent-manager-service/clients/openchoreosvc/client"
 	"github.com/wso2/agent-manager/agent-manager-service/clients/secretmanagersvc"
 	"github.com/wso2/agent-manager/agent-manager-service/middleware/jwtassertion"
@@ -61,17 +61,17 @@ type MonitorManagerService interface {
 }
 
 type monitorManagerService struct {
-	logger                 *slog.Logger
-	db                     *gorm.DB
-	ocClient               client.OpenChoreoClient
-	observabilitySvcClient observabilitysvc.ObservabilitySvcClient
-	executor               MonitorExecutor
-	evaluatorService       EvaluatorManagerService
-	monitorRepo            repositories.MonitorRepository
-	scoreRepo              repositories.ScoreRepository
-	llmProvisioner         *LLMProxyProvisioner
-	monitorLLMMappingRepo  repositories.MonitorLLMMappingRepository
-	provisioner            PublisherCredentialProvisioner
+	logger                *slog.Logger
+	db                    *gorm.DB
+	ocClient              client.OpenChoreoClient
+	observerClient        observersvc.ObserverSvcClient
+	executor              MonitorExecutor
+	evaluatorService      EvaluatorManagerService
+	monitorRepo           repositories.MonitorRepository
+	scoreRepo             repositories.ScoreRepository
+	llmProvisioner        *LLMProxyProvisioner
+	monitorLLMMappingRepo repositories.MonitorLLMMappingRepository
+	provisioner           PublisherCredentialProvisioner
 }
 
 // NewMonitorManagerService creates a new monitor manager service instance
@@ -79,7 +79,7 @@ func NewMonitorManagerService(
 	logger *slog.Logger,
 	db *gorm.DB,
 	ocClient client.OpenChoreoClient,
-	observabilitySvcClient observabilitysvc.ObservabilitySvcClient,
+	observerClient observersvc.ObserverSvcClient,
 	executor MonitorExecutor,
 	evaluatorService EvaluatorManagerService,
 	monitorRepo repositories.MonitorRepository,
@@ -89,17 +89,17 @@ func NewMonitorManagerService(
 	provisioner PublisherCredentialProvisioner,
 ) MonitorManagerService {
 	return &monitorManagerService{
-		logger:                 logger,
-		db:                     db,
-		ocClient:               ocClient,
-		observabilitySvcClient: observabilitySvcClient,
-		executor:               executor,
-		evaluatorService:       evaluatorService,
-		monitorRepo:            monitorRepo,
-		scoreRepo:              scoreRepo,
-		llmProvisioner:         llmProvisioner,
-		monitorLLMMappingRepo:  monitorLLMMappingRepo,
-		provisioner:            provisioner,
+		logger:                logger,
+		db:                    db,
+		ocClient:              ocClient,
+		observerClient:        observerClient,
+		executor:              executor,
+		evaluatorService:      evaluatorService,
+		monitorRepo:           monitorRepo,
+		scoreRepo:             scoreRepo,
+		llmProvisioner:        llmProvisioner,
+		monitorLLMMappingRepo: monitorLLMMappingRepo,
+		provisioner:           provisioner,
 	}
 }
 
@@ -1022,7 +1022,7 @@ func (s *monitorManagerService) GetMonitorRunLogs(ctx context.Context, ouID, pro
 	}
 
 	// Fetch logs from observer service using the workflow run name
-	logs, err := s.observabilitySvcClient.GetWorkflowRunLogs(ctx, run.Name, s.ocClient.NamespaceFor(ouID))
+	logs, err := s.observerClient.GetWorkflowRunLogs(ctx, ouID, run.Name)
 	if err != nil {
 		s.logger.Error("Failed to get workflow run logs from observer service", "runID", runID, "error", err)
 		return nil, fmt.Errorf("failed to get workflow run logs: %w", err)

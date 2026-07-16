@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-package traceobserversvc
+package observersvc
 
 import (
 	"context"
@@ -27,31 +27,35 @@ import (
 
 	occlient "github.com/wso2/agent-manager/agent-manager-service/clients/openchoreosvc/client"
 	"github.com/wso2/agent-manager/agent-manager-service/clients/requests"
+	"github.com/wso2/agent-manager/agent-manager-service/models"
 )
 
-// TraceObserverSvcClient defines the interface for trace observer operations.
-type TraceObserverSvcClient interface {
+//go:generate moq -rm -fmt goimports -skip-ensure -pkg clientmocks -out ../clientmocks/observer_client_fake.go . ObserverSvcClient:ObserverSvcClientMock
+
+// ObserverSvcClient defines the interface for trace and workflow-run-log observer operations.
+type ObserverSvcClient interface {
 	ListTraces(ctx context.Context, params TraceListParams) (map[string]any, error)
 	ExportTraces(ctx context.Context, params TraceListParams) (map[string]any, error)
 	GetTrace(ctx context.Context, params TraceDetailsParams) (map[string]any, error)
 	GetSpan(ctx context.Context, params SpanDetailsParams) (map[string]any, error)
+	GetWorkflowRunLogs(ctx context.Context, organization, workflowRunName string) (*models.LogsResponse, error)
 }
 
-// Config contains configuration for the trace observer client.
+// Config contains configuration for the observer client.
 type Config struct {
 	BaseURL      string
 	AuthProvider occlient.AuthProvider
 	RetryConfig  requests.RequestRetryConfig
 }
 
-type traceObserverSvcClient struct {
+type observerSvcClient struct {
 	baseURL      string
 	httpClient   requests.HttpClient
 	authProvider occlient.AuthProvider
 }
 
-// NewTraceObserverClient creates a new trace observer client.
-func NewTraceObserverClient(cfg *Config) (TraceObserverSvcClient, error) {
+// NewObserverClient creates a new observer client.
+func NewObserverClient(cfg *Config) (ObserverSvcClient, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("config is required")
 	}
@@ -65,14 +69,14 @@ func NewTraceObserverClient(cfg *Config) (TraceObserverSvcClient, error) {
 	retryConfig := cfg.RetryConfig
 	httpClient := requests.NewRetryableHTTPClient(&http.Client{}, retryConfig)
 
-	return &traceObserverSvcClient{
+	return &observerSvcClient{
 		baseURL:      strings.TrimRight(cfg.BaseURL, "/"),
 		httpClient:   httpClient,
 		authProvider: cfg.AuthProvider,
 	}, nil
 }
 
-func (c *traceObserverSvcClient) ListTraces(ctx context.Context, params TraceListParams) (map[string]any, error) {
+func (c *observerSvcClient) ListTraces(ctx context.Context, params TraceListParams) (map[string]any, error) {
 	query := map[string]string{
 		"organization": params.Organization,
 		"project":      params.Project,
@@ -88,10 +92,10 @@ func (c *traceObserverSvcClient) ListTraces(ctx context.Context, params TraceLis
 		query["sortOrder"] = params.SortOrder
 	}
 
-	return c.doGetMap(ctx, "traceobserversvc.ListTraces", "/api/v1/traces", query)
+	return c.doGetMap(ctx, "observersvc.ListTraces", "/api/v1/traces", query)
 }
 
-func (c *traceObserverSvcClient) ExportTraces(ctx context.Context, params TraceListParams) (map[string]any, error) {
+func (c *observerSvcClient) ExportTraces(ctx context.Context, params TraceListParams) (map[string]any, error) {
 	query := map[string]string{
 		"organization": params.Organization,
 		"project":      params.Project,
@@ -107,10 +111,10 @@ func (c *traceObserverSvcClient) ExportTraces(ctx context.Context, params TraceL
 		query["sortOrder"] = params.SortOrder
 	}
 
-	return c.doGetMap(ctx, "traceobserversvc.ExportTraces", "/api/v1/traces/export", query)
+	return c.doGetMap(ctx, "observersvc.ExportTraces", "/api/v1/traces/export", query)
 }
 
-func (c *traceObserverSvcClient) GetTrace(ctx context.Context, params TraceDetailsParams) (map[string]any, error) {
+func (c *observerSvcClient) GetTrace(ctx context.Context, params TraceDetailsParams) (map[string]any, error) {
 	query := map[string]string{
 		"organization": params.Organization,
 		"startTime":    params.StartTime,
@@ -133,10 +137,10 @@ func (c *traceObserverSvcClient) GetTrace(ctx context.Context, params TraceDetai
 	}
 
 	path := "/api/v1/traces/" + url.PathEscape(params.TraceID) + "/spans"
-	return c.doGetMap(ctx, "traceobserversvc.GetTrace", path, query)
+	return c.doGetMap(ctx, "observersvc.GetTrace", path, query)
 }
 
-func (c *traceObserverSvcClient) GetSpan(ctx context.Context, params SpanDetailsParams) (map[string]any, error) {
+func (c *observerSvcClient) GetSpan(ctx context.Context, params SpanDetailsParams) (map[string]any, error) {
 	query := map[string]string{
 		"organization": params.Organization,
 	}
@@ -151,12 +155,25 @@ func (c *traceObserverSvcClient) GetSpan(ctx context.Context, params SpanDetails
 	}
 
 	path := "/api/v1/traces/" + url.PathEscape(params.TraceID) + "/spans/" + url.PathEscape(params.SpanID)
-	return c.doGetMap(ctx, "traceobserversvc.GetSpan", path, query)
+	return c.doGetMap(ctx, "observersvc.GetSpan", path, query)
 }
 
-func (c *traceObserverSvcClient) doGetMap(ctx context.Context, name, path string, query map[string]string) (map[string]any, error) {
+// GetWorkflowRunLogs fetches build/workflow-run logs from the agent-manager-observer.
+// The observer resolves the upstream namespace from the organization itself.
+func (c *observerSvcClient) GetWorkflowRunLogs(ctx context.Context, organization, workflowRunName string) (*models.LogsResponse, error) {
+	q := url.Values{}
+	q.Set("organization", organization)
+	q.Set("buildName", workflowRunName)
+	var out models.LogsResponse
+	if err := c.doGetJSON(ctx, "/api/v1/build-logs", q, &out); err != nil {
+		return nil, fmt.Errorf("observersvc.GetWorkflowRunLogs: %w", err)
+	}
+	return &out, nil
+}
+
+func (c *observerSvcClient) doGetMap(ctx context.Context, name, path string, query map[string]string) (map[string]any, error) {
 	if c == nil {
-		return nil, fmt.Errorf("trace observer client is nil")
+		return nil, fmt.Errorf("observer client is nil")
 	}
 	url := c.baseURL + path
 
@@ -187,7 +204,43 @@ func (c *traceObserverSvcClient) doGetMap(ctx context.Context, name, path string
 	return nil, scanErr
 }
 
-func (c *traceObserverSvcClient) sendGet(ctx context.Context, name, url string, query map[string]string) (*requests.Result, error) {
+// doGetJSON is doGetMap's typed twin: same auth header handling and single
+// 401-retry behavior, but decodes the response body into out instead of a
+// map[string]any.
+func (c *observerSvcClient) doGetJSON(ctx context.Context, path string, query url.Values, out any) error {
+	if c == nil {
+		return fmt.Errorf("observer client is nil")
+	}
+	name := "observersvc" + path
+	reqURL := c.baseURL + path
+	q := make(map[string]string, len(query))
+	for key := range query {
+		q[key] = query.Get(key)
+	}
+
+	result, err := c.sendGet(ctx, name, reqURL, q)
+	if err != nil {
+		return err
+	}
+	scanErr := result.ScanResponse(out, http.StatusOK)
+	if scanErr == nil {
+		return nil
+	}
+	var httpErr *requests.HttpError
+	if errors.As(scanErr, &httpErr) && httpErr.StatusCode == http.StatusUnauthorized {
+		// retry once after invalidating token
+		c.authProvider.InvalidateToken()
+		retryResult, retryErr := c.sendGet(ctx, name, reqURL, q)
+		if retryErr != nil {
+			return retryErr
+		}
+		return retryResult.ScanResponse(out, http.StatusOK)
+	}
+
+	return scanErr
+}
+
+func (c *observerSvcClient) sendGet(ctx context.Context, name, url string, query map[string]string) (*requests.Result, error) {
 	req := &requests.HttpRequest{
 		Name:   name,
 		URL:    url,
