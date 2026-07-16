@@ -29,6 +29,7 @@ export * from './organizations';
 export * from './projects';
 export * from './metrics';
 export * from './monitors';
+export * from './runtime-config';
 export * from './runtime-logs';
 export * from './repositories';
 export * from './resource-configs';

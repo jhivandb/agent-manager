@@ -27,6 +27,7 @@ import {
   ExternalModuleProvider,
   type ExternalModule,
 } from "@agent-management-platform/views";
+import { RuntimeConfigProvider } from "./RuntimeConfigProvider";
 
 const ThemedShell = ({ children }: { children: React.ReactNode }) => {
   const { themeObject } = useAppTheme();
@@ -50,11 +51,13 @@ export const GlobalProviders = ({
         <SnackBarProvider>
           <AuthProvider>
             <ClientProvider>
-              <ConfirmationDialogProvider>
-                <ExternalModuleProvider externalPageModules={externalPageModules}>
-                  {children}
-                </ExternalModuleProvider>
-              </ConfirmationDialogProvider>
+              <RuntimeConfigProvider>
+                <ConfirmationDialogProvider>
+                  <ExternalModuleProvider externalPageModules={externalPageModules}>
+                    {children}
+                  </ExternalModuleProvider>
+                </ConfirmationDialogProvider>
+              </RuntimeConfigProvider>
             </ClientProvider>
           </AuthProvider>
         </SnackBarProvider>

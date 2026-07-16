@@ -42,7 +42,6 @@ window.__RUNTIME_CONFIG__ = {
   disableAuth: "false" === "true",
   rbacEnabled: "true" === "true",
   apiBaseUrl: "http://localhost:9000",
-  obsApiBaseUrl: "http://localhost:9098",
   gatewayControlPlaneUrl: "http://localhost:9243",
   gatewayVersion: "v0.11.0",
   ampVersion: "v0.17.0",

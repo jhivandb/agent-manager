@@ -31,7 +31,6 @@ import {
   GetTraceListPathParams,
   TraceListTimeRange,
   getTimeRange,
-  globalConfig,
 } from "@agent-management-platform/types";
 import {
   Workflow,
@@ -46,6 +45,7 @@ import {
   useGetAgent,
   useGetOrganization,
   useListEnvironments,
+  isObserverConfigured,
   type TraceListWithRange,
 } from "@agent-management-platform/api-client";
 import { TraceDetails, TracesView } from "./subComponents";
@@ -286,17 +286,15 @@ export const TracesComponent: React.FC = () => {
     refetch();
   }, [refetch]);
 
-  const obsUrlMissing =
-    !globalConfig.obsApiBaseUrl?.trim() ||
-    globalConfig.obsApiBaseUrl.trim() === "$OBS_API_BASE_URL";
+  const obsUrlMissing = !isObserverConfigured();
 
   if (obsUrlMissing) {
     return (
       <PageLayout title="Traces" disableIcon>
         <Alert severity="error" sx={{ mt: 2 }}>
-          <strong>Traces service not configured.</strong> Set{" "}
-          <code>OBS_API_BASE_URL</code> to the traces-observer-service URL. The
-          agent-manager no longer serves trace routes.
+          <strong>Observer not configured.</strong> Ask your platform
+          administrator to set <code>AM_OBSERVER_PUBLIC_URL</code> on the
+          agent-manager service.
         </Alert>
       </PageLayout>
     );

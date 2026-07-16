@@ -94,19 +94,31 @@ export async function httpGET(
     return response;
 }
 
+let observerBaseUrl: string | undefined;
+
+/** Set by the runtime-config bootstrap once GET /api/v1/config resolves. */
+export function setObserverBaseUrl(url: string | undefined): void {
+  observerBaseUrl = url?.trim() || undefined;
+}
+
+export function isObserverConfigured(): boolean {
+  return !!observerBaseUrl;
+}
+
 /**
- * Same as httpGET but calls the traces-observer-service directly using obsApiBaseUrl.
- * Throws if obsApiBaseUrl is not configured — the agent-manager no longer serves
- * traces routes, so silently falling back would produce opaque 404 errors.
+ * Same as httpGET but calls the traces-observer-service directly using the
+ * observer base URL discovered at runtime via GET /api/v1/config.
+ * Throws if the observer is not configured — the agent-manager no longer
+ * serves traces routes, so silently falling back would produce opaque 404s.
  */
 export async function httpGETObserver(
     context: string,
     params: {searchParams?: Record<string, string>, token?: string}) {
     const {searchParams, token} = params;
-    const obsUrl = globalConfig.obsApiBaseUrl?.trim();
-    if (!obsUrl || obsUrl === '$OBS_API_BASE_URL') {
+    const obsUrl = observerBaseUrl;
+    if (!obsUrl) {
         throw new Error(
-            'obsApiBaseUrl is not configured. Set OBS_API_BASE_URL to the traces-observer-service URL.'
+            'Observer is not configured. Set AM_OBSERVER_PUBLIC_URL on the agent-manager service.'
         );
     }
     const baseUrl = obsUrl;
