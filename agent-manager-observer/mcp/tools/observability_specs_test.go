@@ -203,3 +203,71 @@ func TestLogsTimeWindowCap(t *testing.T) {
 		}
 	})
 }
+
+// Verifies that get_runtime_logs rejects a start_time in the future,
+// mirroring validateLogTimeRange in handlers/handlers.go (GetLogs).
+func TestGetRuntimeLogsFutureStartTimeRejected(t *testing.T) {
+	clientSession, fake := setupTestServer(t)
+	ctx := context.Background()
+
+	now := time.Now().UTC()
+	start := now.Add(1 * time.Hour)
+	end := now.Add(2 * time.Hour)
+
+	result, err := clientSession.CallTool(ctx, &gomcp.CallToolParams{
+		Name: "get_runtime_logs",
+		Arguments: map[string]any{
+			"organization": testOrgName,
+			"project":      testProjectName,
+			"agent":        testAgentName,
+			"environment":  testEnvName,
+			"start_time":   start.Format(time.RFC3339),
+			"end_time":     end.Format(time.RFC3339),
+		},
+	})
+	switch {
+	case err != nil:
+		// Protocol-level rejection — fine.
+	case result != nil && result.IsError:
+		// Handler-level tool error — fine.
+	default:
+		t.Error("expected error for a future start_time; got success")
+	}
+	if calls := fake.calls["QueryLogs"]; len(calls) != 0 {
+		t.Errorf("expected no QueryLogs call for a rejected request, got %d", len(calls))
+	}
+}
+
+// Verifies that get_metrics does NOT reject a future start_time: REST's
+// GetMetrics handler (handlers/handlers.go) never calls validateLogTimeRange
+// — that check is unique to GetLogs — so get_metrics must not inherit it via
+// the resolveTimeWindow helper it shares with get_runtime_logs.
+func TestGetMetricsAllowsFutureStartTime(t *testing.T) {
+	clientSession, fake := setupTestServer(t)
+	ctx := context.Background()
+
+	now := time.Now().UTC()
+	start := now.Add(1 * time.Hour)
+	end := now.Add(2 * time.Hour)
+
+	result, err := clientSession.CallTool(ctx, &gomcp.CallToolParams{
+		Name: "get_metrics",
+		Arguments: map[string]any{
+			"organization": testOrgName,
+			"project":      testProjectName,
+			"agent":        testAgentName,
+			"environment":  testEnvName,
+			"start_time":   start.Format(time.RFC3339),
+			"end_time":     end.Format(time.RFC3339),
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool failed: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success for a future start_time on get_metrics, got tool error: %+v", result.Content)
+	}
+	if calls := fake.calls["QueryMetrics"]; len(calls) != 1 {
+		t.Errorf("expected exactly one QueryMetrics call, got %d", len(calls))
+	}
+}

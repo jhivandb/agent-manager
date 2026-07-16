@@ -109,6 +109,20 @@ func resolveWindowWithLimit(start, end string, maxDuration time.Duration) (time.
 	return startTime.UTC(), endTime.UTC(), nil
 }
 
+// rejectFutureLogStartTime mirrors validateLogTimeRange in
+// handlers/handlers.go: REST's /api/v1/logs route (GetLogs) rejects a
+// startTime in the future. No other REST route applies this rule — GetMetrics
+// and the trace routes (GetTraceOverviews/ExportTraces/GetTraceSpans) never
+// call validateLogTimeRange — so this is invoked only from get_runtime_logs,
+// not from resolveTimeWindow/resolveTraceTimeWindow (which are also shared
+// with get_metrics/list_traces/get_traces/get_trace_details).
+func rejectFutureLogStartTime(start time.Time) error {
+	if start.After(time.Now()) {
+		return fmt.Errorf("start_time cannot be in the future")
+	}
+	return nil
+}
+
 // requireField trims value and rejects it (and whitespace-only input) as
 // missing. Most required fields are already enforced by the tool's JSON
 // schema (no "omitempty" tag), but the schema only rejects a fully absent
@@ -139,10 +153,11 @@ func validateSortOrder(order, defaultVal string) (string, error) {
 }
 
 // validateLimit resolves an optional limit input against [1, maxVal],
-// defaulting to defaultVal when nil. Unlike the REST handlers (which clamp
-// an over-max limit down), MCP tools reject it: a silently-clamped limit is
-// a worse contract for a programmatic/LLM caller reasoning about the value
-// it asked for.
+// defaulting to defaultVal when nil, mirroring parseLimit in
+// handlers/handlers.go (used by the trace routes: GetTraceOverviews,
+// ExportTraces, GetTraceSpans): a non-positive limit is rejected, but a
+// limit over maxVal is silently clamped down to maxVal rather than
+// rejected.
 func validateLimit(limit *int, defaultVal, maxVal int) (int, error) {
 	if limit == nil {
 		return defaultVal, nil
@@ -151,7 +166,7 @@ func validateLimit(limit *int, defaultVal, maxVal int) (int, error) {
 		return 0, fmt.Errorf("limit must be a positive integer")
 	}
 	if *limit > maxVal {
-		return 0, fmt.Errorf("limit must be between 1 and %d", maxVal)
+		return maxVal, nil
 	}
 	return *limit, nil
 }

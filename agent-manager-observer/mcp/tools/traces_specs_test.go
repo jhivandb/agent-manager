@@ -22,6 +22,8 @@ import (
 	"time"
 
 	gomcp "github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/wso2/agent-manager/agent-manager-observer/observer"
 )
 
 // Returns the test specs for tools registered by registerTraceTools.
@@ -109,18 +111,21 @@ func TestBadRFC3339Rejected(t *testing.T) {
 	}
 }
 
-// Verifies that list_traces rejects a limit outside [1, maxTraceListLimit].
+// Verifies that list_traces rejects a non-positive limit but clamps an
+// over-max limit down to maxTraceListLimit, mirroring parseLimit in
+// handlers/handlers.go (used by GetTraceOverviews/ExportTraces/GetTraceSpans):
+// a non-positive value is a caller error, but an over-max value is silently
+// clamped rather than rejected.
 func TestTraceListLimitBounds(t *testing.T) {
-	cases := []struct {
+	rejectedCases := []struct {
 		name  string
 		limit int
 	}{
 		{"zero", 0},
 		{"negative", -1},
-		{"over max", maxTraceListLimit + 1},
 	}
 
-	for _, tc := range cases {
+	for _, tc := range rejectedCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			clientSession, fake := setupTestServer(t)
@@ -175,6 +180,83 @@ func TestTraceListLimitBounds(t *testing.T) {
 			t.Errorf("expected exactly one QueryTraces call, got %d", len(calls))
 		}
 	})
+
+	t.Run("over max is clamped, not rejected", func(t *testing.T) {
+		clientSession, fake := setupTestServer(t)
+		ctx := context.Background()
+
+		result, err := clientSession.CallTool(ctx, &gomcp.CallToolParams{
+			Name: "list_traces",
+			Arguments: map[string]any{
+				"organization": testOrgName,
+				"project":      testProjectName,
+				"agent":        testAgentName,
+				"environment":  testEnvName,
+				"limit":        maxTraceListLimit + 1,
+			},
+		})
+		if err != nil {
+			t.Fatalf("CallTool failed: %v", err)
+		}
+		if result.IsError {
+			t.Fatalf("expected success (clamped limit), got tool error: %+v", result.Content)
+		}
+		calls := fake.calls["QueryTraces"]
+		if len(calls) != 1 {
+			t.Fatalf("expected exactly one QueryTraces call, got %d", len(calls))
+		}
+		args, ok := calls[0].([]any)
+		if !ok || len(args) != 1 {
+			t.Fatalf("unexpected recorded args: %v", calls[0])
+		}
+		req, ok := args[0].(observer.TracesQueryRequest)
+		if !ok {
+			t.Fatalf("recorded arg has unexpected type %T", args[0])
+		}
+		if req.Limit == nil || *req.Limit != maxTraceListLimit {
+			t.Errorf("Limit: got %v, want %d (clamped)", req.Limit, maxTraceListLimit)
+		}
+	})
+}
+
+// Verifies that get_traces (ExportTraces) also clamps an over-max limit down
+// to maxTraceExportLimit rather than rejecting it, mirroring parseLimit in
+// handlers/handlers.go.
+func TestGetTracesLimitClamped(t *testing.T) {
+	clientSession, fake := setupTestServer(t)
+	ctx := context.Background()
+
+	result, err := clientSession.CallTool(ctx, &gomcp.CallToolParams{
+		Name: "get_traces",
+		Arguments: map[string]any{
+			"organization": testOrgName,
+			"project":      testProjectName,
+			"agent":        testAgentName,
+			"environment":  testEnvName,
+			"limit":        maxTraceExportLimit + 1,
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool failed: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success (clamped limit), got tool error: %+v", result.Content)
+	}
+	calls := fake.calls["QueryTraces"]
+	if len(calls) != 1 {
+		t.Fatalf("expected exactly one QueryTraces call, got %d", len(calls))
+	}
+	args, ok := calls[0].([]any)
+	if !ok || len(args) != 1 {
+		t.Fatalf("unexpected recorded args: %v", calls[0])
+	}
+	req, ok := args[0].(observer.TracesQueryRequest)
+	if !ok {
+		t.Fatalf("recorded arg has unexpected type %T", args[0])
+	}
+	if req.Limit == nil || *req.Limit != maxTraceExportLimit {
+		t.Errorf("Limit: got %v, want %d (clamped)", req.Limit, maxTraceExportLimit)
+	}
 }
 
 // Verifies that list_traces enforces the locked 30-day cap on the

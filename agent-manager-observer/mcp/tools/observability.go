@@ -99,6 +99,9 @@ func getRuntimeLogs(obs *controllers.ObservabilityController) func(context.Conte
 		if err != nil {
 			return nil, nil, err
 		}
+		if err := rejectFutureLogStartTime(startTime); err != nil {
+			return nil, nil, err
+		}
 
 		levels, err := normalizeLogLevels(input.LogLevels)
 		if err != nil {
