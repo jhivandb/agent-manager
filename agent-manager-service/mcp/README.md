@@ -59,7 +59,6 @@ Internal agents only — external agents are never built by the platform.
 | --- | --- |
 | `list_builds` | Builds for an agent, with status, image id, and timestamps |
 | `get_build_details` | Detailed view of one build — steps, durations, commit, build parameters |
-| `get_build_logs` | Build-time stdout/stderr from each pipeline stage |
 | `build_agent` | Trigger a fresh build from a specific commit (defaults to latest). Returns immediately; poll `get_build_details` for completion |
 
 ### Deployments

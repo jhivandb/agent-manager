@@ -1416,8 +1416,8 @@ func TestGetMonitorRunLogs(t *testing.T) {
 
 	mockChoreoClient := createBaseMockChoreoClient()
 
-	mockObservabilityClient := &clientmocks.ObservabilitySvcClientMock{
-		GetWorkflowRunLogsFunc: func(ctx context.Context, workflowRunName string, namespaceName string) (*models.LogsResponse, error) {
+	mockObserverClient := &clientmocks.ObserverSvcClientMock{
+		GetWorkflowRunLogsFunc: func(ctx context.Context, organization string, workflowRunName string) (*models.LogsResponse, error) {
 			return &models.LogsResponse{
 				Logs: []models.LogEntry{
 					{
@@ -1433,8 +1433,8 @@ func TestGetMonitorRunLogs(t *testing.T) {
 	}
 
 	testClients := wiring.TestClients{
-		OpenChoreoClient:       mockChoreoClient,
-		ObservabilitySvcClient: mockObservabilityClient,
+		OpenChoreoClient:  mockChoreoClient,
+		ObserverSvcClient: mockObserverClient,
 	}
 
 	app := apitestutils.MakeAppClientWithDeps(t, testClients, authMiddleware)
@@ -1499,10 +1499,10 @@ func TestGetMonitorRunLogs(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code)
 	assert.Contains(t, w.Body.String(), "Sample log output")
 
-	// Verify the correct namespace was passed to the observability client
-	calls := mockObservabilityClient.GetWorkflowRunLogsCalls()
+	// Verify the correct organization was passed to the observer client
+	calls := mockObserverClient.GetWorkflowRunLogsCalls()
 	require.Len(t, calls, 1)
-	assert.Equal(t, config.GetConfig().OpenChoreo.DefaultNamespace, calls[0].NamespaceName)
+	assert.Equal(t, jwtassertion.MockOUID, calls[0].Organization)
 }
 
 // TestStopMonitor tests stopping a future monitor

@@ -25,7 +25,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	observabilitysvc "github.com/wso2/agent-manager/agent-manager-service/clients/observabilitysvc"
 	"github.com/wso2/agent-manager/agent-manager-service/clients/openchoreosvc/client"
 	"github.com/wso2/agent-manager/agent-manager-service/clients/openchoreosvc/gen"
 	"github.com/wso2/agent-manager/agent-manager-service/clients/secretmanagersvc"
@@ -56,10 +55,7 @@ type AgentManagerService interface {
 	GetAgentEndpoints(ctx context.Context, ouID string, projectName string, agentName string, environmentName string) (map[string]models.EndpointsResponse, error)
 	GetAgentConfigurations(ctx context.Context, ouID string, projectName string, agentName string, environment string) ([]models.EnvVars, error)
 	GetAgentFileMounts(ctx context.Context, ouID string, projectName string, agentName string, environment string) ([]models.FileMountEntry, error)
-	GetBuildLogs(ctx context.Context, ouID string, projectName string, agentName string, buildName string) (*models.LogsResponse, error)
 	GenerateName(ctx context.Context, ouID string, payload spec.ResourceNameRequest) (string, error)
-	GetAgentMetrics(ctx context.Context, ouID string, projectName string, agentName string, payload spec.MetricsFilterRequest) (*spec.MetricsResponse, error)
-	GetAgentRuntimeLogs(ctx context.Context, ouID string, projectName string, agentName string, payload spec.LogFilterRequest) (*models.LogsResponse, error)
 	GetAgentResourceConfigs(ctx context.Context, ouID string, projectName string, agentName string, environment string) (*spec.AgentResourceConfigsResponse, error)
 	UpdateAgentResourceConfigs(ctx context.Context, ouID string, projectName string, agentName string, environment string, req *spec.UpdateAgentResourceConfigsRequest) (*spec.AgentResourceConfigsResponse, error)
 	PromoteAgent(ctx context.Context, ouID string, projectName string, agentName string, req *spec.PromoteAgentRequest) error
@@ -78,7 +74,6 @@ type AgentManagerService interface {
 type agentManagerService struct {
 	db                        *gorm.DB
 	ocClient                  client.OpenChoreoClient
-	observabilitySvcClient    observabilitysvc.ObservabilitySvcClient
 	secretMgmtClient          secretmanagersvc.SecretManagementClient
 	gitRepositoryService      RepositoryService
 	tokenManagerService       AgentTokenManagerService
@@ -97,7 +92,6 @@ type agentManagerService struct {
 func NewAgentManagerService(
 	db *gorm.DB,
 	OpenChoreoClient client.OpenChoreoClient,
-	observabilitySvcClient observabilitysvc.ObservabilitySvcClient,
 	secretMgmtClient secretmanagersvc.SecretManagementClient,
 	gitRepositoryService RepositoryService,
 	tokenManagerService AgentTokenManagerService,
@@ -115,7 +109,6 @@ func NewAgentManagerService(
 	return &agentManagerService{
 		db:                        db,
 		ocClient:                  OpenChoreoClient,
-		observabilitySvcClient:    observabilitySvcClient,
 		secretMgmtClient:          secretMgmtClient,
 		gitRepositoryService:      gitRepositoryService,
 		tokenManagerService:       tokenManagerService,
@@ -4602,149 +4595,6 @@ func (s *agentManagerService) GetAgentFileMounts(ctx context.Context, ouID strin
 
 	s.logger.Info("Fetched file mounts successfully", "agentName", agentName, "count", len(fileMounts))
 	return fileMounts, nil
-}
-
-func (s *agentManagerService) GetBuildLogs(ctx context.Context, ouID string, projectName string, agentName string, buildName string) (*models.LogsResponse, error) {
-	s.logger.Info("Getting build logs", "agentName", agentName, "buildName", buildName, "ouID", ouID, "projectName", projectName)
-	// Validate organization exists
-	_, err := s.ocClient.GetOrganization(ctx, ouID)
-	if err != nil {
-		s.logger.Error("Failed to validate organization", "ouID", ouID, "error", err)
-		return nil, translateOrgError(err)
-	}
-	// Validates the project name by checking its existence
-	_, err = s.ocClient.GetProject(ctx, ouID, projectName)
-	if err != nil {
-		s.logger.Error("Failed to get OpenChoreo project", "projectName", projectName, "ouID", ouID, "error", err)
-		return nil, translateProjectError(err)
-	}
-
-	// Check if component already exists
-	_, err = s.ocClient.GetComponent(ctx, ouID, projectName, agentName)
-	if err != nil {
-		s.logger.Error("Failed to check component existence", "agentName", agentName, "ouID", ouID, "projectName", projectName, "error", err)
-		return nil, translateAgentError(err)
-	}
-
-	// Check if build exists
-	build, err := s.ocClient.GetBuild(ctx, ouID, projectName, agentName, buildName)
-	if err != nil {
-		s.logger.Error("Failed to get build", "buildName", buildName, "agentName", agentName, "ouID", ouID, "projectName", projectName, "error", err)
-		return nil, translateBuildError(err)
-	}
-
-	// Fetch the build logs from Observability service
-	buildLogsParams := observabilitysvc.BuildLogsParams{
-		// Observability queries the OpenChoreo namespace the workloads run in, not the OU ID.
-		NamespaceName:      s.ocClient.NamespaceFor(ouID),
-		ProjectName:        projectName,
-		AgentComponentName: agentName,
-		BuildName:          build.Name,
-	}
-	buildLogs, err := s.observabilitySvcClient.GetBuildLogs(ctx, buildLogsParams)
-	if err != nil {
-		s.logger.Error("Failed to fetch build logs from observability service", "buildName", build.Name, "error", err)
-		return nil, fmt.Errorf("failed to fetch build logs: %w", err)
-	}
-	s.logger.Info("Fetched build logs successfully", "agentName", agentName, "ouID", ouID, "projectName", projectName, "buildName", buildName, "logCount", len(buildLogs.Logs))
-	return buildLogs, nil
-}
-
-func (s *agentManagerService) GetAgentRuntimeLogs(ctx context.Context, ouID string, projectName string, agentName string, payload spec.LogFilterRequest) (*models.LogsResponse, error) {
-	s.logger.Info("Getting application logs", "agentName", agentName, "ouID", ouID, "projectName", projectName)
-	// Validate organization exists
-	_, err := s.ocClient.GetOrganization(ctx, ouID)
-	if err != nil {
-		s.logger.Error("Failed to validate organization", "ouID", ouID, "error", err)
-		return nil, translateOrgError(err)
-	}
-	// Validates the project name by checking its existence
-	_, err = s.ocClient.GetProject(ctx, ouID, projectName)
-	if err != nil {
-		s.logger.Error("Failed to get OpenChoreo project", "projectName", projectName, "ouID", ouID, "error", err)
-		return nil, translateProjectError(err)
-	}
-
-	// Check if component already exists
-	agent, err := s.ocClient.GetComponent(ctx, ouID, projectName, agentName)
-	if err != nil {
-		s.logger.Error("Failed to check component existence", "agentName", agentName, "ouID", ouID, "projectName", projectName, "error", err)
-		return nil, translateAgentError(err)
-	}
-	if agent.Provisioning.Type != string(utils.InternalAgent) {
-		return nil, fmt.Errorf("runtime logs are not supported for agent type: '%s'", agent.Provisioning.Type)
-	}
-	// Fetch environment from open choreo
-	environment, err := s.ocClient.GetEnvironment(ctx, ouID, payload.EnvironmentName)
-	if err != nil {
-		s.logger.Error("Failed to fetch environment from OpenChoreo", "environmentName", payload.EnvironmentName, "ouID", ouID, "error", err)
-		return nil, translateEnvironmentError(err)
-	}
-
-	// Fetch the run time logs from Observability service
-	componentLogsParams := observabilitysvc.ComponentLogsParams{
-		AgentComponentId: agent.UUID,
-		EnvId:            environment.UUID,
-		// Observability queries the OpenChoreo namespace the workloads run in, not the OU ID.
-		NamespaceName:   s.ocClient.NamespaceFor(ouID),
-		ComponentName:   agentName,
-		ProjectName:     projectName,
-		EnvironmentName: payload.EnvironmentName,
-	}
-	applicationLogs, err := s.observabilitySvcClient.GetComponentLogs(ctx, componentLogsParams, payload)
-	if err != nil {
-		s.logger.Error("Failed to fetch application logs from observability service", "agent", agentName, "error", err)
-		return nil, fmt.Errorf("failed to fetch application logs: %w", err)
-	}
-	s.logger.Info("Fetched application logs successfully", "agentName", agentName, "ouID", ouID, "projectName", projectName, "logCount", len(applicationLogs.Logs))
-	return applicationLogs, nil
-}
-
-func (s *agentManagerService) GetAgentMetrics(ctx context.Context, ouID string, projectName string, agentName string, payload spec.MetricsFilterRequest) (*spec.MetricsResponse, error) {
-	s.logger.Info("Getting agent metrics", "agentName", agentName, "ouID", ouID, "projectName", projectName)
-	// Validate organization exists
-	_, err := s.ocClient.GetOrganization(ctx, ouID)
-	if err != nil {
-		s.logger.Error("Failed to validate organization", "ouID", ouID, "error", err)
-		return nil, translateOrgError(err)
-	}
-	// Validates the project name by checking its existence
-	project, err := s.ocClient.GetProject(ctx, ouID, projectName)
-	if err != nil {
-		s.logger.Error("Failed to get OpenChoreo project", "projectName", projectName, "ouID", ouID, "error", err)
-		return nil, translateProjectError(err)
-	}
-	// Fetch environment from open choreo
-	environment, err := s.ocClient.GetEnvironment(ctx, ouID, payload.EnvironmentName)
-	if err != nil {
-		s.logger.Error("Failed to fetch environment from OpenChoreo", "environmentName", payload.EnvironmentName, "ouID", ouID, "error", err)
-		return nil, translateEnvironmentError(err)
-	}
-	// Check if component already exists
-	agent, err := s.ocClient.GetComponent(ctx, ouID, projectName, agentName)
-	if err != nil {
-		s.logger.Error("Failed to check component existence", "agentName", agentName, "ouID", ouID, "projectName", projectName, "error", err)
-		return nil, translateAgentError(err)
-	}
-
-	// Fetch the metrics from Observability service
-	componentMetricsParams := observabilitysvc.ComponentMetricsParams{
-		AgentComponentId: agent.UUID,
-		EnvId:            environment.UUID,
-		ProjectId:        project.UUID,
-		// Observability queries the OpenChoreo namespace the workloads run in, not the OU ID.
-		NamespaceName:   s.ocClient.NamespaceFor(ouID),
-		ProjectName:     projectName,
-		ComponentName:   agentName,
-		EnvironmentName: payload.EnvironmentName,
-	}
-	metrics, err := s.observabilitySvcClient.GetComponentMetrics(ctx, componentMetricsParams, payload)
-	if err != nil {
-		s.logger.Error("Failed to fetch agent metrics from observability service", "agent", agentName, "error", err)
-		return nil, fmt.Errorf("failed to fetch agent metrics: %w", err)
-	}
-	s.logger.Info("Fetched agent metrics successfully", "agentName", agentName, "ouID", ouID, "projectName", projectName)
-	return utils.ConvertToMetricsResponse(metrics), nil
 }
 
 // modelBuildToSpecBuild converts a models.Build (from GetComponent) into a spec.Build for CreateAgent enrichment.

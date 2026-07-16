@@ -124,16 +124,6 @@ func (m *MockToolsetHandler) BuildAgent(
 	return &models.BuildResponse{Name: "test-build", Status: "BuildInitiated"}, nil
 }
 
-func (m *MockToolsetHandler) GetBuildLogs(
-	ctx context.Context, ouID string, projectName string, agentName string, buildName string,
-) (*models.LogsResponse, error) {
-	m.recordCall("GetBuildLogs", ouID, projectName, agentName, buildName)
-	return &models.LogsResponse{
-		Logs:       []models.LogEntry{},
-		TotalCount: 0,
-	}, nil
-}
-
 // Deployment Toolset Handler
 
 func (m *MockToolsetHandler) GetAgentDeployments(
@@ -160,22 +150,6 @@ func (m *MockToolsetHandler) UpdateDeploymentState(
 }
 
 // Observability Toolset Handler
-
-func (m *MockToolsetHandler) GetRuntimeLogs(
-	ctx context.Context, ouID string, projectName string, agentName string,
-	payload spec.LogFilterRequest,
-) (*models.LogsResponse, error) {
-	m.recordCall("GetRuntimeLogs", ouID, projectName, agentName, payload)
-	return &models.LogsResponse{Logs: []models.LogEntry{}, TotalCount: 0}, nil
-}
-
-func (m *MockToolsetHandler) GetMetrics(
-	ctx context.Context, ouID string, projectName string, agentName string,
-	payload spec.MetricsFilterRequest,
-) (*spec.MetricsResponse, error) {
-	m.recordCall("GetMetrics", ouID, projectName, agentName, payload)
-	return &spec.MetricsResponse{}, nil
-}
 
 func (m *MockToolsetHandler) ListTraces(
 	ctx context.Context, ouID string, projectName string, agentName string,

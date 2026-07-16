@@ -51,7 +51,7 @@ func newTestClient(t *testing.T, baseURL string, authProvider *fakeAuthProvider)
 }
 
 // TestGetWorkflowRunLogs_SendsExpectedQueryParamsAndDecodesResponse proves the
-// query is exactly organization+buildName (not the observabilitysvc-era
+// query is exactly organization+buildName (not the legacy client's
 // namespace/workflowRunName shape) and that the observer's wire response
 // decodes into models.LogsResponse.
 func TestGetWorkflowRunLogs_SendsExpectedQueryParamsAndDecodesResponse(t *testing.T) {

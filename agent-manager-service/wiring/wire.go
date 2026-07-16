@@ -27,7 +27,6 @@ import (
 	"github.com/google/wire"
 	"gorm.io/gorm"
 
-	observabilitysvc "github.com/wso2/agent-manager/agent-manager-service/clients/observabilitysvc"
 	observersvc "github.com/wso2/agent-manager/agent-manager-service/clients/observersvc"
 	occlient "github.com/wso2/agent-manager/agent-manager-service/clients/openchoreosvc/client"
 	"github.com/wso2/agent-manager/agent-manager-service/clients/secretmanagersvc"
@@ -51,7 +50,6 @@ var configProviderSet = wire.NewSet(
 )
 
 var clientProviderSet = wire.NewSet(
-	ProvideObservabilitySvcClient,
 	ProvideObserverClient,
 	ProvideOCClient,
 	ProvideSecretManagementClient,
@@ -145,7 +143,6 @@ var controllerProviderSet = wire.NewSet(
 
 var testClientProviderSet = wire.NewSet(
 	ProvideTestOpenChoreoClient,
-	ProvideTestObservabilitySvcClient,
 	ProvideTestObserverClient,
 	ProvideTestSecretManagementClient,
 	ProvidePublisherProvisioner,
@@ -271,14 +268,6 @@ func ProvideOCClient(cfg config.Config, authProvider occlient.AuthProvider) (occ
 	})
 }
 
-// ProvideObservabilitySvcClient creates the observability service client
-func ProvideObservabilitySvcClient(cfg config.Config, authProvider occlient.AuthProvider) (observabilitysvc.ObservabilitySvcClient, error) {
-	return observabilitysvc.NewObservabilitySvcClient(&observabilitysvc.Config{
-		BaseURL:      cfg.Observer.URL,
-		AuthProvider: authProvider,
-	})
-}
-
 func ProvideObserverClient(cfg config.Config, authProvider occlient.AuthProvider) (observersvc.ObserverSvcClient, error) {
 	return observersvc.NewObserverClient(&observersvc.Config{
 		BaseURL:      cfg.Observer.URL,
@@ -373,10 +362,6 @@ func ProvideGatewayConnectionChecker(m *websocket.Manager) services.GatewayConne
 // Test client providers
 func ProvideTestOpenChoreoClient(testClients TestClients) occlient.OpenChoreoClient {
 	return testClients.OpenChoreoClient
-}
-
-func ProvideTestObservabilitySvcClient(testClients TestClients) observabilitysvc.ObservabilitySvcClient {
-	return testClients.ObservabilitySvcClient
 }
 
 func ProvideTestObserverClient(testClients TestClients) observersvc.ObserverSvcClient {

@@ -48,7 +48,6 @@ type BuildToolsetHandler interface {
 	ListAgentBuilds(ctx context.Context, ouID string, projectName string, agentName string, limit int32, offset int32) ([]*models.BuildResponse, int32, error)
 	GetBuild(ctx context.Context, ouID string, projectName string, agentName string, buildName string) (*models.BuildDetailsResponse, error)
 	BuildAgent(ctx context.Context, ouID string, projectName string, agentName string, commitId string) (*models.BuildResponse, error)
-	GetBuildLogs(ctx context.Context, ouID string, projectName string, agentName string, buildName string) (*models.LogsResponse, error)
 }
 
 type DeploymentToolsetHandler interface {
@@ -58,8 +57,6 @@ type DeploymentToolsetHandler interface {
 }
 
 type ObservabilityToolsetHandler interface {
-	GetRuntimeLogs(ctx context.Context, ouID string, projectName string, agentName string, payload spec.LogFilterRequest) (*models.LogsResponse, error)
-	GetMetrics(ctx context.Context, ouID string, projectName string, agentName string, payload spec.MetricsFilterRequest) (*spec.MetricsResponse, error)
 	ListTraces(ctx context.Context, ouID string, projectName string, agentName string, environment string, startTime string, endTime string, sortOrder string, limit int) (map[string]any, error)
 	ExportTraces(ctx context.Context, ouID string, projectName string, agentName string, environment string, startTime string, endTime string, sortOrder string, limit int) (map[string]any, error)
 	GetTraceDetails(ctx context.Context, ouID string, projectName string, agentName string, traceID string, environment string, startTime string, endTime string, limit int) (map[string]any, error)

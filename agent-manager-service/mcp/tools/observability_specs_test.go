@@ -23,56 +23,6 @@ import "testing"
 func observabilityToolSpecs() []toolTestSpec {
 	return []toolTestSpec{
 		{
-			name:                "get_runtime_logs",
-			toolset:             "observability",
-			descriptionKeywords: []string{"log"},
-			descriptionMinLen:   20,
-			requiredParams:      []string{"project_name", "agent_name"},
-			optionalParams:      []string{"org_name", "environment", "start_time", "end_time", "limit", "sort_order", "log_levels", "search_phrase"},
-			testArgs: map[string]any{
-				"org_name":     testOrgName,
-				"project_name": testProjectName,
-				"agent_name":   testAgentName,
-			},
-			expectedMethod: "GetRuntimeLogs",
-			validateCall: func(t *testing.T, args []interface{}) {
-				if got, want := args[0], testOrgName; got != want {
-					t.Errorf("ouID: got %v, want %q", got, want)
-				}
-				if got, want := args[1], testProjectName; got != want {
-					t.Errorf("projectName: got %v, want %q", got, want)
-				}
-				if got, want := args[2], testAgentName; got != want {
-					t.Errorf("agentName: got %v, want %q", got, want)
-				}
-			},
-		},
-		{
-			name:                "get_metrics",
-			toolset:             "observability",
-			descriptionKeywords: []string{"metric"},
-			descriptionMinLen:   20,
-			requiredParams:      []string{"project_name", "agent_name"},
-			optionalParams:      []string{"org_name", "environment", "start_time", "end_time"},
-			testArgs: map[string]any{
-				"org_name":     testOrgName,
-				"project_name": testProjectName,
-				"agent_name":   testAgentName,
-			},
-			expectedMethod: "GetMetrics",
-			validateCall: func(t *testing.T, args []interface{}) {
-				if got, want := args[0], testOrgName; got != want {
-					t.Errorf("ouID: got %v, want %q", got, want)
-				}
-				if got, want := args[1], testProjectName; got != want {
-					t.Errorf("projectName: got %v, want %q", got, want)
-				}
-				if got, want := args[2], testAgentName; got != want {
-					t.Errorf("agentName: got %v, want %q", got, want)
-				}
-			},
-		},
-		{
 			name:                "list_traces",
 			toolset:             "observability",
 			descriptionKeywords: []string{"trace"},

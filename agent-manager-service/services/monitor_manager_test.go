@@ -15,7 +15,7 @@
 // under the License.
 
 // UNIT tests for monitorManagerService.GetMonitorRunLogs — the rewire off
-// observabilitySvcClient onto the renamed observersvc.ObserverSvcClient
+// the legacy observability client onto observersvc.ObserverSvcClient
 // (issue: agent-manager-observer serves build-logs itself now, so the
 // namespace lookup via ocClient.NamespaceFor is gone; the observer resolves
 // org->namespace on its own). No build tag, runs in the fast unit tier with

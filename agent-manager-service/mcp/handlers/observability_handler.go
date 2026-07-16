@@ -22,20 +22,17 @@ import (
 
 	observersvc "github.com/wso2/agent-manager/agent-manager-service/clients/observersvc"
 	occlient "github.com/wso2/agent-manager/agent-manager-service/clients/openchoreosvc/client"
-	"github.com/wso2/agent-manager/agent-manager-service/models"
 	"github.com/wso2/agent-manager/agent-manager-service/services"
-	"github.com/wso2/agent-manager/agent-manager-service/spec"
 )
 
-// For runtime logs and metrics
+// For traces
 type ObservabilityHandler struct {
-	agentSvc    services.AgentManagerService
 	traceClient observersvc.ObserverSvcClient
 	ocClient    occlient.OpenChoreoClient
 }
 
-func NewObservabilityHandler(agentSvc services.AgentManagerService, traceClient observersvc.ObserverSvcClient, ocClient occlient.OpenChoreoClient) *ObservabilityHandler {
-	return &ObservabilityHandler{agentSvc: agentSvc, traceClient: traceClient, ocClient: ocClient}
+func NewObservabilityHandler(traceClient observersvc.ObserverSvcClient, ocClient occlient.OpenChoreoClient) *ObservabilityHandler {
+	return &ObservabilityHandler{traceClient: traceClient, ocClient: ocClient}
 }
 
 // resolveNamespace resolves the OpenChoreo namespace for an OU. The trace
@@ -43,14 +40,6 @@ func NewObservabilityHandler(agentSvc services.AgentManagerService, traceClient 
 // not the OU ID.
 func (h *ObservabilityHandler) resolveNamespace(ctx context.Context, _ string) (string, error) {
 	return services.ResolveNamespace(ctx, h.ocClient)
-}
-
-func (h *ObservabilityHandler) GetRuntimeLogs(ctx context.Context, ouID string, projectName string, agentName string, payload spec.LogFilterRequest) (*models.LogsResponse, error) {
-	return h.agentSvc.GetAgentRuntimeLogs(ctx, ouID, projectName, agentName, payload)
-}
-
-func (h *ObservabilityHandler) GetMetrics(ctx context.Context, ouID string, projectName string, agentName string, payload spec.MetricsFilterRequest) (*spec.MetricsResponse, error) {
-	return h.agentSvc.GetAgentMetrics(ctx, ouID, projectName, agentName, payload)
 }
 
 func (h *ObservabilityHandler) ListTraces(ctx context.Context, ouID string, projectName string, agentName string, environment string, startTime string, endTime string, sortOrder string, limit int) (map[string]any, error) {

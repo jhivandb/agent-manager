@@ -24,7 +24,6 @@ import (
 
 	"gorm.io/gorm"
 
-	observabilitysvc "github.com/wso2/agent-manager/agent-manager-service/clients/observabilitysvc"
 	observersvc "github.com/wso2/agent-manager/agent-manager-service/clients/observersvc"
 	occlient "github.com/wso2/agent-manager/agent-manager-service/clients/openchoreosvc/client"
 	"github.com/wso2/agent-manager/agent-manager-service/clients/secretmanagersvc"
@@ -99,10 +98,9 @@ type AppParams struct {
 
 // TestClients contains all mock clients needed for testing
 type TestClients struct {
-	OpenChoreoClient       occlient.OpenChoreoClient
-	ObservabilitySvcClient observabilitysvc.ObservabilitySvcClient
-	SecretMgmtClient       secretmanagersvc.SecretManagementClient
-	ObserverSvcClient      observersvc.ObserverSvcClient
+	OpenChoreoClient  occlient.OpenChoreoClient
+	SecretMgmtClient  secretmanagersvc.SecretManagementClient
+	ObserverSvcClient observersvc.ObserverSvcClient
 }
 
 func ProvideConfigFromPtr(config *config.Config) config.Config {
