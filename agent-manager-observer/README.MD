@@ -1,8 +1,8 @@
-# Traces Observer Service
+# Agent Manager Observer
 
 ## Overview
 
-Traces Observer Service is a lightweight backend that provides an HTTP API for querying traces collected in the observability plane. It communicates with OpenSearch to retrieve and aggregate tracing data produced by agents(components) across the platform, and exposes simple endpoints for the console. It is planned to migrate this service and functionality to the OpenChoreo Observability Plane Observer service later.
+Agent Manager Observer is a lightweight backend that provides an HTTP API for querying traces collected in the observability plane. It communicates with OpenSearch to retrieve and aggregate tracing data produced by agents(components) across the platform, and exposes simple endpoints for the console. It is planned to migrate this service and functionality to the OpenChoreo Observability Plane Observer service later.
 
 ## Features
 
@@ -28,7 +28,7 @@ This service is configured via environment variables. The following are supporte
 
 ```env
 # Server Configuration
-TRACES_OBSERVER_PORT=9098
+AM_OBSERVER_PORT=9098
 
 # OpenSearch Configuration
 OPENSEARCH_ADDRESS=http://localhost:9200
@@ -46,18 +46,18 @@ Prerequisites: Go 1.20+ and a running OpenSearch instance reachable by the servi
 Build the binary:
 
 ```bash
-go build -o traces-observer-service ./...
+go build -o agent-manager-observer ./...
 ```
 Set the enviornment variables:
 ```bash
-export OPENSEARCH_ADDRESS=https://localhost:9200 OPENSEARCH_USERNAME=admin OPENSEARCH_PASSWORD=ThisIsTheOpenSearchPassword1 TRACES_OBSERVER_PORT=9098
+export OPENSEARCH_ADDRESS=https://localhost:9200 OPENSEARCH_USERNAME=admin OPENSEARCH_PASSWORD=ThisIsTheOpenSearchPassword1 AM_OBSERVER_PORT=9098
 ```
 
 Run with environment variables set (example):
 
 ```bash
-OPENSEARCH_ADDRESS=http://localhost:9200 OPENSEARCH_USERNAME=admin OPENSEARCH_PASSWORD=ThisIsTheOpenSearchPassword1  TRACES_OBSERVER_PORT=9098 \
-./traces-observer-service
+OPENSEARCH_ADDRESS=http://localhost:9200 OPENSEARCH_USERNAME=admin OPENSEARCH_PASSWORD=ThisIsTheOpenSearchPassword1  AM_OBSERVER_PORT=9098 \
+./agent-manager-observer
 ```
 
 Or run directly:
@@ -71,7 +71,7 @@ go run . # or `go run .` from the service root, depending on project layout
 Build the image:
 
 ```bash
-docker build -t traces-observer-service .
+docker build -t agent-manager-observer .
 ```
 
 Run the container (example):
@@ -81,8 +81,8 @@ docker run --rm -p 9098:9098 \
 	-e OPENSEARCH_ADDRESS=http://host.docker.internal:9200 \
 	-e OPENSEARCH_USERNAME=admin \
 	-e OPENSEARCH_PASSWORD=ThisIsTheOpenSearchPassword1 \
-    -e TRACES_OBSERVER_PORT=9098 \
-	traces-observer-service
+    -e AM_OBSERVER_PORT=9098 \
+	agent-manager-observer
 ```
 
 ## API — Query Parameter Examples
@@ -210,7 +210,7 @@ All endpoints return appropriate HTTP status codes:
 
 # Mock Trace Generation (OTLP HTTP)
 
-Use `make mock-traces` from `traces-observer-service`.
+Use `make mock-traces` from `agent-manager-observer`.
 
 ## Prerequisites
 
@@ -224,14 +224,14 @@ Ensure Go bin is in `PATH` (for example `$(go env GOPATH)/bin`).
 
 ## Make Targets
 
-From `traces-observer-service`:
+From `agent-manager-observer`:
 
 ```bash
 export AMP_AGENT_API_KEY="<your-api-key>"
 make mock-traces
 ```
 
-Set values directly in `traces-observer-service/Makefile` under:
+Set values directly in `agent-manager-observer/Makefile` under:
 - `OTLP_ENDPOINT`
 - `OTLP_HTTP_PATH`
 - `TRACE_SERVICE_NAME`

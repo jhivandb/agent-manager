@@ -27,12 +27,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/wso2/agent-manager/traces-observer-service/config"
-	"github.com/wso2/agent-manager/traces-observer-service/controllers"
-	"github.com/wso2/agent-manager/traces-observer-service/handlers"
-	"github.com/wso2/agent-manager/traces-observer-service/middleware"
-	"github.com/wso2/agent-manager/traces-observer-service/middleware/logger"
-	"github.com/wso2/agent-manager/traces-observer-service/observer"
+	"github.com/wso2/agent-manager/agent-manager-observer/config"
+	"github.com/wso2/agent-manager/agent-manager-observer/controllers"
+	"github.com/wso2/agent-manager/agent-manager-observer/handlers"
+	"github.com/wso2/agent-manager/agent-manager-observer/middleware"
+	"github.com/wso2/agent-manager/agent-manager-observer/middleware/logger"
+	"github.com/wso2/agent-manager/agent-manager-observer/observer"
 )
 
 func setupLogger(cfg *config.Config) {

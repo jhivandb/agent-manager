@@ -1,6 +1,6 @@
 openapi: 3.0.3
 info:
-  title: Traces Observer Service API
+  title: Agent Manager Observer API
   description: |
     Observer Service-backed API for listing, exporting, and fetching distributed traces.
 
@@ -21,7 +21,7 @@ info:
 servers:
   - url: http://localhost:9098
     description: Local development
-  - url: https://traces-observer.example.com
+  - url: https://observer.example.com
     description: Production (replace with your deployment URL)
 
 tags:
@@ -364,7 +364,7 @@ components:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
     ObserverUnavailable:
-      description: Observer Service not configured (OBSERVER_BASE_URL unset)
+      description: Observer Service not configured (OPENCHOREO_OBSERVER_URL unset)
       content:
         application/json:
           schema:

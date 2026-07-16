@@ -6,7 +6,7 @@ if [ -f .env ]; then
     echo "Using ENV_FILE_PATH: $ENV_FILE_PATH"
 fi
 
-echo "Running tests for traces-observer-service"
+echo "Running tests for agent-manager-observer"
 
 # Create data directory if it doesn't exist
 mkdir -p data

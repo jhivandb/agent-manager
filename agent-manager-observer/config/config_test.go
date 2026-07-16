@@ -22,17 +22,17 @@ import (
 )
 
 func TestLoad_CustomPort(t *testing.T) {
-	_ = os.Setenv("OBSERVER_BASE_URL", "http://localhost:8085")
+	_ = os.Setenv("OPENCHOREO_OBSERVER_URL", "http://localhost:8085")
 	_ = os.Setenv("IDP_TOKEN_URL", "http://localhost:8090/oauth2/token")
 	_ = os.Setenv("IDP_CLIENT_ID", "amp-api-client")
 	_ = os.Setenv("IDP_CLIENT_SECRET", "amp-api-client-secret")
-	_ = os.Setenv("TRACES_OBSERVER_PORT", "8080")
+	_ = os.Setenv("AM_OBSERVER_PORT", "8080")
 	_ = os.Setenv("IS_LOCAL_DEV_ENV", "true")
-	defer func() { _ = os.Unsetenv("OBSERVER_BASE_URL") }()
+	defer func() { _ = os.Unsetenv("OPENCHOREO_OBSERVER_URL") }()
 	defer func() { _ = os.Unsetenv("IDP_TOKEN_URL") }()
 	defer func() { _ = os.Unsetenv("IDP_CLIENT_ID") }()
 	defer func() { _ = os.Unsetenv("IDP_CLIENT_SECRET") }()
-	defer func() { _ = os.Unsetenv("TRACES_OBSERVER_PORT") }()
+	defer func() { _ = os.Unsetenv("AM_OBSERVER_PORT") }()
 	defer func() { _ = os.Unsetenv("IS_LOCAL_DEV_ENV") }()
 
 	cfg, err := Load()
@@ -45,7 +45,7 @@ func TestLoad_CustomPort(t *testing.T) {
 }
 
 func TestLoad_MissingObserverConfig(t *testing.T) {
-	_ = os.Unsetenv("OBSERVER_BASE_URL")
+	_ = os.Unsetenv("OPENCHOREO_OBSERVER_URL")
 	_ = os.Unsetenv("IDP_TOKEN_URL")
 	_ = os.Unsetenv("IDP_CLIENT_ID")
 	_ = os.Unsetenv("IDP_CLIENT_SECRET")
@@ -57,17 +57,17 @@ func TestLoad_MissingObserverConfig(t *testing.T) {
 }
 
 func TestLoad_InvalidPort(t *testing.T) {
-	_ = os.Setenv("OBSERVER_BASE_URL", "http://localhost:8085")
+	_ = os.Setenv("OPENCHOREO_OBSERVER_URL", "http://localhost:8085")
 	_ = os.Setenv("IDP_TOKEN_URL", "http://localhost:8090/oauth2/token")
 	_ = os.Setenv("IDP_CLIENT_ID", "amp-api-client")
 	_ = os.Setenv("IDP_CLIENT_SECRET", "amp-api-client-secret")
-	_ = os.Setenv("TRACES_OBSERVER_PORT", "0")
+	_ = os.Setenv("AM_OBSERVER_PORT", "0")
 	_ = os.Setenv("IS_LOCAL_DEV_ENV", "true")
-	defer func() { _ = os.Unsetenv("OBSERVER_BASE_URL") }()
+	defer func() { _ = os.Unsetenv("OPENCHOREO_OBSERVER_URL") }()
 	defer func() { _ = os.Unsetenv("IDP_TOKEN_URL") }()
 	defer func() { _ = os.Unsetenv("IDP_CLIENT_ID") }()
 	defer func() { _ = os.Unsetenv("IDP_CLIENT_SECRET") }()
-	defer func() { _ = os.Unsetenv("TRACES_OBSERVER_PORT") }()
+	defer func() { _ = os.Unsetenv("AM_OBSERVER_PORT") }()
 	defer func() { _ = os.Unsetenv("IS_LOCAL_DEV_ENV") }()
 
 	_, err := Load()
@@ -77,17 +77,17 @@ func TestLoad_InvalidPort(t *testing.T) {
 }
 
 func TestLoad_PortTooHigh(t *testing.T) {
-	_ = os.Setenv("OBSERVER_BASE_URL", "http://localhost:8085")
+	_ = os.Setenv("OPENCHOREO_OBSERVER_URL", "http://localhost:8085")
 	_ = os.Setenv("IDP_TOKEN_URL", "http://localhost:8090/oauth2/token")
 	_ = os.Setenv("IDP_CLIENT_ID", "amp-api-client")
 	_ = os.Setenv("IDP_CLIENT_SECRET", "amp-api-client-secret")
-	_ = os.Setenv("TRACES_OBSERVER_PORT", "70000")
+	_ = os.Setenv("AM_OBSERVER_PORT", "70000")
 	_ = os.Setenv("IS_LOCAL_DEV_ENV", "true")
-	defer func() { _ = os.Unsetenv("OBSERVER_BASE_URL") }()
+	defer func() { _ = os.Unsetenv("OPENCHOREO_OBSERVER_URL") }()
 	defer func() { _ = os.Unsetenv("IDP_TOKEN_URL") }()
 	defer func() { _ = os.Unsetenv("IDP_CLIENT_ID") }()
 	defer func() { _ = os.Unsetenv("IDP_CLIENT_SECRET") }()
-	defer func() { _ = os.Unsetenv("TRACES_OBSERVER_PORT") }()
+	defer func() { _ = os.Unsetenv("AM_OBSERVER_PORT") }()
 	defer func() { _ = os.Unsetenv("IS_LOCAL_DEV_ENV") }()
 
 	_, err := Load()
@@ -97,13 +97,13 @@ func TestLoad_PortTooHigh(t *testing.T) {
 }
 
 func TestLoad_MissingJWKSWhenNotLocalDev(t *testing.T) {
-	_ = os.Setenv("OBSERVER_BASE_URL", "http://localhost:8085")
+	_ = os.Setenv("OPENCHOREO_OBSERVER_URL", "http://localhost:8085")
 	_ = os.Setenv("IDP_TOKEN_URL", "http://localhost:8090/oauth2/token")
 	_ = os.Setenv("IDP_CLIENT_ID", "amp-api-client")
 	_ = os.Setenv("IDP_CLIENT_SECRET", "amp-api-client-secret")
 	_ = os.Unsetenv("KEY_MANAGER_JWKS_URL")
 	_ = os.Setenv("IS_LOCAL_DEV_ENV", "false")
-	defer func() { _ = os.Unsetenv("OBSERVER_BASE_URL") }()
+	defer func() { _ = os.Unsetenv("OPENCHOREO_OBSERVER_URL") }()
 	defer func() { _ = os.Unsetenv("IDP_TOKEN_URL") }()
 	defer func() { _ = os.Unsetenv("IDP_CLIENT_ID") }()
 	defer func() { _ = os.Unsetenv("IDP_CLIENT_SECRET") }()

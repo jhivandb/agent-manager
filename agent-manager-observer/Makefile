@@ -2,7 +2,7 @@
 
 # Variables
 TAG=0.0.0-dev
-APP_NAME=amp-traces-observer
+APP_NAME=agent-manager-observer
 DOCKER_IMAGE=$(APP_NAME):$(TAG)
 CONTAINER_NAME=$(APP_NAME)
 PORT=9098

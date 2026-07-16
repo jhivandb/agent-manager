@@ -23,8 +23,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/wso2/agent-manager/traces-observer-service/observer"
-	"github.com/wso2/agent-manager/traces-observer-service/opensearch"
+	"github.com/wso2/agent-manager/agent-manager-observer/observer"
+	"github.com/wso2/agent-manager/agent-manager-observer/opensearch"
 )
 
 // fakeObserverClient is a minimal observer.Client implementation that the

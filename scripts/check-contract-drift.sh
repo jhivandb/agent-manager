@@ -9,7 +9,7 @@ cd "$ROOT"
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
-(cd traces-observer-service && GOFLAGS=-mod=mod go run ./cmd/gen-contract "$TMP")
+(cd agent-manager-observer && GOFLAGS=-mod=mod go run ./cmd/gen-contract "$TMP")
 
 if ! diff -rq "$TMP" test/instrumentation-matrix/contracts/traceloop/v1 >/dev/null; then
     echo "contract drift detected — run 'make gen-instrumentation-contract' and commit the result:"

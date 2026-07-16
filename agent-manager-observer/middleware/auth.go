@@ -32,7 +32,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/wso2/agent-manager/traces-observer-service/config"
+	"github.com/wso2/agent-manager/agent-manager-observer/config"
 )
 
 var validPublisherAudPattern = regexp.MustCompile(`^amp-publisher-[a-zA-Z0-9][a-zA-Z0-9._-]*$`)

@@ -58,10 +58,10 @@ type ServerConfig struct {
 func Load() (*Config, error) {
 	cfg := &Config{
 		Server: ServerConfig{
-			Port: getEnvAsInt("TRACES_OBSERVER_PORT", 9098),
+			Port: getEnvAsInt("AM_OBSERVER_PORT", 9098),
 		},
 		Observer: ObserverConfig{
-			BaseURL:          getEnv("OBSERVER_BASE_URL", ""),
+			BaseURL:          getEnv("OPENCHOREO_OBSERVER_URL", ""),
 			TokenURL:         getEnv("IDP_TOKEN_URL", ""),
 			ClientID:         getEnv("IDP_CLIENT_ID", ""),
 			ClientSecret:     getEnv("IDP_CLIENT_SECRET", ""),
@@ -99,16 +99,16 @@ func (c *Config) validate() error {
 
 func (o *ObserverConfig) validate() error {
 	if strings.TrimSpace(o.BaseURL) == "" {
-		return fmt.Errorf("OBSERVER_BASE_URL is required")
+		return fmt.Errorf("OPENCHOREO_OBSERVER_URL is required")
 	}
 	if strings.TrimSpace(o.TokenURL) == "" {
-		return fmt.Errorf("IDP_TOKEN_URL is required when OBSERVER_BASE_URL is set")
+		return fmt.Errorf("IDP_TOKEN_URL is required when OPENCHOREO_OBSERVER_URL is set")
 	}
 	if strings.TrimSpace(o.ClientID) == "" {
-		return fmt.Errorf("IDP_CLIENT_ID is required when OBSERVER_BASE_URL is set")
+		return fmt.Errorf("IDP_CLIENT_ID is required when OPENCHOREO_OBSERVER_URL is set")
 	}
 	if strings.TrimSpace(o.ClientSecret) == "" {
-		return fmt.Errorf("IDP_CLIENT_SECRET is required when OBSERVER_BASE_URL is set")
+		return fmt.Errorf("IDP_CLIENT_SECRET is required when OPENCHOREO_OBSERVER_URL is set")
 	}
 	return nil
 }

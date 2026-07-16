@@ -1,4 +1,4 @@
-# traces-observer-service — agent guide
+# agent-manager-observer — agent guide
 
 Small Go service that serves the console's trace/observability API. It is **not** an OpenSearch client — it is an adapter that calls an upstream **Observer service** over HTTP, then enriches and reshapes the responses. Built on the **stdlib `net/http`** (no Gin), structured logging with **`slog`**, and only one third-party dep: `github.com/golang-jwt/jwt/v5`.
 
@@ -42,7 +42,7 @@ Middleware wraps in this order (outer→inner): `RequestLogger → CORS → JWTA
 
 ```bash
 make run          # hot-reload via air (go install github.com/air-verse/air@latest)
-make build        # go build -o amp-traces-observer .
+make build        # go build -o agent-manager-observer .
 make test         # bash scripts/run_tests.sh
 make test-cover   # coverage + HTML report
 make fmt          # gofmt -w .
@@ -58,8 +58,8 @@ make mock-traces  # generate OTLP traces via telemetrygen (for local testing)
 
 | Var | Config field (`config.Load()` result) | Purpose |
 |---|---|---|
-| `TRACES_OBSERVER_PORT` | `cfg.Server.Port` | listen port (default 9098) |
-| `OBSERVER_BASE_URL` | `cfg.Observer.BaseURL` | upstream Observer base URL |
+| `AM_OBSERVER_PORT` | `cfg.Server.Port` | listen port (default 9098) |
+| `OPENCHOREO_OBSERVER_URL` | `cfg.Observer.BaseURL` | upstream Observer base URL |
 | `IDP_TOKEN_URL` | `cfg.Observer.TokenURL` | Observer OAuth2 token endpoint |
 | `IDP_CLIENT_ID` | `cfg.Observer.ClientID` | Observer OAuth2 client id |
 | `IDP_CLIENT_SECRET` | `cfg.Observer.ClientSecret` | Observer OAuth2 client secret |
@@ -70,7 +70,7 @@ make mock-traces  # generate OTLP traces via telemetrygen (for local testing)
 | `IS_LOCAL_DEV_ENV` | `cfg.Auth.IsLocalDevEnv` | `true` skips JWT signature validation (checks expiry only) |
 | `LOG_LEVEL` | `cfg.LogLevel` | DEBUG/INFO/WARN/ERROR |
 
-The four `cfg.Observer.*` fields are required together once `OBSERVER_BASE_URL` is set; the `cfg.Auth.*` fields are required unless `IsLocalDevEnv` is true.
+The four `cfg.Observer.*` fields are required together once `OPENCHOREO_OBSERVER_URL` is set; the `cfg.Auth.*` fields are required unless `IsLocalDevEnv` is true.
 
 Co-dependent values are checked together — a partially-set Observer or Auth config fails at startup, not first request. `getEnvAsList` parses comma-separated issuer/audience lists.
 
@@ -95,7 +95,7 @@ The intended rule (not yet enforced): the caller's org identity from the JWT mus
 
 ## Gotchas
 
-- Service **cannot run in isolation** — it needs a reachable Observer (`OBSERVER_BASE_URL` + IDP creds). For local work set `IS_LOCAL_DEV_ENV=true`.
+- Service **cannot run in isolation** — it needs a reachable Observer (`OPENCHOREO_OBSERVER_URL` + IDP creds). For local work set `IS_LOCAL_DEV_ENV=true`.
 - The old README mentions OpenSearch directly; the code does **not** talk to OpenSearch — the `opensearch/` package is only span-parsing types/logic.
 - Tests need env vars set at import/run time. Some existing tests (e.g. `config_test.go`) use the manual `os.Setenv` + `defer os.Unsetenv` pattern; **prefer `t.Setenv("KEY", "val")` in new tests** — it sets the var for the test and auto-restores it on cleanup (no `defer` boilerplate, and it guards against parallel misuse).
 

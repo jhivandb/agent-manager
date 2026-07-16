@@ -25,8 +25,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/wso2/agent-manager/traces-observer-service/controllers"
-	"github.com/wso2/agent-manager/traces-observer-service/middleware/logger"
+	"github.com/wso2/agent-manager/agent-manager-observer/controllers"
+	"github.com/wso2/agent-manager/agent-manager-observer/middleware/logger"
 )
 
 const (

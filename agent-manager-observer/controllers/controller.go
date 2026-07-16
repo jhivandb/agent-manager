@@ -24,9 +24,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/wso2/agent-manager/traces-observer-service/middleware/logger"
-	"github.com/wso2/agent-manager/traces-observer-service/observer"
-	"github.com/wso2/agent-manager/traces-observer-service/opensearch"
+	"github.com/wso2/agent-manager/agent-manager-observer/middleware/logger"
+	"github.com/wso2/agent-manager/agent-manager-observer/observer"
+	"github.com/wso2/agent-manager/agent-manager-observer/opensearch"
 )
 
 const (

@@ -1,5 +1,5 @@
 # Build stage
-FROM public.ecr.aws/docker/library/golang:1.25-alpine AS builder
+FROM --platform=$BUILDPLATFORM public.ecr.aws/docker/library/golang:1.25-alpine AS builder
 
 # Add build args for cross-platform support
 ARG TARGETOS
@@ -21,7 +21,7 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build \
     -a \
     -installsuffix cgo \
     -ldflags="-w -s" \
-    -o /go/bin/traces-observer \
+    -o /go/bin/agent-manager-observer \
     -buildvcs=false
 
 FROM public.ecr.aws/docker/library/alpine:3.21
@@ -33,7 +33,7 @@ RUN apk add --no-cache ca-certificates tzdata
 RUN addgroup -g 1000 app && adduser -D -u 1000 -G app app
 
 # Copy binary with ownership set
-COPY --from=builder --chown=1000:1000 /go/bin/traces-observer /go/bin/traces-observer
+COPY --from=builder --chown=1000:1000 /go/bin/agent-manager-observer /go/bin/agent-manager-observer
 
 # Drop root privileges
 USER 1000:1000
@@ -46,4 +46,4 @@ ENV GODEBUG=x509negativeserial=1
 # Expose application port
 EXPOSE 9098
 
-ENTRYPOINT ["/go/bin/traces-observer"]
+ENTRYPOINT ["/go/bin/agent-manager-observer"]

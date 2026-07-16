@@ -260,7 +260,7 @@ gen-eval-artifacts:
 	@echo "All evaluator artifacts generated"
 
 gen-instrumentation-contract:
-	@$(MAKE) -C traces-observer-service gen-instrumentation-contract
+	@$(MAKE) -C agent-manager-observer gen-instrumentation-contract
 
 check-contract-drift:
 	@scripts/check-contract-drift.sh

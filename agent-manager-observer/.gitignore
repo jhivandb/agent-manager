@@ -13,8 +13,7 @@ data/*
 
 # Build output
 tmp/*
-traces-observer
-amp-traces-observer
+agent-manager-observer
 
 # Test output
 coverage/*
