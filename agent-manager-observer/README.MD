@@ -185,7 +185,11 @@ curl --location 'http://localhost:9098/api/v1/trace?traceId=21a29d5d24837ca724b8
 }
 ```
 
-### 3. Health check - `GET /health`
+### 3. MCP server - `POST /mcp` (also `/mcp/`)
+
+`am-obs-mcp` is a streamable-HTTP MCP server mounted on the root mux (not under `/api/v1/`), behind the same `JWTAuth` middleware as the REST routes. It exposes seven observability tools that call the controllers directly (no HTTP hop): `get_runtime_logs`, `get_build_logs`, `get_metrics`, `list_traces`, `get_traces`, `get_trace_details`, `get_span_details`. Every tool takes an explicit, required `organization` parameter (no claims parsing), except `get_span_details`, which only needs a `trace_id`/`span_id`. See `mcp/setup.go` and `mcp/tools/` for the implementation.
+
+### 4. Health check - `GET /health`
 
 ```bash
 curl http://localhost:9098/health

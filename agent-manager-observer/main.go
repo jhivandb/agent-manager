@@ -30,6 +30,7 @@ import (
 	"github.com/wso2/agent-manager/agent-manager-observer/config"
 	"github.com/wso2/agent-manager/agent-manager-observer/controllers"
 	"github.com/wso2/agent-manager/agent-manager-observer/handlers"
+	"github.com/wso2/agent-manager/agent-manager-observer/mcp"
 	"github.com/wso2/agent-manager/agent-manager-observer/middleware"
 	"github.com/wso2/agent-manager/agent-manager-observer/middleware/logger"
 	"github.com/wso2/agent-manager/agent-manager-observer/observer"
@@ -126,6 +127,16 @@ func main() {
 	// Apply JWT auth middleware to API routes
 	authenticatedHandler := middleware.JWTAuth(cfg.Auth)(apiMux)
 	mux.Handle("/api/v1/", authenticatedHandler)
+
+	// am-obs-mcp: streamable-HTTP MCP server on the root mux (not under
+	// /api/v1/). Behind the same JWTAuth middleware, but — unlike the REST
+	// logs/metrics/build-logs routes — deliberately not gated by
+	// RejectPublisherAudience: publisher-audience tokens may call it.
+	mcp.RegisterRoute(mux, mcp.Dependencies{
+		Tracing:       controller,
+		Observability: obsController,
+	}, middleware.JWTAuth(cfg.Auth))
+	slog.Info("am-obs-mcp registered", "path", "/mcp")
 
 	// Apply middleware: Request Logger -> CORS
 	corsConfig := middleware.DefaultCORSConfig()

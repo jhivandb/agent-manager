@@ -5,18 +5,21 @@ Small Go service that serves the console's trace/observability API. It is **not*
 ## Request flow
 
 ```text
-HTTP → RequestLogger → CORS → mux ┬→ /health              (no auth)
-                                   └→ JWTAuth → /api/v1/* → handlers/ → controllers/ → observer/ (HTTP client) → Observer service
-                                                                                    ↘ opensearch/ (span parsing / enrichment)
+HTTP → RequestLogger → CORS → mux ┬→ /health                             (no auth)
+                                   ├→ /.well-known/oauth-protected-resource (no auth)
+                                   ├→ JWTAuth → /api/v1/*  → handlers/ → controllers/ → observer/ (HTTP client) → Observer service
+                                   │                                                 ↘ opensearch/ (span parsing / enrichment)
+                                   └→ JWTAuth → /mcp, /mcp/ → mcp/tools/ → controllers/ (same as above, no HTTP hop)
 ```
 
-`RequestLogger` and `CORS` wrap the whole server; `JWTAuth` wraps only the `apiMux` mounted at `/api/v1/*` (`main.go`). `/health` is registered on the bare mux and is **unauthenticated**.
+`RequestLogger` and `CORS` wrap the whole server. `JWTAuth` wraps both the `apiMux` mounted at `/api/v1/*` and the `am-obs-mcp` streamable-HTTP MCP server mounted at `/mcp` and `/mcp/` — both on the root mux (`main.go`). `/health` and the well-known route are registered on the bare mux and are **unauthenticated**. Unlike `/api/v1/logs`, `/api/v1/build-logs` and `/api/v1/metrics`, `/mcp` is **not** wrapped by `middleware.RejectPublisherAudience` — publisher-audience tokens may call it.
 
 - **`handlers/`** — parse/validate the request, extract path params, call the controller, write the response. Client-facing errors are generic (`"Failed to retrieve …"`); real detail is logged server-side.
 - **`controllers/`** — orchestration + enrichment. Fetches trace overviews, then fans out to fetch span details and aggregates input/output/token usage.
 - **`observer/`** — the typed HTTP client to the upstream Observer (`QueryTraces`, `QueryTraceSpans`, `GetSpanDetails`), plus auth token management and response→`opensearch.Span` conversion.
 - **`opensearch/`** — pure span-parsing logic. Extracts input/output from spans; branches by vendor (CrewAI via `crewai.*` attributes vs LangChain/Traceloop via `traceloop.entity.*`).
 - **`config/`** — env-var config loading + startup validation.
+- **`mcp/`** — the `am-obs-mcp` streamable-HTTP MCP server (`mcp/setup.go`) and its seven tools (`mcp/tools/`): `get_runtime_logs`, `get_build_logs`, `get_metrics`, `list_traces`, `get_traces`, `get_trace_details`, `get_span_details`. Tool handlers call `controllers.TracingController`/`controllers.ObservabilityController` directly — no HTTP hop, no claims parsing. Every tool takes an explicit, required `organization` input except `get_span_details` (its controller call is scoped by trace/span ID alone).
 
 ## File map
 
@@ -31,10 +34,14 @@ HTTP → RequestLogger → CORS → mux ┬→ /health              (no auth)
 | Span parsing / vendor branches | `opensearch/process.go`, `opensearch/crewai_process.go` |
 | JWT / CORS / request logging | `middleware/` |
 | Config + validation | `config/config.go` |
+| MCP server + route mount | `mcp/setup.go` |
+| MCP tool definitions/handlers | `mcp/tools/{tools,observability,traces}.go` |
 
 ## Routing
 
 Plain `http.ServeMux` in `main.go`. Dynamic segments (`/api/v1/traces/{traceId}/spans/{spanId}`) are parsed **by hand** with `strings.CutPrefix`/`Index` in the handlers — `pathSegment()` rejects any segment containing `/` (path-traversal guard). When you add a nested route, extend that manual dispatch; there is no path-param router.
+
+`/mcp` and `/mcp/` are registered on the same root mux via `mcp.RegisterRoute(mux, deps, middleware.JWTAuth(cfg.Auth))` — a streamable-HTTP MCP server (`github.com/modelcontextprotocol/go-sdk`), not a REST route, so it isn't in `docs/openapi.yaml`. Tool input schemas are auto-inferred from the Go input structs (`jsonschema` struct tags): a field is schema-required unless it has `,omitempty`.
 
 Middleware wraps in this order (outer→inner): `RequestLogger → CORS → JWTAuth → handler`. Keep it — CORS must see the request before auth rejects it, and the logger must wrap both.
 
