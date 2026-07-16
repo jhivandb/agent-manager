@@ -16,20 +16,29 @@
  * under the License.
  */
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useRuntimeConfig, setObserverBaseUrl } from "@agent-management-platform/api-client";
 import { FullPageLoader } from "@agent-management-platform/views";
 
 export function RuntimeConfigProvider({ children }: { children: React.ReactNode }) {
   const { data, isLoading } = useRuntimeConfig();
+  // Children may read isObserverConfigured() synchronously in their render
+  // body, so the store must be populated before they ever mount. Gating on
+  // this flag (set in the same effect that writes the store) guarantees that;
+  // gating on isLoading alone would let children's first render race ahead of
+  // the effect and see the unset store.
+  const [synced, setSynced] = useState(false);
 
   useEffect(() => {
-    setObserverBaseUrl(data?.observerBaseUrl);
-  }, [data?.observerBaseUrl]);
+    if (!isLoading) {
+      setObserverBaseUrl(data?.observerBaseUrl);
+      setSynced(true);
+    }
+  }, [isLoading, data?.observerBaseUrl]);
 
   // Gate rendering until discovery settles so observability pages never
   // render against a transiently-empty observer URL. On error we proceed
   // unconfigured — pages show the "observer not configured" state.
-  if (isLoading) return <FullPageLoader />;
+  if (!synced) return <FullPageLoader />;
   return <>{children}</>;
 }
