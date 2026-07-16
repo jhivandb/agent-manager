@@ -107,7 +107,7 @@ flowchart TB
             api["amp-api"]
             thunder["Thunder OAuth"]
             cp["Gateway control plane<br/>(external AI gateways)"]
-            observer["Traces Observer"]
+            observer["Agent Manager Observer"]
             gw["AI Gateway<br/>OTel ingest · LLM proxy"]
             agents["Deployed agents"]
         end
@@ -127,14 +127,14 @@ flowchart TB
     dpgw --> agents
 ```
 
-Every public hostname resolves to the VM's IP (via sslip.io) and arrives at Caddy on `:443`; Caddy terminates TLS and reverse-proxies to the matching loopback port. The Agent Manager services are ClusterIP inside the cluster: Caddy forwards the console, API, Thunder, and gateway-control-plane hosts to the OpenChoreo control-plane kgateway (loopback `:8080`), the traces observer host to the observability-plane kgateway (loopback `:11080`), and the OTel-ingest host plus the deployed-agent wildcard to the data-plane kgateway (loopback `:19080`) — each gateway routes by the preserved `Host` header. Certificates are obtained over that same `:443` using the TLS-ALPN-01 challenge, so no inbound port 80 is needed. The deployed-agent wildcard gets its certificate on demand at first request.
+Every public hostname resolves to the VM's IP (via sslip.io) and arrives at Caddy on `:443`; Caddy terminates TLS and reverse-proxies to the matching loopback port. The Agent Manager services are ClusterIP inside the cluster: Caddy forwards the console, API, Thunder, and gateway-control-plane hosts to the OpenChoreo control-plane kgateway (loopback `:8080`), the observer host to the observability-plane kgateway (loopback `:11080`), and the OTel-ingest host plus the deployed-agent wildcard to the data-plane kgateway (loopback `:19080`) — each gateway routes by the preserved `Host` header. Certificates are obtained over that same `:443` using the TLS-ALPN-01 challenge, so no inbound port 80 is needed. The deployed-agent wildcard gets its certificate on demand at first request.
 
 | URL | Purpose |
 |---|---|
 | `https://console.amp.<IP>.sslip.io` | Console UI |
 | `https://api.amp.<IP>.sslip.io` | Agent Manager API (used by `amctl`) |
 | `https://thunder.amp.<IP>.sslip.io` | Thunder OAuth (login) |
-| `https://observer.amp.<IP>.sslip.io` | Traces Observer |
+| `https://observer.amp.<IP>.sslip.io` | Agent Manager Observer |
 | `https://gateway.amp.<IP>.sslip.io/otel` | OTel trace ingest from deployed agents |
 | `https://<org>-<project>.agents.<IP>.sslip.io/...` | Deployed-agent invocation endpoints (one wildcard host per org/project) |
 | `https://cp.amp.<IP>.sslip.io` | Gateway control plane; connect external gateways here (on by default) |

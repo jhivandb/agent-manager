@@ -487,7 +487,7 @@ else
 fi
 
 # ============================================================================
-# Step 6: Install Observability Extension (Traces Observer Service)
+# Step 6: Install Observability Extension (Agent Manager Observer)
 # ============================================================================
 echo "6️⃣  Observability Extension (Agent Manager Observer)"
 if ! helm status wso2-amp-observability-extension -n openchoreo-observability-plane &>/dev/null; then

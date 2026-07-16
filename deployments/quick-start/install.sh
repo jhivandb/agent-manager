@@ -125,7 +125,7 @@ check_required_ports() {
     #         external AI gateway control plane)
     # 8443  - Control Plane Gateway HTTPS
     # 10082 - Container Registry (Workflow Plane)
-    # 11080 - Observability Plane Gateway HTTP (Traces Observer, Observer API)
+    # 11080 - Observability Plane Gateway HTTP (Agent Manager Observer, Observer API)
     # 11082 - OpenSearch API
     # 11085 - OpenSearch HTTPS
     # 19080 - Data Plane Gateway HTTP (agent workloads, OTLP /otel)
@@ -1551,7 +1551,7 @@ fi
 echo ""
 
 # Install observability extension
-log_info "Installing Observability Extension (Traces Observer)..."
+log_info "Installing Observability Extension (Agent Manager Observer)..."
 if ! install_observability_extension; then
     log_warning "Observability Extension installation failed (non-fatal)"
     echo "The platform is installed but observability features may not work."

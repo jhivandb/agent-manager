@@ -18,7 +18,7 @@ Agent Manager is a two-layer system installed in two phases:
 
 - **Phase 1 — OpenChoreo (base layer):** [OpenChoreo](https://openchoreo.dev) is an open-source platform that provides the Kubernetes infrastructure Agent Manager runs on. It consists of four planes: a **Control Plane** for API and configuration, a **Data Plane** for running workloads and gateways, a **Workflow Plane** for builds and CI pipelines, and an **Observability Plane** for traces, logs, and metrics via OpenSearch.
 
-- **Phase 2 — Agent Manager :** The AI agent management platform installed on top of OpenChoreo. It includes **Thunder** (identity provider — installed with OpenChoreo since it provides JWT validation for all planes), the **Console** (web UI), **AMP API** (backend), **AI Gateway**, **PostgreSQL** (database), **Secrets Extension** (OpenBao for runtime secret injection), **Traces Observer** (trace querying), and **Evaluation Engine** (automated agent evaluations).
+- **Phase 2 — Agent Manager :** The AI agent management platform installed on top of OpenChoreo. It includes **Thunder** (identity provider — installed with OpenChoreo since it provides JWT validation for all planes), the **Console** (web UI), **AMP API** (backend), **AI Gateway**, **PostgreSQL** (database), **Secrets Extension** (OpenBao for runtime secret injection), **Agent Manager Observer** (traces, logs, and metrics), and **Evaluation Engine** (automated agent evaluations).
 
 This guide installs both layers on a single-node k3d cluster on your local machine.
 
@@ -65,7 +65,7 @@ Prefix the cluster creation command in Step 1 with `K3D_FIX_DNS=0`.
 
 ### Required Ports
 
-The following host ports must be free before installation. The Agent Manager services do not need host ports of their own: the Console and API are served through the Control Plane gateway (8080), the Traces Observer through the Observability Plane gateway (11080), and trace ingestion through the Data Plane gateway (19080).
+The following host ports must be free before installation. The Agent Manager services do not need host ports of their own: the Console and API are served through the Control Plane gateway (8080), the Agent Manager Observer through the Observability Plane gateway (11080), and trace ingestion through the Data Plane gateway (19080).
 
 | Port | Purpose |
 |------|---------|
@@ -75,7 +75,7 @@ The following host ports must be free before installation. The Agent Manager ser
 | 19080 | Data Plane Gateway (HTTP) — deployed agents, OTLP `/otel` ingest |
 | 19443 | Data Plane Gateway (HTTPS) |
 | 10082 | Container Registry (Workflow Plane) |
-| 11080 | Observability Plane Gateway (HTTP) — Traces Observer, Observer API |
+| 11080 | Observability Plane Gateway (HTTP) — Agent Manager Observer, Observer API |
 | 11082 | OpenSearch API |
 | 11085 | OpenSearch HTTPS |
 
@@ -251,7 +251,7 @@ export INSTRUMENTATION_URL="http://default-default.gateway.localhost:19080/otel"
 ```
 
 :::info
-In k3d, every management endpoint is accessed through a plane gateway using a hostname: Thunder, the Console, and the API via the Control Plane kgateway on port 8080 (`thunder.amp.localhost`, `console.amp.localhost`, `api.amp.localhost`), and the Traces Observer via the Observability Plane kgateway on port 11080 (`traces.amp.localhost`). These match the chart defaults and the Control Plane / Observability Plane OIDC configuration. No port-forwarding is needed; `*.localhost` names resolve to the loopback address in browsers and curl.
+In k3d, every management endpoint is accessed through a plane gateway using a hostname: Thunder, the Console, and the API via the Control Plane kgateway on port 8080 (`thunder.amp.localhost`, `console.amp.localhost`, `api.amp.localhost`), and the Agent Manager Observer via the Observability Plane kgateway on port 11080 (`traces.amp.localhost`). These match the chart defaults and the Control Plane / Observability Plane OIDC configuration. No port-forwarding is needed; `*.localhost` names resolve to the loopback address in browsers and curl.
 :::
 
 ### Step 6: Install Thunder Extension (Identity Provider)
@@ -661,7 +661,7 @@ helm list -A | grep -E 'openchoreo|amp|gateway'
 |---------|-----|
 | **Agent Manager Console** | [http://console.amp.localhost:8080](http://console.amp.localhost:8080) |
 | **Agent Manager API** | [http://api.amp.localhost:8080](http://api.amp.localhost:8080) |
-| **Traces Observer** | [http://traces.amp.localhost:11080](http://traces.amp.localhost:11080) |
+| **Agent Manager Observer** | [http://traces.amp.localhost:11080](http://traces.amp.localhost:11080) |
 | **OTLP trace ingest (HTTP)** | http://default-default.gateway.localhost:19080/otel |
 | **OTLP trace ingest (HTTPS)** | https://default-default.gateway.localhost:19443/otel |
 

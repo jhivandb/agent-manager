@@ -106,7 +106,7 @@ export function isObserverConfigured(): boolean {
 }
 
 /**
- * Same as httpGET but calls the traces-observer-service directly using the
+ * Same as httpGET but calls the observer service directly using the
  * observer base URL discovered at runtime via GET /api/v1/config.
  * Throws if the observer is not configured — the agent-manager no longer
  * serves traces routes, so silently falling back would produce opaque 404s.

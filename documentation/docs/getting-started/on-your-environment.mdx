@@ -20,7 +20,7 @@ Agent Manager is a two-layer system installed in two phases:
 
 - **Phase 1 — OpenChoreo (base layer):** [OpenChoreo](https://openchoreo.dev) is an open-source platform that provides the Kubernetes infrastructure Agent Manager runs on. It consists of four planes: a **Control Plane** for API and configuration, a **Data Plane** for running workloads and gateways, a **Workflow Plane** for builds and CI pipelines, and an **Observability Plane** for traces, logs, and metrics via OpenSearch.
 
-- **Phase 2 — Agent Manager :** The AI agent management platform installed on top of OpenChoreo. It includes the **Console** (web UI), **AMP API** (backend), **AI Gateway**, **PostgreSQL** (database), **Secrets Extension** (OpenBao for runtime secret injection), **Traces Observer** (trace querying), and **Evaluation Engine** (automated agent evaluations).
+- **Phase 2 — Agent Manager :** The AI agent management platform installed on top of OpenChoreo. It includes the **Console** (web UI), **AMP API** (backend), **AI Gateway**, **PostgreSQL** (database), **Secrets Extension** (OpenBao for runtime secret injection), **Agent Manager Observer** (traces, logs, and metrics), and **Evaluation Engine** (automated agent evaluations).
 
 This guide installs both layers on your existing Kubernetes cluster, production-first: a real domain, trusted TLS certificates issued automatically by cert-manager, and every management surface served through the three OpenChoreo plane gateways — the only LoadBalancers the platform needs.
 
@@ -85,7 +85,7 @@ Pick a base domain you control (a delegated subdomain like `amp.yourdomain.com` 
 | `thunder.<base>` | Thunder OAuth login (+ per-environment `<org>-<env>.thunder.<base>`) | control-plane gateway LB |
 | `cp.<base>` | Gateway control plane (external AI gateways, optional) | control-plane gateway LB |
 | `api.<base>` | OpenChoreo API | control-plane gateway LB |
-| `traces.<base>` | Traces Observer | observability-plane gateway LB |
+| `traces.<base>` | Agent Manager Observer | observability-plane gateway LB |
 | `*.agents.<base>` | Deployed-agent invocation endpoints (wildcard) | data-plane gateway LB |
 
 Concretely: `console`/`api-amp`/`thunder`/`cp`/`api` all point at the control-plane gateway (five records, or a single `*.<base>` wildcard), `traces` points at the observability-plane gateway, and `*.agents.<base>` plus the `agents.<base>` apex point at the data-plane gateway. [Step 10](#step-10-publish-dns-records) lists the exact records once the LoadBalancer addresses exist.
@@ -989,7 +989,7 @@ Everything is hostname-routed through the three plane gateway LoadBalancers, ove
 | **Agent Manager Console** | `https://${CONSOLE_PUBLIC_HOST}` |
 | **Agent Manager API** | `https://${API_PUBLIC_HOST}` |
 | **Thunder (OAuth login)** | `https://${THUNDER_PUBLIC_HOST}` |
-| **Traces Observer** | `https://${OBS_API_PUBLIC_HOST}` |
+| **Agent Manager Observer** | `https://${OBS_API_PUBLIC_HOST}` |
 | **OpenChoreo API** | `https://api.${BASE_DOMAIN}` |
 | **Gateway control plane** | `https://${CP_GW_PUBLIC_HOST}` |
 

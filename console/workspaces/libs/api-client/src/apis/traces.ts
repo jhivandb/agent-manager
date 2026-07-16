@@ -24,8 +24,8 @@ import type {
 } from "@agent-management-platform/types";
 import { httpGETObserver } from "../utils";
 
-// Params for direct traces-observer-service calls.
-export interface TraceObserverListParams {
+// Params for direct observer service calls.
+export interface ObserverTraceListParams {
   organization: string;
   project: string;
   component: string;
@@ -36,7 +36,7 @@ export interface TraceObserverListParams {
   sortOrder?: 'asc' | 'desc';
 }
 
-export interface TraceObserverSpanListParams {
+export interface ObserverTraceSpanListParams {
   traceId: string;
   organization: string;
   project?: string;
@@ -48,7 +48,7 @@ export interface TraceObserverSpanListParams {
   sortOrder?: "asc" | "desc";
 }
 
-export interface TraceObserverSpanDetailParams {
+export interface ObserverTraceSpanDetailParams {
   traceId: string;
   spanId: string;
 }
@@ -58,7 +58,7 @@ function assertRequired(value: string, field: string): void {
 }
 
 export async function getTraceList(
-  params: TraceObserverListParams,
+  params: ObserverTraceListParams,
   getToken?: () => Promise<string>
 ): Promise<TraceListResponse> {
   const {
@@ -96,7 +96,7 @@ export async function getTraceList(
 }
 
 export async function exportTraces(
-  params: TraceObserverListParams,
+  params: ObserverTraceListParams,
   getToken?: () => Promise<string>
 ): Promise<TraceExportResponse> {
   const {
@@ -134,7 +134,7 @@ export async function exportTraces(
 }
 
 export async function listTraceSpans(
-  params: TraceObserverSpanListParams,
+  params: ObserverTraceSpanListParams,
   getToken?: () => Promise<string>,
 ): Promise<TraceSpanSummaryListResponse> {
   const {
@@ -175,7 +175,7 @@ export async function listTraceSpans(
 }
 
 export async function getSpanDetail(
-  params: TraceObserverSpanDetailParams,
+  params: ObserverTraceSpanDetailParams,
   getToken?: () => Promise<string>,
 ): Promise<Span> {
   const { traceId, spanId } = params;

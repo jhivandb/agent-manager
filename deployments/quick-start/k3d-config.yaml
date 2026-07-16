@@ -8,7 +8,7 @@ agents: 0
 kubeAPI:
   hostPort: "6550"
 # Single cluster mode exposes all plane port ranges for consistency with multi-cluster setup.
-# AMP services (Console, API, Traces Observer) ride the plane gateways below —
+# AMP services (Console, API, Agent Manager Observer) ride the plane gateways below —
 # they have no host ports of their own.
 ports:
   # Control Plane uses port range 8xxx

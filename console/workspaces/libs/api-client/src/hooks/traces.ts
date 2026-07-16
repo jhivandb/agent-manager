@@ -28,7 +28,7 @@ import {
   exportTraces,
   getSpanDetail,
   listTraceSpans,
-  type TraceObserverListParams,
+  type ObserverTraceListParams,
 } from "../apis/traces";
 import { getAgentTraceScores } from "../apis/monitors";
 import { useAuthHooks } from "@agent-management-platform/auth";
@@ -472,7 +472,7 @@ export function useSpanDetail(
 }
 
 export type ExportTracesParams = Pick<
-  TraceObserverListParams,
+  ObserverTraceListParams,
   "startTime" | "endTime" | "limit" | "sortOrder"
 > & {
   organization: string;

@@ -119,7 +119,7 @@ build_gateway_helm_args() {
 }
 
 # build_observability_helm_args <ip>
-# Prints OBSERVABILITY_HELM_ARGS tokens. The traces observer validates the same
+# Prints OBSERVABILITY_HELM_ARGS tokens. The observer validates the same
 # user token (its `iss` must match), so the console's traces page 401s until its
 # issuer is the public Thunder URL too. jwksUrl stays on the in-cluster service.
 # observability_helm_args — hostname-driven core. Reads AMP_HOST_THUNDER and
@@ -393,10 +393,10 @@ caddyfile() {
   printf '%s*.%s%s {\n%s\treverse_proxy 127.0.0.1:8080\n}\n\n' \
     "$([[ "$scheme" == http ]] && printf 'http://')" "$AMP_HOST_THUNDER" "$addr_suffix" "$agent_tls"
 
-  # Traces observer is ClusterIP behind the OC observability-plane kgateway
+  # Observer is ClusterIP behind the OC observability-plane kgateway
   # (11080), host-routed the same way (observability_helm_args sets the route
   # hostname).
-  _site "$AMP_HOST_OBSERVER" 11080  # traces observer (OC kgateway, host-routed)
+  _site "$AMP_HOST_OBSERVER" 11080  # observer (OC kgateway, host-routed)
   # The api-platform gateway runtime is a ClusterIP service (ports 22893/22894 are
   # not node-published), so it is reached through the kgateway data plane on 19080 —
   # which has a catch-all HTTPRoute for AMP_HOST_GATEWAY that forwards to the runtime

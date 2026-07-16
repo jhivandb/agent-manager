@@ -44,7 +44,7 @@ func (h *ObservabilityHandler) resolveNamespace(ctx context.Context, _ string) (
 
 func (h *ObservabilityHandler) ListTraces(ctx context.Context, ouID string, projectName string, agentName string, environment string, startTime string, endTime string, sortOrder string, limit int) (map[string]any, error) {
 	if h.traceClient == nil {
-		return nil, fmt.Errorf("trace observer client is not configured")
+		return nil, fmt.Errorf("observer client is not configured")
 	}
 
 	namespace, err := h.resolveNamespace(ctx, ouID)
@@ -68,7 +68,7 @@ func (h *ObservabilityHandler) ListTraces(ctx context.Context, ouID string, proj
 
 func (h *ObservabilityHandler) ExportTraces(ctx context.Context, ouID string, projectName string, agentName string, environment string, startTime string, endTime string, sortOrder string, limit int) (map[string]any, error) {
 	if h.traceClient == nil {
-		return nil, fmt.Errorf("trace observer client is not configured")
+		return nil, fmt.Errorf("observer client is not configured")
 	}
 
 	namespace, err := h.resolveNamespace(ctx, ouID)
@@ -92,7 +92,7 @@ func (h *ObservabilityHandler) ExportTraces(ctx context.Context, ouID string, pr
 
 func (h *ObservabilityHandler) GetTraceDetails(ctx context.Context, ouID string, projectName string, agentName string, traceID string, environment string, startTime string, endTime string, limit int) (map[string]any, error) {
 	if h.traceClient == nil {
-		return nil, fmt.Errorf("trace observer client is not configured")
+		return nil, fmt.Errorf("observer client is not configured")
 	}
 
 	namespace, err := h.resolveNamespace(ctx, ouID)
@@ -116,7 +116,7 @@ func (h *ObservabilityHandler) GetTraceDetails(ctx context.Context, ouID string,
 
 func (h *ObservabilityHandler) GetSpanDetails(ctx context.Context, ouID string, projectName string, agentName string, traceID string, spanID string, environment string) (map[string]any, error) {
 	if h.traceClient == nil {
-		return nil, fmt.Errorf("trace observer client is not configured")
+		return nil, fmt.Errorf("observer client is not configured")
 	}
 
 	namespace, err := h.resolveNamespace(ctx, ouID)
