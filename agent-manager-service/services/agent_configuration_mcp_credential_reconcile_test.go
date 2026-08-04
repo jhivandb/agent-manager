@@ -335,13 +335,23 @@ func TestReconcileMCPMappingCredentials_EnableAlreadyProvisionedReportsUnchanged
 }
 
 // TestReconcileMCPMappingCredentials_DisableNothingProvisionedReportsUnchanged proves that
-// disabling api-key security on a mapping with no provisioned key does not report a change —
-// this is the case that would otherwise roll every bound agent's pods on an unrelated proxy
-// edit (e.g. renaming a tool) once security was already off for that environment.
+// disabling api-key security on a mapping with no provisioned key does not report a change and
+// removes no env var — this is the case that would otherwise roll every bound agent's pods on
+// an unrelated save once security was already off for that environment.
 func TestReconcileMCPMappingCredentials_DisableNothingProvisionedReportsUnchanged(t *testing.T) {
 	secretRefWrites := 0
 	svc := &agentConfigurationService{
 		logger: slog.Default(),
+		ocClient: &clientmocks.OpenChoreoClientMock{
+			RemoveReleaseBindingEnvVarsFunc: func(context.Context, string, string, string, string, []string) error {
+				t.Fatal("must not rewrite the ReleaseBinding when nothing was ever provisioned")
+				return nil
+			},
+			RemoveComponentEnvironmentVariablesFunc: func(context.Context, string, string, string, []string) error {
+				t.Fatal("must not rewrite the Component env vars when nothing was ever provisioned")
+				return nil
+			},
+		},
 		envVariableRepo: &repomocks.AgentEnvConfigVariableRepositoryMock{
 			ListByConfigAndEnvFunc: func(context.Context, uuid.UUID, uuid.UUID) ([]models.AgentEnvConfigVariable, error) {
 				return nil, nil
@@ -366,7 +376,8 @@ func TestReconcileMCPMappingCredentials_DisableNothingProvisionedReportsUnchange
 	}
 
 	changed, err := svc.reconcileMCPMappingCredentials(context.Background(), testCredConfig(),
-		testCredMappingWithProxy(identityOnlyProxy()), identityOnlyProxy(), "dev", "org-1", nil, false, "")
+		testCredMappingWithProxy(identityOnlyProxy()), identityOnlyProxy(), "dev", "org-1",
+		testCredEnvTemplates(), false, "dev")
 
 	require.NoError(t, err)
 	assert.False(t, changed, "clearing an already-empty secret_reference is a no-op and must not roll pods")
@@ -756,6 +767,61 @@ func TestReconcileOneMCPMappingCredential_AssertEnvVarsReInjectsWithoutCredentia
 	require.NoError(t, err)
 	assert.False(t, changed, "asserting env vars is not a credential change")
 	assertInjectedAPIKeyReferencesSecret(t, injectedVars)
+}
+
+// TestReconcileOneMCPMappingCredential_AssertEnvVarsRemovesAPIKeyVarInIdentityMode is the
+// disable-direction mirror of the test above, and the recovery the design's assertion exists
+// for: a dropped best-effort removal leaves the pod holding a SecretKeyRef to a deleted secret,
+// which nothing else repairs. Asserting absence must still write no credential state.
+func TestReconcileOneMCPMappingCredential_AssertEnvVarsRemovesAPIKeyVarInIdentityMode(t *testing.T) {
+	var removedEnvKeys []string
+
+	svc := &agentConfigurationService{
+		logger: discardLogger(),
+		envVariableRepo: &repomocks.AgentEnvConfigVariableRepositoryMock{
+			ListByConfigAndEnvFunc: func(context.Context, uuid.UUID, uuid.UUID) ([]models.AgentEnvConfigVariable, error) {
+				// No secret reference: nothing is provisioned, which matches OAuth mode.
+				return []models.AgentEnvConfigVariable{{
+					ConfigUUID:      testCredConfigUUID,
+					EnvironmentUUID: testCredEnvUUID,
+					VariableName:    "BOOKING_API_KEY",
+					VariableKey:     "apikey",
+					SecretReference: "",
+				}}, nil
+			},
+			UpdateAPIKeySecretReferenceFunc: func(context.Context, uuid.UUID, uuid.UUID, string) (int64, error) {
+				t.Fatal("must not write secret_reference when the mapping is already converged")
+				return 0, nil
+			},
+		},
+		apiKeyBroadcaster: &apiKeyBroadcaster{
+			apiKeyRepo: &repomocks.APIKeyRepositoryMock{
+				GetByArtifactAndNameFunc: func(string, string) (*models.StoredAPIKey, error) {
+					return nil, gorm.ErrRecordNotFound
+				},
+				ListByArtifactFunc: func(context.Context, string) ([]models.StoredAPIKey, error) {
+					t.Fatal("must not touch the gateway when the mapping is already converged")
+					return nil, nil
+				},
+			},
+		},
+		ocClient: &clientmocks.OpenChoreoClientMock{
+			RemoveReleaseBindingEnvVarsFunc: func(_ context.Context, _, _, _, _ string, envVarKeys []string) error {
+				removedEnvKeys = append(removedEnvKeys, envVarKeys...)
+				return nil
+			},
+			RemoveComponentEnvironmentVariablesFunc: func(context.Context, string, string, string, []string) error {
+				return nil
+			},
+		},
+	}
+
+	changed, err := svc.reconcileOneMCPMappingCredential(context.Background(), testCredConfig(), testCredMapping(),
+		identityOnlyProxy(), "dev", "org-1", testCredEnvTemplates(), false, "dev", true)
+
+	require.NoError(t, err)
+	assert.False(t, changed, "asserting env vars is not a credential change")
+	assert.Equal(t, []string{"BOOKING_API_KEY"}, removedEnvKeys, "only the api-key variable is removed, never the URL")
 }
 
 // convergedAPIKeyModeService wires a mapping that is already converged in api-key mode: the

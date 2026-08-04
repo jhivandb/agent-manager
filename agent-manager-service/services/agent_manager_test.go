@@ -485,16 +485,74 @@ func TestRevokeAgentIdentitySecret_PipelineLookupFails_StillRevokesConservativel
 }
 
 // stubAgentConfigurationServiceForDeploy implements AgentConfigurationService by embedding
-// the (nil) interface and overriding only ReconcileMCPCredentialsForAgentEnv — the deploy
-// hook's one call into this dependency. Deploy tests using this stub keep
-// GetComponentConfigurations empty, so getSystemManagedEnvVars short-circuits before it would
-// need any other method.
+// the (nil) interface and overriding only the methods the deploy path calls into it. Deploy
+// tests that keep GetComponentConfigurations empty never reach
+// ListAgentLLMConfigSecretReferences, since getSystemManagedEnvVars short-circuits first.
 type stubAgentConfigurationServiceForDeploy struct {
 	AgentConfigurationService
+	// callOrder records the sequence of stub calls DeployAgent makes, so a test can prove the
+	// MCP credential reconcile runs before the system-managed env var read — the reverse order
+	// would preserve env vars built from pre-reconcile rows.
+	callOrder *[]string
 }
 
 func (s *stubAgentConfigurationServiceForDeploy) ReconcileMCPCredentialsForAgentEnv(context.Context, string, string, string, string) error {
+	if s.callOrder != nil {
+		*s.callOrder = append(*s.callOrder, "reconcileMCPCredentials")
+	}
 	return nil
+}
+
+func (s *stubAgentConfigurationServiceForDeploy) ListAgentLLMConfigSecretReferences(context.Context, string, string, string) (map[string]struct{}, error) {
+	if s.callOrder != nil {
+		*s.callOrder = append(*s.callOrder, "listAgentLLMConfigSecretReferences")
+	}
+	return map[string]struct{}{}, nil
+}
+
+// TestDeployAgent_ReconcilesMCPCredentialsBeforeReadingSystemManagedEnvVars pins the hook's
+// position, which is otherwise protected only by a comment. GetComponentConfigurations must be
+// non-empty or getSystemManagedEnvVars short-circuits before it reads anything.
+func TestDeployAgent_ReconcilesMCPCredentialsBeforeReadingSystemManagedEnvVars(t *testing.T) {
+	var order []string
+	ocClient := &clientmocks.OpenChoreoClientMock{
+		GetOrganizationFunc: func(_ context.Context, name string) (*models.OrganizationResponse, error) {
+			return &models.OrganizationResponse{Name: name}, nil
+		},
+		GetComponentFunc: func(_ context.Context, _, _, _ string) (*models.AgentResponse, error) {
+			return &models.AgentResponse{Provisioning: models.Provisioning{Type: string(utils.InternalAgent)}}, nil
+		},
+		GetProjectDeploymentPipelineFunc: func(_ context.Context, _, _ string) (*models.DeploymentPipelineResponse, error) {
+			return &models.DeploymentPipelineResponse{PromotionPaths: []models.PromotionPath{
+				{SourceEnvironmentRef: "dev", TargetEnvironmentRefs: []models.TargetEnvironmentRef{{Name: "staging"}}},
+			}}, nil
+		},
+		GetComponentConfigurationsFunc: func(context.Context, string, string, string, string) ([]models.EnvVars, error) {
+			return []models.EnvVars{{Key: "OPENAI_API_KEY", IsSensitive: true, SecretRef: "llm-secret", SecretKey: "apiKey"}}, nil
+		},
+		DeployFunc: func(context.Context, string, string, string, client.DeployRequest) error {
+			return nil
+		},
+	}
+	// Aborting on the identity build keeps this test focused: both reads under test already
+	// happened by then, and nothing past them is this test's business.
+	injector := &agentIdentityInjectorStub{
+		EnvVarsForEnvironmentFunc: func(context.Context, string, string, string, string) ([]client.EnvVar, error) {
+			return nil, errors.New("secret backend unavailable")
+		},
+	}
+	s := &agentManagerService{
+		ocClient:                  ocClient,
+		agentIdentityInjection:    injector,
+		agentConfigurationService: &stubAgentConfigurationServiceForDeploy{callOrder: &order},
+		logger:                    discardLogger(),
+	}
+
+	_, err := s.DeployAgent(context.Background(), "acme", "proj1", "my-agent", &spec.DeployAgentRequest{ImageId: "registry.example.com/my-agent:v1"})
+
+	require.Error(t, err)
+	assert.Equal(t, []string{"reconcileMCPCredentials", "listAgentLLMConfigSecretReferences"}, order,
+		"the MCP credential reconcile must precede the system-managed env var read")
 }
 
 // TestDeployAgent_IdentityInjectionError_AbortsDeploy guards that a failure
@@ -605,6 +663,9 @@ func (s *stubAgentConfigurationServiceForPromote) ListSystemManagedEnvVarKeys(ct
 }
 
 func (s *stubAgentConfigurationServiceForPromote) BuildSystemManagedEnvVarsFromConfig(ctx context.Context, agentID, ouID, projectName, environmentName string) ([]client.EnvVar, error) {
+	if s.callOrder != nil {
+		*s.callOrder = append(*s.callOrder, "buildSystemManagedVars")
+	}
 	return s.SystemVarsFunc(ctx, agentID, ouID, projectName, environmentName)
 }
 
@@ -750,6 +811,14 @@ func TestPromoteAgent_TargetIdentityReady_PromotesWithTargetOnlyCredentials(t *t
 	agentConfigSvc, ok := s.agentConfigurationService.(*stubAgentConfigurationServiceForPromote)
 	require.True(t, ok)
 	agentConfigSvc.callOrder = &order
+	// PromoteAgent only builds the target's system-managed vars when it has keys, so give it
+	// some — otherwise the ordering assertion below never sees that read at all.
+	agentConfigSvc.SystemKeysFunc = func(_ context.Context, _, _, _, _ string) (map[string]bool, error) {
+		return map[string]bool{"OPENAI_API_KEY": true}, nil
+	}
+	agentConfigSvc.SystemVarsFunc = func(_ context.Context, _, _, _, _ string) ([]client.EnvVar, error) {
+		return []client.EnvVar{{Key: "OPENAI_API_KEY", Value: "target-key"}}, nil
+	}
 
 	var capturedOverrides []client.EnvVar
 	ocMock, ok := s.ocClient.(*clientmocks.OpenChoreoClientMock)
@@ -781,6 +850,8 @@ func TestPromoteAgent_TargetIdentityReady_PromotesWithTargetOnlyCredentials(t *t
 	assert.Equal(t, "reconcileMCPCredentials", order[0],
 		"the MCP credential reconcile must precede the system-managed env var reads")
 	assert.Contains(t, order, "listSystemManagedKeys")
+	assert.Contains(t, order, "buildSystemManagedVars",
+		"both system-managed reads must run, or this ordering assertion is vacuous")
 }
 
 func TestPromoteAgent_IdentityBuildError_AbortsBeforePromoting(t *testing.T) {
