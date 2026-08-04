@@ -32,6 +32,7 @@ import (
 	"github.com/wso2/agent-manager/agent-manager-service/clients/secretmanagersvc"
 	"github.com/wso2/agent-manager/agent-manager-service/models"
 	"github.com/wso2/agent-manager/agent-manager-service/repositories/repomocks"
+	"github.com/wso2/agent-manager/agent-manager-service/utils"
 )
 
 // mcpCredentialTestIDs are the fixed identifiers every test in this file shares, so
@@ -767,14 +768,11 @@ func convergedAPIKeyModeService(t *testing.T, ocClient client.OpenChoreoClient) 
 	return &agentConfigurationService{
 		logger: discardLogger(),
 		envVariableRepo: &repomocks.AgentEnvConfigVariableRepositoryMock{
+			ListByConfigFunc: func(context.Context, uuid.UUID) ([]models.AgentEnvConfigVariable, error) {
+				return provisionedAPIKeyVarRows(), nil
+			},
 			ListByConfigAndEnvFunc: func(context.Context, uuid.UUID, uuid.UUID) ([]models.AgentEnvConfigVariable, error) {
-				return []models.AgentEnvConfigVariable{{
-					ConfigUUID:      testCredConfigUUID,
-					EnvironmentUUID: testCredEnvUUID,
-					VariableName:    "BOOKING_API_KEY",
-					VariableKey:     "apikey",
-					SecretReference: "booking-proxy-secret",
-				}}, nil
+				return provisionedAPIKeyVarRows(), nil
 			},
 			UpdateAPIKeySecretReferenceFunc: func(context.Context, uuid.UUID, uuid.UUID, string) (int64, error) {
 				t.Fatal("must not write secret_reference when the mapping is already converged")
@@ -813,4 +811,231 @@ func convergedAPIKeyModeService(t *testing.T, ocClient client.OpenChoreoClient) 
 		},
 		ocClient: ocClient,
 	}
+}
+
+// TestReconcileMCPCredentialsForProxy_ContinuesAfterOneConfigFails proves one broken agent
+// cannot stop the rest — the proxy-update trigger is best-effort and must cover every binding.
+func TestReconcileMCPCredentialsForProxy_ContinuesAfterOneConfigFails(t *testing.T) {
+	otherConfigUUID := uuid.MustParse("55555555-5555-5555-5555-555555555555")
+	seen := map[uuid.UUID]bool{}
+
+	svc := &agentConfigurationService{
+		logger: slog.Default(),
+		mcpProxyRepo: &repomocks.MCPProxyRepositoryMock{
+			GetByUUIDFunc: func(context.Context, string, string) (*models.MCPProxy, error) {
+				return identityOnlyProxy(), nil
+			},
+		},
+		envMCPMappingRepo: &repomocks.EnvAgentMCPMappingRepositoryMock{
+			ListByMCPProxyFunc: func(context.Context, uuid.UUID) ([]models.EnvAgentMCPMapping, error) {
+				first := *testCredMapping()
+				second := *testCredMapping()
+				second.ConfigUUID = otherConfigUUID
+				return []models.EnvAgentMCPMapping{first, second}, nil
+			},
+		},
+		agentConfigRepo: &repomocks.AgentConfigurationRepositoryMock{
+			GetByUUIDFunc: func(_ context.Context, configUUID uuid.UUID, _ string) (*models.AgentConfiguration, error) {
+				seen[configUUID] = true
+				if configUUID == testCredConfigUUID {
+					return nil, errors.New("config vanished")
+				}
+				return testCredConfig(), nil
+			},
+		},
+		infraResourceManager: &infraResourceManagerStubForScopeRefresh{
+			ListOrgEnvironmentsFunc: func(context.Context, string) ([]*models.EnvironmentResponse, error) {
+				return []*models.EnvironmentResponse{{UUID: testCredEnvUUID.String(), Name: "dev"}}, nil
+			},
+		},
+		ocClient: &clientmocks.OpenChoreoClientMock{
+			GetComponentFunc: func(context.Context, string, string, string) (*models.AgentResponse, error) {
+				return nil, errors.New("component lookup failed")
+			},
+		},
+	}
+
+	err := svc.ReconcileMCPCredentialsForProxy(context.Background(), "org-1", testCredMappingUUID)
+
+	require.Error(t, err, "per-config failures are aggregated, not swallowed")
+	assert.True(t, seen[testCredConfigUUID])
+	assert.True(t, seen[otherConfigUUID], "a failing config must not stop the remaining configs")
+	// Logging is the only consumer of the aggregate, so it has to name who failed.
+	assert.Contains(t, err.Error(), "config booking of agent help-desk")
+}
+
+// provisionedAPIKeyVarRows is the env var row set of a mapping whose api-key credential is
+// provisioned: the name row carries a stored secret reference.
+func provisionedAPIKeyVarRows() []models.AgentEnvConfigVariable {
+	return []models.AgentEnvConfigVariable{{
+		ConfigUUID:      testCredConfigUUID,
+		EnvironmentUUID: testCredEnvUUID,
+		VariableName:    "BOOKING_API_KEY",
+		VariableKey:     "apikey",
+		SecretReference: "booking-proxy-secret",
+	}}
+}
+
+// internalAgentTopologyClient stubs the three OpenChoreo reads buildMCPCredentialContext makes
+// for an internal agent whose pipeline starts at "dev", leaving the caller's write hooks intact.
+func internalAgentTopologyClient(oc *clientmocks.OpenChoreoClientMock) *clientmocks.OpenChoreoClientMock {
+	oc.GetEnvironmentFunc = func(_ context.Context, _, environmentName string) (*models.EnvironmentResponse, error) {
+		// Braced deliberately: the entry point must canonicalise before keying its env map, or
+		// every mapping silently reads as "environment since deleted".
+		return &models.EnvironmentResponse{UUID: "{" + testCredEnvUUID.String() + "}", Name: environmentName}, nil
+	}
+	oc.GetComponentFunc = func(context.Context, string, string, string) (*models.AgentResponse, error) {
+		return &models.AgentResponse{Provisioning: models.Provisioning{Type: string(utils.InternalAgent)}}, nil
+	}
+	oc.GetProjectDeploymentPipelineFunc = func(context.Context, string, string) (*models.DeploymentPipelineResponse, error) {
+		return &models.DeploymentPipelineResponse{PromotionPaths: []models.PromotionPath{{
+			SourceEnvironmentRef:  "dev",
+			TargetEnvironmentRefs: []models.TargetEnvironmentRef{{Name: "production"}},
+		}}}, nil
+	}
+	return oc
+}
+
+// TestReconcileMCPCredentialsForAgentEnv_ReconcilesOnlyMCPMappingsInThatEnvironment drives the
+// deploy/promote entry point end to end. The mapping is already converged, so reaching
+// injectMCPMappingEnvVars is only possible if the mapping loop ran, assertEnvVars=true was
+// propagated, and the source proxy was resolved from mapping.MCPProxy — the entry point passes
+// none of its own. The converged-state fixture's write guards stay armed throughout.
+func TestReconcileMCPCredentialsForAgentEnv_ReconcilesOnlyMCPMappingsInThatEnvironment(t *testing.T) {
+	llmConfigUUID := uuid.MustParse("66666666-6666-6666-6666-666666666666")
+	otherEnvConfigUUID := uuid.MustParse("77777777-7777-7777-7777-777777777777")
+	otherEnvUUID := uuid.MustParse("88888888-8888-8888-8888-888888888888")
+	var (
+		injectedVars     []client.EnvVar
+		reconciledConfig []uuid.UUID
+	)
+
+	svc := convergedAPIKeyModeService(t, internalAgentTopologyClient(&clientmocks.OpenChoreoClientMock{
+		UpdateReleaseBindingEnvVarsFunc: func(_ context.Context, _, _, _, _ string, envVars []client.EnvVar) error {
+			injectedVars = append(injectedVars, envVars...)
+			return nil
+		},
+		UpdateComponentEnvVarsFunc: func(context.Context, string, string, string, []client.EnvVar) error {
+			return nil
+		},
+	}))
+	svc.agentConfigRepo = &repomocks.AgentConfigurationRepositoryMock{
+		ListByAgentFunc: func(context.Context, string, string, string, int, int) ([]models.AgentConfiguration, error) {
+			llmConfig := *testCredConfig()
+			llmConfig.UUID = llmConfigUUID
+			llmConfig.TypeID = models.AgentConfigTypeIDLLM
+			otherEnvConfig := *testCredConfig()
+			otherEnvConfig.UUID = otherEnvConfigUUID
+			return []models.AgentConfiguration{*testCredConfig(), llmConfig, otherEnvConfig}, nil
+		},
+		GetByUUIDFunc: func(_ context.Context, configUUID uuid.UUID, _ string) (*models.AgentConfiguration, error) {
+			reconciledConfig = append(reconciledConfig, configUUID)
+			return testCredConfig(), nil
+		},
+	}
+	svc.envMCPMappingRepo = &repomocks.EnvAgentMCPMappingRepositoryMock{
+		ListByConfigFunc: func(_ context.Context, configUUID uuid.UUID) ([]models.EnvAgentMCPMapping, error) {
+			switch configUUID {
+			case llmConfigUUID:
+				t.Fatal("must not read MCP mappings for a non-MCP configuration")
+				return nil, nil
+			case otherEnvConfigUUID:
+				elsewhere := *testCredMappingWithProxy(apiKeyEnabledProxy())
+				elsewhere.EnvironmentUUID = otherEnvUUID
+				return []models.EnvAgentMCPMapping{elsewhere}, nil
+			default:
+				return []models.EnvAgentMCPMapping{*testCredMappingWithProxy(apiKeyEnabledProxy())}, nil
+			}
+		},
+	}
+
+	err := svc.ReconcileMCPCredentialsForAgentEnv(context.Background(), "org-1", "default", "help-desk", "dev")
+
+	require.NoError(t, err)
+	assert.Equal(t, []uuid.UUID{testCredConfigUUID}, reconciledConfig,
+		"only the MCP configuration with a mapping in this environment is reconciled")
+	assertInjectedAPIKeyReferencesSecret(t, injectedVars)
+}
+
+// proxyAlsoCovering is identityOnlyProxy with a second environment on its endpoint, so a mapping
+// in that environment is skipped only by the deleted-environment guard, never by the
+// endpoint-not-bound guard.
+func proxyAlsoCovering(envUUID uuid.UUID) *models.MCPProxy {
+	proxy := identityOnlyProxy()
+	proxy.Endpoints[0].Environments = append(proxy.Endpoints[0].Environments,
+		models.MCPProxyEndpointEnvironment{EnvironmentUUID: envUUID, ArtifactUUID: testCredArtifactUUID})
+	return proxy
+}
+
+// TestReconcileMCPCredentialsForProxy_SkipsDeletedEnvironmentAndNamesTheFailingMapping covers the
+// proxy path's mapping loop: a mapping whose environment no longer exists is skipped before any
+// credential state is read, and the surviving mapping's failure is reported with its identity.
+func TestReconcileMCPCredentialsForProxy_SkipsDeletedEnvironmentAndNamesTheFailingMapping(t *testing.T) {
+	deletedEnvUUID := uuid.MustParse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+	var readEnvUUIDs []uuid.UUID
+
+	svc := &agentConfigurationService{
+		logger: discardLogger(),
+		mcpProxyRepo: &repomocks.MCPProxyRepositoryMock{
+			GetByUUIDFunc: func(context.Context, string, string) (*models.MCPProxy, error) {
+				return proxyAlsoCovering(deletedEnvUUID), nil
+			},
+		},
+		envMCPMappingRepo: &repomocks.EnvAgentMCPMappingRepositoryMock{
+			ListByMCPProxyFunc: func(context.Context, uuid.UUID) ([]models.EnvAgentMCPMapping, error) {
+				deleted := *testCredMapping()
+				deleted.EnvironmentUUID = deletedEnvUUID
+				return []models.EnvAgentMCPMapping{deleted, *testCredMapping()}, nil
+			},
+		},
+		agentConfigRepo: &repomocks.AgentConfigurationRepositoryMock{
+			GetByUUIDFunc: func(context.Context, uuid.UUID, string) (*models.AgentConfiguration, error) {
+				return testCredConfig(), nil
+			},
+		},
+		infraResourceManager: &infraResourceManagerStubForScopeRefresh{
+			ListOrgEnvironmentsFunc: func(context.Context, string) ([]*models.EnvironmentResponse, error) {
+				// deletedEnvUUID is deliberately absent — that environment is gone.
+				return []*models.EnvironmentResponse{{UUID: testCredEnvUUID.String(), Name: "dev"}}, nil
+			},
+		},
+		ocClient: internalAgentTopologyClient(&clientmocks.OpenChoreoClientMock{}),
+		envVariableRepo: &repomocks.AgentEnvConfigVariableRepositoryMock{
+			ListByConfigFunc: func(context.Context, uuid.UUID) ([]models.AgentEnvConfigVariable, error) {
+				return provisionedAPIKeyVarRows(), nil
+			},
+			ListByConfigAndEnvFunc: func(_ context.Context, _, envUUID uuid.UUID) ([]models.AgentEnvConfigVariable, error) {
+				readEnvUUIDs = append(readEnvUUIDs, envUUID)
+				return provisionedAPIKeyVarRows(), nil
+			},
+			UpdateAPIKeySecretReferenceFunc: func(context.Context, uuid.UUID, uuid.UUID, string) (int64, error) {
+				t.Fatal("secret_reference must survive a failed teardown so the next reconcile retries")
+				return 0, nil
+			},
+		},
+		apiKeyBroadcaster: &apiKeyBroadcaster{
+			apiKeyRepo: &repomocks.APIKeyRepositoryMock{
+				GetByArtifactAndNameFunc: func(_ string, name string) (*models.StoredAPIKey, error) {
+					return &models.StoredAPIKey{Name: name}, nil
+				},
+				ListByArtifactFunc: func(context.Context, string) ([]models.StoredAPIKey, error) {
+					return nil, errors.New("gateway unreachable")
+				},
+			},
+		},
+		secretClient: &clientmocks.SecretManagementClientMock{
+			DeleteSecretFunc: func(context.Context, secretmanagersvc.SecretLocation, string) error {
+				return nil
+			},
+		},
+	}
+
+	err := svc.ReconcileMCPCredentialsForProxy(context.Background(), "org-1", testCredMappingUUID)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "config booking environment dev", "a failing mapping is named in the aggregate")
+	assert.Contains(t, err.Error(), "gateway unreachable")
+	assert.NotContains(t, readEnvUUIDs, deletedEnvUUID,
+		"a mapping whose environment was deleted is skipped before any credential state is read")
+	assert.Contains(t, readEnvUUIDs, testCredEnvUUID, "the surviving mapping is still reconciled")
 }

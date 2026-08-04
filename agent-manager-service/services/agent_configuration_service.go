@@ -97,6 +97,11 @@ type AgentConfigurationService interface {
 	CreateLLMConfigAPIKey(ctx context.Context, ouID, projectName, agentName string, configUUID uuid.UUID, envName string, req *models.CreateAPIKeyRequest) (*models.CreateAPIKeyResponse, error)
 	RotateLLMConfigAPIKey(ctx context.Context, ouID, projectName, agentName string, configUUID uuid.UUID, envName, keyName string, req *models.RotateAPIKeyRequest) (*models.CreateAPIKeyResponse, error)
 	RevokeLLMConfigAPIKey(ctx context.Context, ouID, projectName, agentName string, configUUID uuid.UUID, envName, keyName string) error
+
+	// MCP credential reconciliation — converges an agent's MCP api-key credentials with the
+	// source proxy's per-environment security mode. See MCPMappingCredentialReconciler.
+	ReconcileMCPCredentialsForProxy(ctx context.Context, ouID string, proxyUUID uuid.UUID) error
+	ReconcileMCPCredentialsForAgentEnv(ctx context.Context, ouID, projectName, agentName, envName string) error
 }
 
 type EnvConfigTemplate struct {
