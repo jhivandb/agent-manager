@@ -2284,9 +2284,11 @@ func (s *agentConfigurationService) updateMCPConfig(ctx context.Context, existin
 				if err := s.updateExistingMCPMapping(ctx, existingConfig, mapping, sourceProxy, envName, ouID, handle, artifactName, sourceVersion, false); err != nil {
 					return nil, err
 				}
-				if err := s.reconcileMCPMappingCredentials(ctx, existingConfig, mapping, sourceProxy, envName, ouID, envTemplates, isExternalAgent, firstEnvName); err != nil {
+				credentialsChanged, err := s.reconcileMCPMappingCredentials(ctx, existingConfig, mapping, sourceProxy, envName, ouID, envTemplates, isExternalAgent, firstEnvName)
+				if err != nil {
 					return nil, err
 				}
+				shouldRefresh = shouldRefresh || credentialsChanged
 				// No per-agent deployment; refresh the injected env vars when the proxy or
 				// its name changed so the URL / api key reference stays correct.
 				if shouldRefresh && !isExternalAgent {
@@ -2593,7 +2595,7 @@ func (s *agentConfigurationService) refreshAllMCPMappings(ctx context.Context, c
 		if err := s.updateExistingMCPMapping(ctx, config, mapping, mapping.MCPProxy, envName, ouID, handle, artifactName, version, false); err != nil {
 			return err
 		}
-		if err := s.reconcileMCPMappingCredentials(ctx, config, mapping, mapping.MCPProxy, envName, ouID, envTemplates, isExternalAgent, firstEnvName); err != nil {
+		if _, err := s.reconcileMCPMappingCredentials(ctx, config, mapping, mapping.MCPProxy, envName, ouID, envTemplates, isExternalAgent, firstEnvName); err != nil {
 			return err
 		}
 		// No per-agent gateway deployment: the proxy owns the single per-environment
@@ -2720,37 +2722,48 @@ func (s *agentConfigurationService) provisionUnconfiguredMCPEnv(ctx context.Cont
 	return nil
 }
 
+// cleanupMCPMappingCredentials revokes the mapping's API keys and deletes its KV secret,
+// logging and swallowing failures. Used by the teardown paths (config delete, environment
+// removal), where a gateway being unreachable must not fail the user's operation.
 func (s *agentConfigurationService) cleanupMCPMappingCredentials(ctx context.Context, config *models.AgentConfiguration, mapping *models.EnvAgentMCPMapping, envName, ouID string) {
+	if err := s.tryCleanupMCPMappingCredentials(ctx, config, mapping, envName, ouID); err != nil {
+		s.logger.Warn("failed to clean up MCP mapping credentials", "environment", envName, "err", err)
+	}
+}
+
+// tryCleanupMCPMappingCredentials is cleanupMCPMappingCredentials with failures reported.
+// The security-switch reconcile needs the error: it must not clear secret_reference — the
+// signal that a key is provisioned — until teardown has actually succeeded, or the switch
+// would look converged while the key stayed live on the gateway.
+func (s *agentConfigurationService) tryCleanupMCPMappingCredentials(ctx context.Context, config *models.AgentConfiguration, mapping *models.EnvAgentMCPMapping, envName, ouID string) error {
 	if config == nil || mapping == nil || envName == "" {
-		return
+		return nil
 	}
 	handle := mcpMappingProxyName(config.ProjectName, config.AgentID, config.Name, envName)
-	scopedID := scopedProxyIdentifier(config.ProjectName, config.AgentID, config.Name, envName)
-	keyName := fmt.Sprintf("%s-key", scopedID)
-	if err := s.revokeAllMCPMappingAPIKeys(ctx, ouID, s.resolveMCPMappingAPIID(ctx, mapping, ouID), mapping.ArtifactUUID); err != nil {
-		s.logger.Warn("failed to revoke MCP mapping API key", "mappingHandle", handle, "keyName", keyName, "err", err)
+	var errs []error
+	apiID := s.resolveMCPMappingAPIID(ctx, mapping, ouID)
+	if err := s.revokeAllMCPMappingAPIKeys(ctx, ouID, apiID, mapping.ArtifactUUID); err != nil {
+		errs = append(errs, fmt.Errorf("revoke API keys for %s: %w", handle, err))
+	}
+	if apiID == uuid.Nil {
+		// The gateway artifact did not resolve, so nothing was revoked there — the local row
+		// delete above is not proof of teardown.
+		errs = append(errs, fmt.Errorf("revoke API keys for %s: unresolved gateway artifact", handle))
 	}
 
 	secretRefName, err := s.loadSecretRefForConfigEnv(ctx, config.UUID, mapping.EnvironmentUUID)
 	if err != nil {
-		s.logger.Warn("failed to load MCP SecretReference for cleanup", "environment", envName, "err", err)
+		errs = append(errs, fmt.Errorf("load SecretReference for %s: %w", envName, err))
 	}
-	proxySecretLoc := secretmanagersvc.SecretLocation{
-		OrgName:         ouID,
-		ProjectName:     config.ProjectName,
-		AgentName:       config.AgentID,
-		EnvironmentName: envName,
-		ConfigName:      config.Name,
-		EntityName:      fmt.Sprintf("%s-proxy", scopedID),
-		SecretKey:       secretmanagersvc.SecretKeyAPIKey,
-	}
+	proxySecretLoc := mcpMappingSecretLocation(config, ouID, envName)
 	secretRefForDelete := secretRefName
 	if secretRefForDelete == "" {
 		secretRefForDelete = proxySecretLoc.SecretRefName()
 	}
 	if err := s.secretClient.DeleteSecret(ctx, proxySecretLoc, secretRefForDelete); err != nil {
-		s.logger.Warn("failed to delete MCP mapping API key secret", "mappingHandle", handle, "secretRef", secretRefForDelete, "err", err)
+		errs = append(errs, fmt.Errorf("delete API key secret %s for %s: %w", secretRefForDelete, handle, err))
 	}
+	return errors.Join(errs...)
 }
 
 func (s *agentConfigurationService) removeMCPMappingEnvironment(ctx context.Context, config *models.AgentConfiguration, mapping *models.EnvAgentMCPMapping,
@@ -4626,22 +4639,43 @@ func (s *agentConfigurationService) ensureMCPMappingCredentials(ctx context.Cont
 	return newSecretRefName, nil
 }
 
-func (s *agentConfigurationService) reconcileMCPMappingCredentials(ctx context.Context, config *models.AgentConfiguration, mapping *models.EnvAgentMCPMapping, sourceProxy *models.MCPProxy, envName, ouID string, envTemplates []EnvConfigTemplate, isExternalAgent bool, firstEnvName string) error {
-	if mcpProxyAPIKeySecurityEnabled(sourceProxy, mapping.EnvironmentUUID.String()) {
-		if _, err := s.ensureMCPMappingCredentials(ctx, config, mapping, envName, ouID); err != nil {
-			return err
-		}
-		return nil
+// reconcileMCPMappingCredentials brings one mapping's api-key credential state in line with
+// its source proxy's security mode for that environment. Returns whether credential state
+// actually changed (a key was minted, or a provisioned key was torn down) — not merely
+// whether this branch ran — so callers only refresh injected env vars, and roll pods, when
+// there is something new for them to reflect.
+func (s *agentConfigurationService) reconcileMCPMappingCredentials(ctx context.Context, config *models.AgentConfiguration, mapping *models.EnvAgentMCPMapping, sourceProxy *models.MCPProxy, envName, ouID string, envTemplates []EnvConfigTemplate, isExternalAgent bool, firstEnvName string) (bool, error) {
+	secretRefBefore, err := s.loadSecretRefForConfigEnv(ctx, config.UUID, mapping.EnvironmentUUID)
+	if err != nil {
+		return false, fmt.Errorf("failed to load MCP SecretReference for %s: %w", envName, err)
 	}
 
-	s.cleanupMCPMappingCredentials(ctx, config, mapping, envName, ouID)
+	if mcpProxyAPIKeySecurityEnabled(sourceProxy, mapping.EnvironmentUUID.String()) {
+		keyExists, err := s.mcpMappingAPIKeyExists(mapping.ArtifactUUID, mcpMappingAPIKeyName(config, envName))
+		if err != nil {
+			return false, fmt.Errorf("failed to inspect MCP API key for %s: %w", envName, err)
+		}
+		if _, err := s.ensureMCPMappingCredentials(ctx, config, mapping, envName, ouID); err != nil {
+			return false, err
+		}
+		// ensureMCPMappingCredentials early-returns without writing when the key is already
+		// provisioned, so only an actual mint counts as a change.
+		return secretRefBefore == "" || !keyExists, nil
+	}
+
+	// Clear the provisioned marker only once teardown has actually succeeded — otherwise the
+	// security-switch gate would read this mapping as converged while its key stayed live.
+	if err := s.tryCleanupMCPMappingCredentials(ctx, config, mapping, envName, ouID); err != nil {
+		return false, err
+	}
 	if err := s.updateMCPMappingSecretReference(ctx, config.UUID, mapping.EnvironmentUUID, ""); err != nil {
-		return fmt.Errorf("failed to clear MCP API key env reference for %s: %w", envName, err)
+		return false, fmt.Errorf("failed to clear MCP API key env reference for %s: %w", envName, err)
 	}
 	if !isExternalAgent {
 		s.removeMCPMappingAPIKeyEnvVar(ctx, config, envName, envTemplates, firstEnvName)
 	}
-	return nil
+	// Nothing was provisioned, so the clear is a no-op write and there is no env var to remove.
+	return secretRefBefore != "", nil
 }
 
 func (s *agentConfigurationService) cleanupNewMCPMapping(ctx context.Context, config *models.AgentConfiguration, mapping *models.EnvAgentMCPMapping, envName, ouID string) {
