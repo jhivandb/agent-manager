@@ -39,6 +39,9 @@ import (
 //			ListSecretReferencesByAgentAndEnvFunc: func(ctx context.Context, agentID string, ouID string, envUUID uuid.UUID) ([]string, error) {
 //				panic("mock out the ListSecretReferencesByAgentAndEnv method")
 //			},
+//			UpdateAPIKeySecretReferenceFunc: func(ctx context.Context, configUUID uuid.UUID, envUUID uuid.UUID, secretRefName string) (int64, error) {
+//				panic("mock out the UpdateAPIKeySecretReference method")
+//			},
 //			UpdateVariableNamesFunc: func(ctx context.Context, tx *gorm.DB, configUUID uuid.UUID, keyNameMap map[string]string) error {
 //				panic("mock out the UpdateVariableNames method")
 //			},
@@ -69,6 +72,9 @@ type AgentEnvConfigVariableRepositoryMock struct {
 
 	// ListSecretReferencesByAgentAndEnvFunc mocks the ListSecretReferencesByAgentAndEnv method.
 	ListSecretReferencesByAgentAndEnvFunc func(ctx context.Context, agentID string, ouID string, envUUID uuid.UUID) ([]string, error)
+
+	// UpdateAPIKeySecretReferenceFunc mocks the UpdateAPIKeySecretReference method.
+	UpdateAPIKeySecretReferenceFunc func(ctx context.Context, configUUID uuid.UUID, envUUID uuid.UUID, secretRefName string) (int64, error)
 
 	// UpdateVariableNamesFunc mocks the UpdateVariableNames method.
 	UpdateVariableNamesFunc func(ctx context.Context, tx *gorm.DB, configUUID uuid.UUID, keyNameMap map[string]string) error
@@ -140,6 +146,17 @@ type AgentEnvConfigVariableRepositoryMock struct {
 			// EnvUUID is the envUUID argument value.
 			EnvUUID uuid.UUID
 		}
+		// UpdateAPIKeySecretReference holds details about calls to the UpdateAPIKeySecretReference method.
+		UpdateAPIKeySecretReference []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// ConfigUUID is the configUUID argument value.
+			ConfigUUID uuid.UUID
+			// EnvUUID is the envUUID argument value.
+			EnvUUID uuid.UUID
+			// SecretRefName is the secretRefName argument value.
+			SecretRefName string
+		}
 		// UpdateVariableNames holds details about calls to the UpdateVariableNames method.
 		UpdateVariableNames []struct {
 			// Ctx is the ctx argument value.
@@ -159,6 +176,7 @@ type AgentEnvConfigVariableRepositoryMock struct {
 	lockListByConfigAndEnv                sync.RWMutex
 	lockListByConfigForUpdate             sync.RWMutex
 	lockListSecretReferencesByAgentAndEnv sync.RWMutex
+	lockUpdateAPIKeySecretReference       sync.RWMutex
 	lockUpdateVariableNames               sync.RWMutex
 }
 
@@ -443,6 +461,50 @@ func (mock *AgentEnvConfigVariableRepositoryMock) ListSecretReferencesByAgentAnd
 	mock.lockListSecretReferencesByAgentAndEnv.RLock()
 	calls = mock.calls.ListSecretReferencesByAgentAndEnv
 	mock.lockListSecretReferencesByAgentAndEnv.RUnlock()
+	return calls
+}
+
+// UpdateAPIKeySecretReference calls UpdateAPIKeySecretReferenceFunc.
+func (mock *AgentEnvConfigVariableRepositoryMock) UpdateAPIKeySecretReference(ctx context.Context, configUUID uuid.UUID, envUUID uuid.UUID, secretRefName string) (int64, error) {
+	if mock.UpdateAPIKeySecretReferenceFunc == nil {
+		panic("AgentEnvConfigVariableRepositoryMock.UpdateAPIKeySecretReferenceFunc: method is nil but AgentEnvConfigVariableRepository.UpdateAPIKeySecretReference was just called")
+	}
+	callInfo := struct {
+		Ctx           context.Context
+		ConfigUUID    uuid.UUID
+		EnvUUID       uuid.UUID
+		SecretRefName string
+	}{
+		Ctx:           ctx,
+		ConfigUUID:    configUUID,
+		EnvUUID:       envUUID,
+		SecretRefName: secretRefName,
+	}
+	mock.lockUpdateAPIKeySecretReference.Lock()
+	mock.calls.UpdateAPIKeySecretReference = append(mock.calls.UpdateAPIKeySecretReference, callInfo)
+	mock.lockUpdateAPIKeySecretReference.Unlock()
+	return mock.UpdateAPIKeySecretReferenceFunc(ctx, configUUID, envUUID, secretRefName)
+}
+
+// UpdateAPIKeySecretReferenceCalls gets all the calls that were made to UpdateAPIKeySecretReference.
+// Check the length with:
+//
+//	len(mockedAgentEnvConfigVariableRepository.UpdateAPIKeySecretReferenceCalls())
+func (mock *AgentEnvConfigVariableRepositoryMock) UpdateAPIKeySecretReferenceCalls() []struct {
+	Ctx           context.Context
+	ConfigUUID    uuid.UUID
+	EnvUUID       uuid.UUID
+	SecretRefName string
+} {
+	var calls []struct {
+		Ctx           context.Context
+		ConfigUUID    uuid.UUID
+		EnvUUID       uuid.UUID
+		SecretRefName string
+	}
+	mock.lockUpdateAPIKeySecretReference.RLock()
+	calls = mock.calls.UpdateAPIKeySecretReference
+	mock.lockUpdateAPIKeySecretReference.RUnlock()
 	return calls
 }
 

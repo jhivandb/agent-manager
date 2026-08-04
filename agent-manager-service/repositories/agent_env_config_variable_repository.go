@@ -55,6 +55,11 @@ type AgentEnvConfigVariableRepository interface {
 	// ListSecretReferencesByAgentAndEnv returns distinct non-empty secret_reference values stored
 	// for all LLM config variables belonging to this agent in the given environment.
 	ListSecretReferencesByAgentAndEnv(ctx context.Context, agentID, ouID string, envUUID uuid.UUID) ([]string, error)
+
+	// UpdateAPIKeySecretReference sets secret_reference on the config's "apikey" variable row
+	// for one environment. Returns how many rows the (config, environment, "apikey") triple
+	// matched, so a caller can tell "no apikey row exists" (0) from "already up to date" (1+).
+	UpdateAPIKeySecretReference(ctx context.Context, configUUID, envUUID uuid.UUID, secretRefName string) (int64, error)
 }
 
 type agentEnvConfigVariableRepository struct {
@@ -168,4 +173,27 @@ func (r *agentEnvConfigVariableRepository) ListSecretReferencesByAgentAndEnv(ctx
 		refs = append(refs, row.SecretReference)
 	}
 	return refs, nil
+}
+
+func (r *agentEnvConfigVariableRepository) UpdateAPIKeySecretReference(
+	ctx context.Context, configUUID, envUUID uuid.UUID, secretRefName string,
+) (int64, error) {
+	result := r.db.WithContext(ctx).Model(&models.AgentEnvConfigVariable{}).
+		Where("config_uuid = ? AND environment_uuid = ? AND variable_key = ?", configUUID, envUUID, "apikey").
+		Update("secret_reference", secretRefName)
+	if result.Error != nil {
+		return 0, result.Error
+	}
+	if result.RowsAffected > 0 {
+		return result.RowsAffected, nil
+	}
+	// GORM reports rows *changed*, so writing a value that is already stored affects zero
+	// rows. Count instead, so the caller never mistakes a no-op for a missing row.
+	var count int64
+	if err := r.db.WithContext(ctx).Model(&models.AgentEnvConfigVariable{}).
+		Where("config_uuid = ? AND environment_uuid = ? AND variable_key = ?", configUUID, envUUID, "apikey").
+		Count(&count).Error; err != nil {
+		return 0, err
+	}
+	return count, nil
 }

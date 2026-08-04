@@ -4525,22 +4525,11 @@ func (s *agentConfigurationService) loadSecretRefForConfigEnv(ctx context.Contex
 }
 
 func (s *agentConfigurationService) updateMCPMappingSecretReference(ctx context.Context, configUUID, envUUID uuid.UUID, secretRefName string) error {
-	result := s.db.WithContext(ctx).Model(&models.AgentEnvConfigVariable{}).
-		Where("config_uuid = ? AND environment_uuid = ? AND variable_key = ?", configUUID, envUUID, "apikey").
-		Update("secret_reference", secretRefName)
-	if result.Error != nil {
-		return result.Error
-	}
-	if result.RowsAffected > 0 {
-		return nil
-	}
-	var count int64
-	if err := s.db.WithContext(ctx).Model(&models.AgentEnvConfigVariable{}).
-		Where("config_uuid = ? AND environment_uuid = ? AND variable_key = ?", configUUID, envUUID, "apikey").
-		Count(&count).Error; err != nil {
+	matched, err := s.envVariableRepo.UpdateAPIKeySecretReference(ctx, configUUID, envUUID, secretRefName)
+	if err != nil {
 		return err
 	}
-	if count == 0 {
+	if matched == 0 {
 		return fmt.Errorf("apikey environment variable row not found")
 	}
 	return nil
