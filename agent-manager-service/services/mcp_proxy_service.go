@@ -29,6 +29,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -89,6 +90,8 @@ type MCPProxyService struct {
 	logger                 *slog.Logger
 	encryptionKey          []byte
 	resolver               thundersvc.EnvThunderResolver
+	credentialReconciler   MCPMappingCredentialReconciler
+	credentialReconcilerMu sync.RWMutex
 }
 
 // NewMCPProxyService creates a new MCP proxy service.
@@ -571,15 +574,57 @@ func (s *MCPProxyService) Update(ctx context.Context, orgUUID, proxyID string, r
 	return convertModelMCPProxyToSpec(updated), nil
 }
 
-// refreshAgentsBoundToProxy brings every agent bound to proxyUUID's live AgentID scope
-// list in line with what it should now be (recomputing the scope list), across every
-// environment they're deployed to. Uses ReconcileForEnvironment (not InjectForEnvironment)
-// so an agent whose scopes didn't actually change from this proxy update never gets its
-// pod needlessly rolled. Purely best-effort: the caller runs this on a detached goroutine
-// after the proxy update already succeeded, so a failure here must never surface as an
-// error from Update — it's logged and the corresponding agent simply picks up the change
-// on its next deploy/promote/rotation instead.
+// MCPCredentialReconcilerSetter is an optional capability MCPProxyService implements so
+// app.Run can backfill the reconciler after both services exist. It is not a constructor
+// argument because NewAgentConfigurationService already takes *MCPProxyService — the
+// dependency edge runs the other way (same shape as WorkloadInjectorSetter).
+type MCPCredentialReconcilerSetter interface {
+	// SetMCPCredentialReconciler backfills the reconciler once the real
+	// AgentConfigurationService exists (this service is constructed first — see the
+	// type's doc comment). app.Run calls it exactly once, before the HTTP server starts.
+	// No-op when reconciler is nil. If this backfill is ever skipped (a startup-order
+	// regression), refreshAgentsBoundToProxy logs a warning rather than silently
+	// no-op-ing, so the gap is visible.
+	SetMCPCredentialReconciler(reconciler MCPMappingCredentialReconciler)
+}
+
+func (s *MCPProxyService) SetMCPCredentialReconciler(reconciler MCPMappingCredentialReconciler) {
+	if reconciler == nil {
+		return
+	}
+	s.credentialReconcilerMu.Lock()
+	s.credentialReconciler = reconciler
+	s.credentialReconcilerMu.Unlock()
+}
+
+func (s *MCPProxyService) getMCPCredentialReconciler() MCPMappingCredentialReconciler {
+	s.credentialReconcilerMu.RLock()
+	defer s.credentialReconcilerMu.RUnlock()
+	return s.credentialReconciler
+}
+
+// refreshAgentsBoundToProxy brings every agent bound to proxyUUID's MCP credentials and live
+// AgentID scope list in line with what they should now be, across every environment they're
+// deployed to. Credentials are reconciled first so the scope refresh below performs the final
+// write and the pod settles on the correct AgentID scope list. Uses ReconcileForEnvironment
+// (not InjectForEnvironment) so an agent whose scopes didn't actually change from this proxy
+// update never gets its pod needlessly rolled. Purely best-effort: the caller runs this on a
+// detached goroutine after the proxy update already succeeded, so a failure here must never
+// surface as an error from Update — it's logged and the corresponding agent simply picks up
+// the change on its next deploy/promote/rotation instead.
 func (s *MCPProxyService) refreshAgentsBoundToProxy(ctx context.Context, proxy *models.MCPProxy, orgUUID string) {
+	// Credentials first; the scope refresh below must be the final write.
+	if reconciler := s.getMCPCredentialReconciler(); reconciler != nil {
+		if err := reconciler.ReconcileMCPCredentialsForProxy(ctx, orgUUID, proxy.UUID); err != nil {
+			s.logger.Warn("Failed to reconcile MCP credentials after proxy change",
+				"proxyUUID", proxy.UUID, "error", err)
+		}
+	} else {
+		s.logger.Warn("MCP credential reconciler not wired; agents bound to this proxy keep their "+
+			"previous api-key state until their tool configuration is re-saved",
+			"proxyUUID", proxy.UUID)
+	}
+
 	mappings, err := s.envMCPMappingRepo.ListByMCPProxy(ctx, proxy.UUID)
 	if err != nil {
 		s.logger.Warn("Failed to list agent bindings for scope refresh", "proxyUUID", proxy.UUID, "error", err)

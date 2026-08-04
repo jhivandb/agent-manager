@@ -17,8 +17,10 @@
 package services
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"sort"
 	"testing"
 
@@ -42,7 +44,12 @@ func (s *infraResourceManagerStubForScopeRefresh) ListOrgEnvironments(ctx contex
 	return s.ListOrgEnvironmentsFunc(ctx, ouID)
 }
 
-func TestRefreshAgentsBoundToProxy_NoMappings_NoOp(t *testing.T) {
+// TestRefreshAgentsBoundToProxy_NoMappings_SkipsScopeRefresh pins only the scope-refresh
+// half of the function: with no credential reconciler wired (nil), no mappings means no
+// environment lookup and no scope refresh call. It does not claim the whole function is a
+// no-op — a wired reconciler's ReconcileMCPCredentialsForProxy still runs unconditionally
+// before this early return (see TestRefreshAgentsBoundToProxy_ReconcilesCredentialsBeforeScopes).
+func TestRefreshAgentsBoundToProxy_NoMappings_SkipsScopeRefresh(t *testing.T) {
 	svc := &MCPProxyService{
 		envMCPMappingRepo: &repomocks.EnvAgentMCPMappingRepositoryMock{
 			ListByMCPProxyFunc: func(context.Context, uuid.UUID) ([]models.EnvAgentMCPMapping, error) {
@@ -210,4 +217,111 @@ func TestRefreshAgentsBoundToProxy_ContinuesAfterOneAgentFails(t *testing.T) {
 		svc.refreshAgentsBoundToProxy(context.Background(), &models.MCPProxy{UUID: proxyUUID}, "acme")
 	})
 	assert.Equal(t, []string{"agent-b"}, refreshed, "a failure refreshing one agent must not stop the others from being refreshed")
+}
+
+// credentialReconcilerStub records the calls refreshAgentsBoundToProxy makes.
+type credentialReconcilerStub struct {
+	ReconcileMCPCredentialsForProxyFunc    func(ctx context.Context, ouID string, proxyUUID uuid.UUID) error
+	ReconcileMCPCredentialsForAgentEnvFunc func(ctx context.Context, ouID, projectName, agentName, envName string) error
+}
+
+func (s *credentialReconcilerStub) ReconcileMCPCredentialsForProxy(ctx context.Context, ouID string, proxyUUID uuid.UUID) error {
+	if s.ReconcileMCPCredentialsForProxyFunc == nil {
+		return nil
+	}
+	return s.ReconcileMCPCredentialsForProxyFunc(ctx, ouID, proxyUUID)
+}
+
+func (s *credentialReconcilerStub) ReconcileMCPCredentialsForAgentEnv(ctx context.Context, ouID, projectName, agentName, envName string) error {
+	if s.ReconcileMCPCredentialsForAgentEnvFunc == nil {
+		return nil
+	}
+	return s.ReconcileMCPCredentialsForAgentEnvFunc(ctx, ouID, projectName, agentName, envName)
+}
+
+// TestRefreshAgentsBoundToProxy_ReconcilesCredentialsBeforeScopes pins the ordering: the
+// credential write happens first so the scope refresh settles the identity vars last.
+func TestRefreshAgentsBoundToProxy_ReconcilesCredentialsBeforeScopes(t *testing.T) {
+	proxyUUID := uuid.MustParse("66666666-6666-6666-6666-666666666666")
+	envUUID := uuid.MustParse("77777777-7777-7777-7777-777777777777")
+	var calls []string
+
+	svc := &MCPProxyService{
+		credentialReconciler: &credentialReconcilerStub{
+			ReconcileMCPCredentialsForProxyFunc: func(_ context.Context, ouID string, gotProxyUUID uuid.UUID) error {
+				assert.Equal(t, "org-1", ouID)
+				assert.Equal(t, proxyUUID, gotProxyUUID)
+				calls = append(calls, "credentials")
+				return nil
+			},
+		},
+		envMCPMappingRepo: &repomocks.EnvAgentMCPMappingRepositoryMock{
+			ListByMCPProxyFunc: func(context.Context, uuid.UUID) ([]models.EnvAgentMCPMapping, error) {
+				return []models.EnvAgentMCPMapping{{
+					ConfigUUID:      uuid.MustParse("88888888-8888-8888-8888-888888888888"),
+					EnvironmentUUID: envUUID,
+				}}, nil
+			},
+		},
+		infraManager: &infraResourceManagerStubForScopeRefresh{
+			ListOrgEnvironmentsFunc: func(context.Context, string) ([]*models.EnvironmentResponse, error) {
+				return []*models.EnvironmentResponse{{UUID: envUUID.String(), Name: "dev"}}, nil
+			},
+		},
+		agentConfigRepo: &repomocks.AgentConfigurationRepositoryMock{
+			GetByUUIDFunc: func(context.Context, uuid.UUID, string) (*models.AgentConfiguration, error) {
+				return &models.AgentConfiguration{ProjectName: "default", AgentID: "help-desk"}, nil
+			},
+		},
+		agentIdentityInjection: &agentIdentityInjectorStub{
+			ReconcileForEnvironmentFunc: func(context.Context, string, string, string, string) error {
+				calls = append(calls, "scopes")
+				return nil
+			},
+		},
+		logger: discardLogger(),
+	}
+
+	svc.refreshAgentsBoundToProxy(context.Background(), &models.MCPProxy{UUID: proxyUUID}, "org-1")
+
+	assert.Equal(t, []string{"credentials", "scopes"}, calls)
+}
+
+// TestRefreshAgentsBoundToProxy_NilCredentialReconcilerStillRefreshesScopes keeps a
+// startup-order regression from silently disabling the scope refresh too. Asserts both
+// halves of that requirement: the gap is logged, AND the scope refresh still runs.
+func TestRefreshAgentsBoundToProxy_NilCredentialReconcilerStillRefreshesScopes(t *testing.T) {
+	envUUID := uuid.MustParse("77777777-7777-7777-7777-777777777777")
+	scopeRefreshed := false
+	var logBuf bytes.Buffer
+
+	svc := &MCPProxyService{
+		envMCPMappingRepo: &repomocks.EnvAgentMCPMappingRepositoryMock{
+			ListByMCPProxyFunc: func(context.Context, uuid.UUID) ([]models.EnvAgentMCPMapping, error) {
+				return []models.EnvAgentMCPMapping{{EnvironmentUUID: envUUID}}, nil
+			},
+		},
+		infraManager: &infraResourceManagerStubForScopeRefresh{
+			ListOrgEnvironmentsFunc: func(context.Context, string) ([]*models.EnvironmentResponse, error) {
+				return []*models.EnvironmentResponse{{UUID: envUUID.String(), Name: "dev"}}, nil
+			},
+		},
+		agentConfigRepo: &repomocks.AgentConfigurationRepositoryMock{
+			GetByUUIDFunc: func(context.Context, uuid.UUID, string) (*models.AgentConfiguration, error) {
+				return &models.AgentConfiguration{ProjectName: "default", AgentID: "help-desk"}, nil
+			},
+		},
+		agentIdentityInjection: &agentIdentityInjectorStub{
+			ReconcileForEnvironmentFunc: func(context.Context, string, string, string, string) error {
+				scopeRefreshed = true
+				return nil
+			},
+		},
+		logger: slog.New(slog.NewTextHandler(&logBuf, nil)),
+	}
+
+	svc.refreshAgentsBoundToProxy(context.Background(), &models.MCPProxy{UUID: uuid.New()}, "org-1")
+
+	assert.True(t, scopeRefreshed)
+	assert.Contains(t, logBuf.String(), "MCP credential reconciler not wired")
 }

@@ -155,6 +155,13 @@ func Run(authProvider occlient.AuthProvider, secretProvider secretmanagersvc.Pro
 		setter.SetWorkloadInjector(dependencies.AgentIdentityInjectionService)
 	}
 
+	// Backfill the MCP credential reconciler into MCPProxyService for the same reason as
+	// above: MCPProxyService is constructed before the agent configuration service that
+	// implements the reconciler. Must happen before the HTTP server starts.
+	if setter, ok := any(dependencies.MCPProxyService).(services.MCPCredentialReconcilerSetter); ok {
+		setter.SetMCPCredentialReconciler(dependencies.AgentConfigurationService)
+	}
+
 	// Start monitor scheduler with background context
 	schedulerCtx, schedulerCancel := context.WithCancel(context.Background())
 	if err := dependencies.MonitorScheduler.Start(schedulerCtx); err != nil {

@@ -132,6 +132,8 @@ type MCPMappingCredentialReconciler interface {
 	ReconcileMCPCredentialsForAgentEnv(ctx context.Context, ouID, projectName, agentName, envName string) error
 }
 
+var _ MCPMappingCredentialReconciler = (*agentConfigurationService)(nil)
+
 // mcpCredentialConfigPageSize bounds the per-agent configuration listing. Truncation is logged
 // rather than paged over: it is unreachable in practice and the direction is benign.
 const mcpCredentialConfigPageSize = 1000
