@@ -301,18 +301,17 @@ export function MCPProxySecurityTab({
     [setRowScopes],
   );
 
-  // Confirm before switching methods — bound agents' credentials are
-  // reconciled automatically and their pods restart once. Reads the saved
-  // type from `config`, not
-  // lastSavedAuthRef, which defaults to "apiKey" until the sync effect above
-  // runs and would otherwise warn about a method nobody actually configured.
+  // Confirm before switching methods — bound agents' credentials are reconciled
+  // automatically and their pods restart. Reads the saved type from `config`, not
+  // lastSavedAuthRef, which defaults to "apiKey" until the sync effect above runs and
+  // would otherwise warn about a method nobody actually configured.
   const handleAuthTypeChange = useCallback(
     (nextType: AuthenticationType) => {
       const savedType = resolveAuthenticationType(config);
       if (savedType && nextType !== savedType) {
         addConfirmation({
           title: "Switch authentication method?",
-          description: `This proxy is currently secured with ${getAuthenticationTypeLabel(savedType)}. Switching to ${getAuthenticationTypeLabel(nextType)} will update every agent already configured to use it — their credentials are reconciled automatically and their pods restart once to pick up the change.`,
+          description: `This proxy is currently secured with ${getAuthenticationTypeLabel(savedType)}. Switching to ${getAuthenticationTypeLabel(nextType)} will update every agent already configured to use it — their credentials are reconciled automatically and their pods restart to pick up the change.`,
           confirmButtonText: "Switch Method",
           confirmButtonColor: "error",
           onConfirm: () => setAuthenticationType(nextType),
