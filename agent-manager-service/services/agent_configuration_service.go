@@ -5274,11 +5274,13 @@ func (s *agentConfigurationService) BuildSystemManagedEnvVarsFromConfig(
 		}
 
 		urlValue := ""
+		var mcpBinding mcpSystemManagedBinding
 		switch config.TypeID {
 		case models.AgentConfigTypeIDLLM:
 			urlValue, err = s.systemManagedLLMURL(ctx, config, ouID, environmentName, envUUID)
 		case models.AgentConfigTypeIDMCP:
-			urlValue, err = s.systemManagedMCPURL(ctx, config, ouID, environmentName, envUUID)
+			mcpBinding, err = s.systemManagedMCPBinding(ctx, config, ouID, environmentName, envUUID)
+			urlValue = mcpBinding.url
 		default:
 			err = nil
 		}
@@ -5286,7 +5288,15 @@ func (s *agentConfigurationService) BuildSystemManagedEnvVarsFromConfig(
 			return nil, err
 		}
 
+		isMCP := config.TypeID == models.AgentConfigTypeIDMCP
 		for _, v := range vars {
+			// An OAuth-secured MCP has no api key at all, so the variable must be absent —
+			// matching buildMCPEnvVars. An unconfigured environment keeps its blank
+			// placeholder (buildEmptyMCPEnvVars), which is why this checks the security mode
+			// rather than the empty secret reference the two cases share.
+			if isMCP && v.VariableKey == "apikey" && mcpBinding.configured && !mcpBinding.apiKeySecured {
+				continue
+			}
 			envVar := client.EnvVar{Key: v.VariableName}
 			switch {
 			case v.SecretReference != "":
@@ -5334,12 +5344,21 @@ func (s *agentConfigurationService) systemManagedLLMURL(
 	return buildProxyURL(gateway, mapping.LLMProxy.Configuration.Context, true), nil
 }
 
-func (s *agentConfigurationService) systemManagedMCPURL(
+// mcpSystemManagedBinding is what one MCP configuration's environment binding contributes to
+// the system-managed env vars: the proxy URL, plus enough of the security mode to know whether
+// an api-key variable belongs in the pod at all.
+type mcpSystemManagedBinding struct {
+	url           string
+	configured    bool
+	apiKeySecured bool
+}
+
+func (s *agentConfigurationService) systemManagedMCPBinding(
 	ctx context.Context, config *models.AgentConfiguration, ouID, environmentName string, envUUID uuid.UUID,
-) (string, error) {
+) (mcpSystemManagedBinding, error) {
 	mappings, err := s.envMCPMappingRepo.ListByConfig(ctx, config.UUID)
 	if err != nil {
-		return "", fmt.Errorf("failed to list MCP env mappings for config %s: %w", config.UUID, err)
+		return mcpSystemManagedBinding{}, fmt.Errorf("failed to list MCP env mappings for config %s: %w", config.UUID, err)
 	}
 	for i := range mappings {
 		mapping := &mappings[i]
@@ -5347,19 +5366,25 @@ func (s *agentConfigurationService) systemManagedMCPURL(
 			continue
 		}
 		if mapping.MCPProxy == nil {
-			return "", fmt.Errorf("MCP proxy not found for mapping in environment %s", environmentName)
+			return mcpSystemManagedBinding{}, fmt.Errorf("MCP proxy not found for mapping in environment %s", environmentName)
+		}
+		endpoint, _ := resolveMCPEndpointForEnv(mapping.MCPProxy, envUUID.String())
+		binding := mcpSystemManagedBinding{
+			configured:    endpoint != nil,
+			apiKeySecured: mcpProxyAPIKeySecurityEnabled(mapping.MCPProxy, envUUID.String()),
 		}
 		sharedArtifactUUID := s.resolveMCPMappingAPIID(ctx, mapping, ouID)
 		if sharedArtifactUUID == uuid.Nil {
-			return "", fmt.Errorf("MCP proxy shared artifact not found for mapping in environment %s", environmentName)
+			return mcpSystemManagedBinding{}, fmt.Errorf("MCP proxy shared artifact not found for mapping in environment %s", environmentName)
 		}
 		gateway, err := s.resolveGatewayForMCPArtifact(ctx, sharedArtifactUUID, ouID, envUUID)
 		if err != nil {
-			return "", fmt.Errorf("failed to resolve gateway for MCP proxy in %s: %w", environmentName, err)
+			return mcpSystemManagedBinding{}, fmt.Errorf("failed to resolve gateway for MCP proxy in %s: %w", environmentName, err)
 		}
 		handle := mcpMappingProxyName(config.ProjectName, config.AgentID, config.Name, environmentName)
 		deployedProxy := buildAgentMCPConfigProxy(config, mapping, mapping.MCPProxy, environmentName, ouID, handle)
-		return buildMCPProxyURL(gateway, deployedProxy.Configuration.Context, true), nil
+		binding.url = buildMCPProxyURL(gateway, deployedProxy.Configuration.Context, true)
+		return binding, nil
 	}
-	return "", nil
+	return mcpSystemManagedBinding{}, nil
 }

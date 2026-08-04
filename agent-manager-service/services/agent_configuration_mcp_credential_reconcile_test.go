@@ -1039,3 +1039,179 @@ func TestReconcileMCPCredentialsForProxy_SkipsDeletedEnvironmentAndNamesTheFaili
 		"a mapping whose environment was deleted is skipped before any credential state is read")
 	assert.Contains(t, readEnvUUIDs, testCredEnvUUID, "the surviving mapping is still reconciled")
 }
+
+// TestBuildSystemManagedEnvVarsFromConfig_OmitsAPIKeyVarInIdentityMode makes promote match
+// create/update: nothing named *_API_KEY exists for an OAuth-secured MCP.
+func TestBuildSystemManagedEnvVarsFromConfig_OmitsAPIKeyVarInIdentityMode(t *testing.T) {
+	gatewayUUID := uuid.New()
+	svc := &agentConfigurationService{
+		logger: slog.Default(),
+		ocClient: &clientmocks.OpenChoreoClientMock{
+			GetEnvironmentFunc: func(context.Context, string, string) (*models.EnvironmentResponse, error) {
+				return &models.EnvironmentResponse{UUID: testCredEnvUUID.String(), Name: "dev"}, nil
+			},
+		},
+		agentConfigRepo: &repomocks.AgentConfigurationRepositoryMock{
+			ListByAgentFunc: func(context.Context, string, string, string, int, int) ([]models.AgentConfiguration, error) {
+				return []models.AgentConfiguration{*testCredConfig()}, nil
+			},
+		},
+		envVariableRepo: &repomocks.AgentEnvConfigVariableRepositoryMock{
+			ListByConfigAndEnvFunc: func(context.Context, uuid.UUID, uuid.UUID) ([]models.AgentEnvConfigVariable, error) {
+				return []models.AgentEnvConfigVariable{
+					{VariableName: "BOOKING_URL", VariableKey: "url"},
+					{VariableName: "BOOKING_API_KEY", VariableKey: "apikey"},
+				}, nil
+			},
+		},
+		envMCPMappingRepo: &repomocks.EnvAgentMCPMappingRepositoryMock{
+			ListByConfigFunc: func(context.Context, uuid.UUID) ([]models.EnvAgentMCPMapping, error) {
+				mapping := *testCredMapping()
+				mapping.MCPProxy = identityOnlyProxy()
+				return []models.EnvAgentMCPMapping{mapping}, nil
+			},
+		},
+		gatewayRepo: &repomocks.GatewayRepositoryMock{
+			EnvironmentMappingExistsFunc: func(string, string) (bool, error) {
+				return true, nil
+			},
+			GetByUUIDFunc: func(string) (*models.Gateway, error) {
+				return &models.Gateway{UUID: gatewayUUID, Name: "egress", Vhost: "gw.local", RuntimeURL: "http://gw.local"}, nil
+			},
+		},
+		mcpProxyService: &MCPProxyService{
+			deploymentRepo: &repomocks.DeploymentRepositoryMock{
+				GetDeployedGatewaysByProviderFunc: func(uuid.UUID, string) ([]string, error) {
+					return []string{gatewayUUID.String()}, nil
+				},
+			},
+		},
+	}
+
+	vars, err := svc.BuildSystemManagedEnvVarsFromConfig(context.Background(), "help-desk", "org-1", "default", "dev")
+
+	require.NoError(t, err)
+	var keys []string
+	for _, v := range vars {
+		keys = append(keys, v.Key)
+	}
+	assert.Contains(t, keys, "BOOKING_URL", "the URL variable must still be emitted")
+	assert.NotContains(t, keys, "BOOKING_API_KEY", "identity mode must not emit an api-key variable")
+}
+
+// findEnvVar returns the entry with the given key, or nil if absent.
+func findEnvVar(vars []client.EnvVar, key string) *client.EnvVar {
+	for i := range vars {
+		if vars[i].Key == key {
+			return &vars[i]
+		}
+	}
+	return nil
+}
+
+// TestBuildSystemManagedEnvVarsFromConfig_UnconfiguredEnvironmentKeepsBlankPlaceholder is the
+// case that actually distinguishes the security-mode skip from the simpler-looking (and wrong)
+// secret_reference-keyed skip: no mapping covers this environment, so buildEmptyMCPEnvVars'
+// blank placeholder must survive untouched.
+func TestBuildSystemManagedEnvVarsFromConfig_UnconfiguredEnvironmentKeepsBlankPlaceholder(t *testing.T) {
+	svc := &agentConfigurationService{
+		logger: slog.Default(),
+		ocClient: &clientmocks.OpenChoreoClientMock{
+			GetEnvironmentFunc: func(context.Context, string, string) (*models.EnvironmentResponse, error) {
+				return &models.EnvironmentResponse{UUID: testCredEnvUUID.String(), Name: "dev"}, nil
+			},
+		},
+		agentConfigRepo: &repomocks.AgentConfigurationRepositoryMock{
+			ListByAgentFunc: func(context.Context, string, string, string, int, int) ([]models.AgentConfiguration, error) {
+				return []models.AgentConfiguration{*testCredConfig()}, nil
+			},
+		},
+		envVariableRepo: &repomocks.AgentEnvConfigVariableRepositoryMock{
+			ListByConfigAndEnvFunc: func(context.Context, uuid.UUID, uuid.UUID) ([]models.AgentEnvConfigVariable, error) {
+				return []models.AgentEnvConfigVariable{
+					{VariableName: "BOOKING_URL", VariableKey: "url"},
+					{VariableName: "BOOKING_API_KEY", VariableKey: "apikey"},
+				}, nil
+			},
+		},
+		envMCPMappingRepo: &repomocks.EnvAgentMCPMappingRepositoryMock{
+			ListByConfigFunc: func(context.Context, uuid.UUID) ([]models.EnvAgentMCPMapping, error) {
+				// The only mapping on record is for a different environment: testCredEnvUUID has
+				// never had an MCP endpoint configured for it.
+				elsewhere := *testCredMapping()
+				elsewhere.EnvironmentUUID = uuid.MustParse("99999999-9999-9999-9999-999999999999")
+				return []models.EnvAgentMCPMapping{elsewhere}, nil
+			},
+		},
+	}
+
+	vars, err := svc.BuildSystemManagedEnvVarsFromConfig(context.Background(), "help-desk", "org-1", "default", "dev")
+
+	require.NoError(t, err)
+	apiKeyVar := findEnvVar(vars, "BOOKING_API_KEY")
+	require.NotNil(t, apiKeyVar, "an unconfigured environment must keep the blank placeholder")
+	assert.Equal(t, "", apiKeyVar.Value)
+	assert.Nil(t, apiKeyVar.ValueFrom)
+}
+
+// TestBuildSystemManagedEnvVarsFromConfig_APIKeyModeKeepsSecretReference is the api-key mirror of
+// TestBuildSystemManagedEnvVarsFromConfig_OmitsAPIKeyVarInIdentityMode: when api-key security is
+// on, the skip must never fire, and the injected variable must still resolve through the stored
+// secret rather than carrying a literal value.
+func TestBuildSystemManagedEnvVarsFromConfig_APIKeyModeKeepsSecretReference(t *testing.T) {
+	gatewayUUID := uuid.New()
+	svc := &agentConfigurationService{
+		logger: slog.Default(),
+		ocClient: &clientmocks.OpenChoreoClientMock{
+			GetEnvironmentFunc: func(context.Context, string, string) (*models.EnvironmentResponse, error) {
+				return &models.EnvironmentResponse{UUID: testCredEnvUUID.String(), Name: "dev"}, nil
+			},
+		},
+		agentConfigRepo: &repomocks.AgentConfigurationRepositoryMock{
+			ListByAgentFunc: func(context.Context, string, string, string, int, int) ([]models.AgentConfiguration, error) {
+				return []models.AgentConfiguration{*testCredConfig()}, nil
+			},
+		},
+		envVariableRepo: &repomocks.AgentEnvConfigVariableRepositoryMock{
+			ListByConfigAndEnvFunc: func(context.Context, uuid.UUID, uuid.UUID) ([]models.AgentEnvConfigVariable, error) {
+				return []models.AgentEnvConfigVariable{
+					{VariableName: "BOOKING_URL", VariableKey: "url"},
+					{VariableName: "BOOKING_API_KEY", VariableKey: "apikey", SecretReference: "booking-proxy-secret"},
+				}, nil
+			},
+		},
+		envMCPMappingRepo: &repomocks.EnvAgentMCPMappingRepositoryMock{
+			ListByConfigFunc: func(context.Context, uuid.UUID) ([]models.EnvAgentMCPMapping, error) {
+				mapping := *testCredMapping()
+				mapping.MCPProxy = apiKeyEnabledProxy()
+				return []models.EnvAgentMCPMapping{mapping}, nil
+			},
+		},
+		gatewayRepo: &repomocks.GatewayRepositoryMock{
+			EnvironmentMappingExistsFunc: func(string, string) (bool, error) {
+				return true, nil
+			},
+			GetByUUIDFunc: func(string) (*models.Gateway, error) {
+				return &models.Gateway{UUID: gatewayUUID, Name: "egress", Vhost: "gw.local", RuntimeURL: "http://gw.local"}, nil
+			},
+		},
+		mcpProxyService: &MCPProxyService{
+			deploymentRepo: &repomocks.DeploymentRepositoryMock{
+				GetDeployedGatewaysByProviderFunc: func(uuid.UUID, string) ([]string, error) {
+					return []string{gatewayUUID.String()}, nil
+				},
+			},
+		},
+	}
+
+	vars, err := svc.BuildSystemManagedEnvVarsFromConfig(context.Background(), "help-desk", "org-1", "default", "dev")
+
+	require.NoError(t, err)
+	apiKeyVar := findEnvVar(vars, "BOOKING_API_KEY")
+	require.NotNil(t, apiKeyVar, "api-key mode must still inject the variable")
+	require.NotNil(t, apiKeyVar.ValueFrom)
+	require.NotNil(t, apiKeyVar.ValueFrom.SecretKeyRef)
+	assert.Equal(t, "booking-proxy-secret", apiKeyVar.ValueFrom.SecretKeyRef.Name)
+	assert.Equal(t, secretmanagersvc.SecretKeyAPIKey, apiKeyVar.ValueFrom.SecretKeyRef.Key)
+	assert.Equal(t, "", apiKeyVar.Value, "the raw key must never be injected as a literal value")
+}

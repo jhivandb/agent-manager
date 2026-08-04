@@ -82,7 +82,7 @@ func TestSystemManagedMCPURLReturnsProxyURLForMatchingMapping(t *testing.T) {
 		},
 	}
 
-	url, err := svc.systemManagedMCPURL(context.Background(), &models.AgentConfiguration{
+	binding, err := svc.systemManagedMCPBinding(context.Background(), &models.AgentConfiguration{
 		UUID:        configUUID,
 		Name:        "tools",
 		ProjectName: "project",
@@ -90,7 +90,7 @@ func TestSystemManagedMCPURLReturnsProxyURLForMatchingMapping(t *testing.T) {
 	}, "org", "dev", envUUID)
 
 	require.NoError(t, err)
-	require.Equal(t, "https://gateway.example.com/shared-mcp/mcp", url)
+	require.Equal(t, "https://gateway.example.com/shared-mcp/mcp", binding.url)
 }
 
 func TestSystemManagedMCPURLMissingSharedArtifactReturnsError(t *testing.T) {
@@ -121,12 +121,12 @@ func TestSystemManagedMCPURLMissingSharedArtifactReturnsError(t *testing.T) {
 		},
 	}
 
-	url, err := svc.systemManagedMCPURL(context.Background(), &models.AgentConfiguration{
+	binding, err := svc.systemManagedMCPBinding(context.Background(), &models.AgentConfiguration{
 		UUID: configUUID,
 	}, "org", "dev", envUUID)
 
 	require.ErrorContains(t, err, "MCP proxy shared artifact not found")
-	require.Empty(t, url)
+	require.Empty(t, binding.url)
 }
 
 func TestSystemManagedMCPURLMissingEnvMappingReturnsEmptyURL(t *testing.T) {
@@ -149,10 +149,10 @@ func TestSystemManagedMCPURLMissingEnvMappingReturnsEmptyURL(t *testing.T) {
 		},
 	}
 
-	url, err := svc.systemManagedMCPURL(context.Background(), &models.AgentConfiguration{
+	binding, err := svc.systemManagedMCPBinding(context.Background(), &models.AgentConfiguration{
 		UUID: configUUID,
 	}, "org", "dev", targetEnvUUID)
 
 	require.NoError(t, err)
-	require.Empty(t, url)
+	require.Empty(t, binding.url)
 }
