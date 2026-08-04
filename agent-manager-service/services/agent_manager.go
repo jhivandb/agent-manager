@@ -2556,6 +2556,16 @@ func (s *agentManagerService) DeployAgent(ctx context.Context, ouID string, proj
 			"secretRef", env.GetSecretRef())
 	}
 
+	// Converge this environment's MCP api-key credentials with each source proxy's current
+	// security mode before reading system-managed env vars below, so what we preserve reflects
+	// the reconciled state. Soft by design: this is the safety net for a dropped proxy-update
+	// goroutine, and blocking a deploy on MCP gateway health would be worse than deploying.
+	// A failure leaves secret_reference untouched, so the next deploy or promote retries.
+	if err := s.agentConfigurationService.ReconcileMCPCredentialsForAgentEnv(ctx, ouID, projectName, agentName, lowestEnv); err != nil {
+		s.logger.Warn("Failed to reconcile MCP credentials during deploy",
+			"agentName", agentName, "environment", lowestEnv, "error", err)
+	}
+
 	// Fetch system-managed env vars (e.g., LLM provider config) from the existing Component CR /
 	// ReleaseBinding. These are managed by the configuration service and must be preserved because
 	// both ReplaceComponentEnvVars and Deploy() overwrite all env vars.
@@ -3503,6 +3513,14 @@ func (s *agentManagerService) PromoteAgent(ctx context.Context, ouID string, pro
 		s.logger.Warn("Failed to check deployment status in target environment", "agentName", agentName, "environment", req.TargetEnvironment, "error", err)
 	} else if inProgress {
 		return fmt.Errorf("%w for agent %s in environment %s", utils.ErrDeploymentInProgress, agentName, req.TargetEnvironment)
+	}
+
+	// Reconcile the target environment before the system-managed key/env-var reads below:
+	// building the target's vars from pre-reconcile rows would inject a SecretKeyRef to a key
+	// this reconcile is about to revoke. Soft for the same reason as the deploy hook.
+	if err := s.agentConfigurationService.ReconcileMCPCredentialsForAgentEnv(ctx, ouID, projectName, agentName, req.TargetEnvironment); err != nil {
+		s.logger.Warn("Failed to reconcile MCP credentials during promote",
+			"agentName", agentName, "environment", req.TargetEnvironment, "error", err)
 	}
 
 	// System-managed env vars (LLM provider URL/key, MCP, etc.) live per-environment in

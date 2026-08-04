@@ -484,6 +484,19 @@ func TestRevokeAgentIdentitySecret_PipelineLookupFails_StillRevokesConservativel
 			"cleanup too — that must be surfaced to the caller, not reported as a plain, silent success")
 }
 
+// stubAgentConfigurationServiceForDeploy implements AgentConfigurationService by embedding
+// the (nil) interface and overriding only ReconcileMCPCredentialsForAgentEnv — the deploy
+// hook's one call into this dependency. Deploy tests using this stub keep
+// GetComponentConfigurations empty, so getSystemManagedEnvVars short-circuits before it would
+// need any other method.
+type stubAgentConfigurationServiceForDeploy struct {
+	AgentConfigurationService
+}
+
+func (s *stubAgentConfigurationServiceForDeploy) ReconcileMCPCredentialsForAgentEnv(context.Context, string, string, string, string) error {
+	return nil
+}
+
 // TestDeployAgent_IdentityInjectionError_AbortsDeploy guards that a failure
 // building the AgentID env vars stops the deploy entirely rather than
 // deploying without credentials: Deploy() replaces every workload env var, so
@@ -517,7 +530,12 @@ func TestDeployAgent_IdentityInjectionError_AbortsDeploy(t *testing.T) {
 			return nil, boom
 		},
 	}
-	s := &agentManagerService{ocClient: ocClient, agentIdentityInjection: injector, logger: discardLogger()}
+	s := &agentManagerService{
+		ocClient:                  ocClient,
+		agentIdentityInjection:    injector,
+		agentConfigurationService: &stubAgentConfigurationServiceForDeploy{},
+		logger:                    discardLogger(),
+	}
 
 	_, err := s.DeployAgent(context.Background(), "acme", "proj1", "my-agent", &spec.DeployAgentRequest{ImageId: "registry.example.com/my-agent:v1"})
 
@@ -566,21 +584,35 @@ func TestUpdateAgentConfigurations_IdentityInjectionError_AbortsUpdate(t *testin
 }
 
 // stubAgentConfigurationServiceForPromote implements AgentConfigurationService
-// by embedding the (nil) interface and overriding only the two methods
+// by embedding the (nil) interface and overriding only the methods
 // PromoteAgent actually calls — any other method call panics on the nil
 // embed, which is fine since these tests never exercise them.
 type stubAgentConfigurationServiceForPromote struct {
 	AgentConfigurationService
 	SystemKeysFunc func(ctx context.Context, agentID, ouID, projectName, environmentName string) (map[string]bool, error)
 	SystemVarsFunc func(ctx context.Context, agentID, ouID, projectName, environmentName string) ([]client.EnvVar, error)
+	// callOrder records the sequence of stub calls PromoteAgent makes, so a test can prove the
+	// MCP credential reconcile runs before the system-managed env var reads — building the
+	// target's vars from pre-reconcile rows would inject a SecretKeyRef to a revoked key.
+	callOrder *[]string
 }
 
 func (s *stubAgentConfigurationServiceForPromote) ListSystemManagedEnvVarKeys(ctx context.Context, agentID, ouID, projectName, environmentName string) (map[string]bool, error) {
+	if s.callOrder != nil {
+		*s.callOrder = append(*s.callOrder, "listSystemManagedKeys")
+	}
 	return s.SystemKeysFunc(ctx, agentID, ouID, projectName, environmentName)
 }
 
 func (s *stubAgentConfigurationServiceForPromote) BuildSystemManagedEnvVarsFromConfig(ctx context.Context, agentID, ouID, projectName, environmentName string) ([]client.EnvVar, error) {
 	return s.SystemVarsFunc(ctx, agentID, ouID, projectName, environmentName)
+}
+
+func (s *stubAgentConfigurationServiceForPromote) ReconcileMCPCredentialsForAgentEnv(_ context.Context, _, _, _, _ string) error {
+	if s.callOrder != nil {
+		*s.callOrder = append(*s.callOrder, "reconcileMCPCredentials")
+	}
+	return nil
 }
 
 // shrinkPromotionIdentityPollForTest overrides the poll interval/budget
@@ -711,6 +743,14 @@ func TestPromoteAgent_TargetIdentityReady_PromotesWithTargetOnlyCredentials(t *t
 	}
 	s, _ := promoteAgentTestFixture(t, targetVars, nil)
 
+	// Record the stub call order so we can prove PromoteAgent itself reconciles MCP
+	// credentials before reading the system-managed env vars, not just that the stub's
+	// own methods happen to be called in that order.
+	var order []string
+	agentConfigSvc, ok := s.agentConfigurationService.(*stubAgentConfigurationServiceForPromote)
+	require.True(t, ok)
+	agentConfigSvc.callOrder = &order
+
 	var capturedOverrides []client.EnvVar
 	ocMock, ok := s.ocClient.(*clientmocks.OpenChoreoClientMock)
 	require.True(t, ok)
@@ -736,6 +776,11 @@ func TestPromoteAgent_TargetIdentityReady_PromotesWithTargetOnlyCredentials(t *t
 		}
 	}
 	assert.True(t, found, "target environment's identity env vars must be present in the promoted overrides")
+
+	require.NotEmpty(t, order)
+	assert.Equal(t, "reconcileMCPCredentials", order[0],
+		"the MCP credential reconcile must precede the system-managed env var reads")
+	assert.Contains(t, order, "listSystemManagedKeys")
 }
 
 func TestPromoteAgent_IdentityBuildError_AbortsBeforePromoting(t *testing.T) {
@@ -1451,11 +1496,12 @@ func deployAPIAgentMocks(existingConfig *models.AgentConfig) (*agentManagerServi
 		},
 	}
 	s := &agentManagerService{
-		ocClient:               ocClient,
-		agentIdentityInjection: injector,
-		artifactRepo:           artifactRepo,
-		agentConfigRepo:        agentConfigRepo,
-		logger:                 discardLogger(),
+		ocClient:                  ocClient,
+		agentIdentityInjection:    injector,
+		artifactRepo:              artifactRepo,
+		agentConfigRepo:           agentConfigRepo,
+		agentConfigurationService: &stubAgentConfigurationServiceForDeploy{},
+		logger:                    discardLogger(),
 	}
 	return s, &capturedDeployConfig
 }
