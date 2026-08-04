@@ -36,10 +36,12 @@ import (
 // is unchanged, so reconciling unconditionally would roll every bound agent's pods whenever
 // anyone edited an unrelated part of the proxy.
 //
-// assertEnvVars re-injects the desired env vars even when the credential state did not change.
-// The deploy path sets it — deploy rolls the pod anyway, so the write is free there, and it is
-// the only thing that repairs a previously failed (best-effort) env var write. The proxy-update
-// path must leave it false.
+// assertEnvVars asserts the desired env var state — injected in api-key mode, absent in OAuth
+// mode — even when the credential state did not change. The deploy path sets it: deploy rolls
+// the pod anyway, so the write is free there, and it is the only thing that repairs a
+// previously failed (best-effort) env var write in either direction. A dropped removal
+// otherwise leaves the pod holding a SecretKeyRef to a deleted secret. The proxy-update path
+// must leave it false.
 func (s *agentConfigurationService) reconcileOneMCPMappingCredential(
 	ctx context.Context,
 	config *models.AgentConfiguration,
@@ -66,9 +68,13 @@ func (s *agentConfigurationService) reconcileOneMCPMappingCredential(
 	}
 
 	if desired == current {
-		if assertEnvVars && desired && !isExternalAgent {
-			if injectErr := s.injectMCPMappingEnvVars(ctx, config, mapping, proxy, envName, ouID, envTemplates, firstEnvName); injectErr != nil {
-				s.logger.Warn("failed to assert MCP mapping env vars", "environment", envName, "err", injectErr)
+		if assertEnvVars && !isExternalAgent {
+			if desired {
+				if injectErr := s.injectMCPMappingEnvVars(ctx, config, mapping, proxy, envName, ouID, envTemplates, firstEnvName); injectErr != nil {
+					s.logger.Warn("failed to assert MCP mapping env vars", "environment", envName, "err", injectErr)
+				}
+			} else {
+				s.removeMCPMappingAPIKeyEnvVar(ctx, config, envName, envTemplates, firstEnvName)
 			}
 		}
 		return false, nil

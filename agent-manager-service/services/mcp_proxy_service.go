@@ -613,6 +613,20 @@ func (s *MCPProxyService) getMCPCredentialReconciler() MCPMappingCredentialRecon
 // surface as an error from Update — it's logged and the corresponding agent simply picks up
 // the change on its next deploy/promote/rotation instead.
 func (s *MCPProxyService) refreshAgentsBoundToProxy(ctx context.Context, proxy *models.MCPProxy, orgUUID string) {
+	if proxy == nil {
+		s.logger.Warn("Skipping agent refresh for a nil MCP proxy", "orgUUID", orgUUID)
+		return
+	}
+	// Runs on a detached goroutine, so a panic anywhere in this best-effort fan-out would
+	// take the whole process down. Recovering confines it to this one proxy update.
+	proxyUUID := proxy.UUID
+	defer func() {
+		if r := recover(); r != nil {
+			s.logger.Error("Recovered from panic while refreshing agents bound to MCP proxy",
+				"proxyUUID", proxyUUID, "panic", r)
+		}
+	}()
+
 	// Credentials first; the scope refresh below must be the final write.
 	if reconciler := s.getMCPCredentialReconciler(); reconciler != nil {
 		if err := reconciler.ReconcileMCPCredentialsForProxy(ctx, orgUUID, proxy.UUID); err != nil {

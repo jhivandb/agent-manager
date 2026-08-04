@@ -2742,7 +2742,9 @@ func (s *agentConfigurationService) cleanupMCPMappingCredentials(ctx context.Con
 // would look converged while the key stayed live on the gateway.
 func (s *agentConfigurationService) tryCleanupMCPMappingCredentials(ctx context.Context, config *models.AgentConfiguration, mapping *models.EnvAgentMCPMapping, envName, ouID string) error {
 	if config == nil || mapping == nil || envName == "" {
-		return nil
+		// Never report success without tearing anything down: the reconcile reads nil as
+		// "proven torn down" and would clear secret_reference on a live key.
+		return errors.New("cannot clean up MCP mapping credentials: missing config, mapping or environment name")
 	}
 	handle := mcpMappingProxyName(config.ProjectName, config.AgentID, config.Name, envName)
 	var errs []error
@@ -4676,10 +4678,13 @@ func (s *agentConfigurationService) reconcileMCPMappingCredentials(ctx context.C
 	if err := s.updateMCPMappingSecretReference(ctx, config.UUID, mapping.EnvironmentUUID, ""); err != nil {
 		return false, fmt.Errorf("failed to clear MCP API key env reference for %s: %w", envName, err)
 	}
-	if !isExternalAgent {
+	// Gated on secretRefBefore: with nothing provisioned there is no env var to remove, and
+	// removeMCPMappingAPIKeyEnvVar stamps restartedAt, so an unconditional call would roll the
+	// pods of every OAuth-mode agent on every unrelated save. Genuine drift — a pod still
+	// holding the variable — is repaired by the deploy path's env var assertion.
+	if !isExternalAgent && secretRefBefore != "" {
 		s.removeMCPMappingAPIKeyEnvVar(ctx, config, envName, envTemplates, firstEnvName)
 	}
-	// Nothing was provisioned, so the clear is a no-op write and there is no env var to remove.
 	return secretRefBefore != "", nil
 }
 
