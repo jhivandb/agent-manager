@@ -50,6 +50,7 @@ agent-manager-service/agent-manager-service
 
 # Docker
 .dockerignore
+!console/.dockerignore
 
 # Database
 *.db
