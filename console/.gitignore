@@ -98,11 +98,6 @@ jspm_packages/
 !.vscode/tasks.json
 !.vscode/launch.json
 
-# Rush temporary files
-common/deploy/
-common/temp/
-common/autoinstallers/*/.npmrc
-**/.rush/temp/
 *.lock
 
 # Common toolchain intermediate files
