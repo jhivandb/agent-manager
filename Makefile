@@ -211,9 +211,7 @@ dev-rebuild: setup-console-local
 	@echo "🧹 Stopping services..."
 	@cd deployments && docker compose down
 	@echo "🧹 Removing console volumes (preserving database)..."
-	@docker volume rm deployments_console_node_modules deployments_console_common_temp 2>/dev/null || true
-	@echo "🧹 Cleaning Rush temp directory..."
-	@rm -rf console/common/temp
+	@docker volume rm deployments_console_node_modules 2>/dev/null || true
 	@echo "🔨 Rebuilding Docker images..."
 	@cd deployments && docker compose build --no-cache
 	@echo "🔄 Starting services..."
