@@ -7,6 +7,7 @@
   },
   "scripts": {
     "build": "turbo run build",
+    "build:core-ui": "turbo run build --filter=@agent-management-platform/am-core-ui...",
     "dev": "turbo run dev --filter=web-ui --filter=@agent-management-platform/am-core-ui",
     "lint": "turbo run lint",
     "lint:fix": "turbo run lint:fix"

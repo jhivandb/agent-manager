@@ -24,7 +24,7 @@ build:
 
 build-webapp:
 	@echo "Building core-ui..."
-	@pnpm turbo run build --filter=@agent-management-platform/am-core-ui...
+	@pnpm build:core-ui
 
 dev:
 	@echo "Starting development mode (core-ui watch + web-ui dev server)..."
