@@ -47,20 +47,7 @@ This command will:
 - Install all dependencies for all projects in the monorepo via pnpm
 - Create symlinks between local packages
 
-### 2. Build Libraries
-
-Build all shared libraries first:
-
-```bash
-make build-webapp
-```
-
-Or build all projects:
-```bash
-make build
-```
-
-### 3. Start Development Server
+### 2. Start Development Server
 
 ```bash
 make dev
@@ -72,9 +59,11 @@ This will:
 - Automatically rebuild dependencies when you make changes
 - Hot-reload the webapp when dependencies update
 
-Press `Ctrl+C` to stop all processes.
+Press `Ctrl+C` to stop all processes. No separate build step is needed for development —
+Vite resolves `@agent-management-platform/*` imports straight to each package's `src/`.
+Run `make build` only to produce production output.
 
-### 4. Environment Configuration
+### 3. Environment Configuration
 
 Copy the configuration template and customize it:
 
@@ -116,14 +105,14 @@ make help
 
 ### pnpm / Turbo Commands
 
+The `make` targets wrap these. Reach for them directly when you need a filter:
+
 ```bash
-pnpm install                                    # was: rush install
-pnpm build                                      # was: rush build
-pnpm turbo run build --filter=<package-name>... # was: rush build --to <package-name>
-pnpm lint                                       # was: rush lint
+pnpm build                                      # all packages
+pnpm build:core-ui                              # core-ui and its dependencies
+pnpm turbo run build --filter=<package-name>... # any package and its dependencies
+pnpm lint                                       # eslint across packages
 pnpm lint:fix                                   # eslint --fix across packages
-make purge                                      # was: rush purge
-pnpm install                                    # was: rush update (adds/updates a dependency)
 ```
 
 ### Project-Specific Commands
@@ -142,24 +131,14 @@ pnpm run build
 # Run linting
 pnpm run lint
 
+# Fix linting issues
+pnpm run lint:fix
+
 # Preview production build
 pnpm run preview
 ```
 
-Note: `lint:fix` is only defined in some packages (e.g. `am-core-ui`, `api-client`, `auth`, `types`) — use `pnpm lint:fix` from the repo root to run ESLint `--fix` everywhere via Turbo.
-
 ## Project Structure Details
 
-### Apps
-- **webapp**: Main React application with Vite build system
-
-### Libraries
-- **auth**: Authentication provider and hooks
-- **types**: Shared TypeScript type definitions
-- **eslint-config**: Shared ESLint configuration
-- **views**: Shared UI components and themes
-- **api-client**: API client utilities
-
-### Pages
-- **AgentsListPage**: Example page component (use as reference)
+See [`AGENTS.md`](AGENTS.md) for the package map — every workspace, its package name, and what it holds.
 
