@@ -1,6 +1,6 @@
-# pnpm-lock.yaml is generated. Resolve conflicts by re-running "pnpm install",
-# not by hand-merging the conflict markers — the merged result may be invalid.
-pnpm-lock.yaml               merge=text
+# pnpm-lock.yaml is generated, and a line-wise merge of it may be silently invalid.
+# merge=binary makes git refuse to merge it; regenerate with "pnpm install" instead.
+pnpm-lock.yaml               merge=binary
 
 # TypeScript's tsconfig files use JavaScript-style code comments. The rule below prevents
 # pedantic syntax highlighters such as GitHub's from highlighting these comments as errors.
