@@ -13,5 +13,10 @@
   },
   "devDependencies": {
     "turbo": "^2.5.0"
+  },
+  "pnpm": {
+    "overrides": {
+      "ws": "^8.21.1"
+    }
   }
 }
