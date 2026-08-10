@@ -20,7 +20,7 @@
   },
   "scripts": {
     "dev": "VITE_WATCH=1 vite build --watch",
-    "build": "vite build && npm run build:types",
+    "build": "vite build && pnpm run build:types",
     "build:types": "rollup -c rollup.dts.config.mjs --silent",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
