@@ -79,10 +79,10 @@ Press `Ctrl+C` to stop all processes.
 Copy the configuration template and customize it:
 
 ```bash
-cp apps/webapp/public/config.js.template apps/webapp/public/config.js
+cp apps/web-ui/public/config.template.js apps/web-ui/public/config.js
 ```
 
-Edit `apps/webapp/public/config.js` to set your API URL:
+Edit `apps/web-ui/public/config.js` to set your API URL:
 
 ```javascript
 window.APP_CONFIG = {
@@ -122,7 +122,8 @@ pnpm build                                      # was: rush build
 pnpm turbo run build --filter=<package-name>... # was: rush build --to <package-name>
 pnpm lint                                       # was: rush lint
 pnpm lint:fix                                   # eslint --fix across packages
-make purge                                      # was: rush purge / rush update
+make purge                                      # was: rush purge
+pnpm install                                    # was: rush update (adds/updates a dependency)
 ```
 
 ### Project-Specific Commands
