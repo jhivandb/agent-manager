@@ -117,6 +117,9 @@ dist/
 dist-storybook/
 *.tsbuildinfo
 
+# Turborepo cache
+.turbo/
+
 # Heft temporary files
 .cache/
 .heft/
