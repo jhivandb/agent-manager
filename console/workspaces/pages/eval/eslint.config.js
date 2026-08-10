@@ -38,7 +38,6 @@ export default [
     ignores: [
       "**/dist/**",
       "**/node_modules/**",
-      "**/common/temp/**",
       "**/coverage/**",
       "**/.storybook/**",
       "**/storybook-static/**",

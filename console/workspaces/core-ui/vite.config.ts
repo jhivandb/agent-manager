@@ -73,7 +73,6 @@ export default defineConfig({
     watch: process.env.VITE_WATCH ? {
       exclude: [
         '**/node_modules/**',
-        '**/common/temp/**',
         '**/.git/**',
       ],
     } : undefined,
