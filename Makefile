@@ -160,33 +160,29 @@ setup-platform: gen-keys
 setup-gateway:
 	@cd deployments/setup && ./setup-gateway.sh
 
-# Console local setup with dependency tracking
-# This will only rebuild when console/pnpm-lock.yaml changes
+# Console local setup. The install is gated on console/pnpm-lock.yaml; the build always runs
+# because turbo caches it by source hash, which a timestamp sentinel cannot do correctly.
 .make:
 	@mkdir -p .make
 
 .make/console-deps-installed: console/pnpm-lock.yaml | .make
 	@echo "📦 Installing console dependencies locally..."
-	@if ! command -v pnpm &> /dev/null; then \
+	@if ! command -v pnpm >/dev/null 2>&1; then \
 		echo "⚠️  pnpm not found. Enabling via corepack..."; \
-		corepack enable || npm install -g pnpm@9.12.3; \
+		corepack enable; \
 	fi
 	@echo "📥 Running pnpm install..."
 	@cd console && pnpm install --frozen-lockfile
 	@touch .make/console-deps-installed
 
-.make/console-built: .make/console-deps-installed
+setup-console-local: .make/console-deps-installed
 	@echo "🔨 Building monorepo packages..."
 	@cd console && pnpm build
-	@touch .make/console-built
 	@echo "✅ Console packages built"
 
-setup-console-local: .make/console-built
-	@echo "✅ Console dependencies are up to date"
-
-# Force rebuild of console dependencies (ignores timestamps)
+# Force reinstall of console dependencies (ignores timestamps)
 setup-console-local-force:
-	@rm -f .make/console-deps-installed .make/console-built
+	@rm -f .make/console-deps-installed
 	@$(MAKE) setup-console-local
 
 # Daily development commands
