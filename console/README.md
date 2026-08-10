@@ -14,7 +14,7 @@ React/TypeScript web application for the Agent Manager platform, built as a pnpm
 
 Before you begin, ensure you have the following installed:
 
-- **Node.js**: Version 18.20.3+ or 20.14.0+ (see engines in package.json)
+- **Node.js**: Version 20.19.0+ or 22.12.0+ (see engines in package.json)
 - **pnpm**: Package manager, pinned via `packageManager` in package.json and activated through Corepack
 
 ### Installing pnpm
