@@ -98,23 +98,9 @@ jspm_packages/
 !.vscode/tasks.json
 !.vscode/launch.json
 
-*.lock
-
-# Common toolchain intermediate files
-temp/
-lib/
-lib-amd/
-lib-es6/
-lib-esnext/
-lib-commonjs/
-lib-shim/
+# Build outputs
 dist/
 dist-storybook/
-*.tsbuildinfo
 
 # Turborepo cache
 .turbo/
-
-# Heft temporary files
-.cache/
-.heft/
