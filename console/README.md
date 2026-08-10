@@ -71,11 +71,14 @@ Copy the configuration template and customize it:
 cp apps/web-ui/public/config.template.js apps/web-ui/public/config.js
 ```
 
-Edit `apps/web-ui/public/config.js` to set your API URL:
+The template is written for env-var substitution at deploy time, so a local `config.js`
+needs the `$PLACEHOLDER` values replaced with real ones. At minimum, point
+`apiBaseUrl` at your backend:
 
 ```javascript
-window.APP_CONFIG = {
-  API_URL: 'http://localhost:8080'
+window.__RUNTIME_CONFIG__ = {
+  // ...the rest of the template
+  apiBaseUrl: 'http://localhost:8080',
 };
 ```
 
