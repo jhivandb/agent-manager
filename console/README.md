@@ -1,35 +1,36 @@
 # Agent Manager Console
 
-React/TypeScript web application for the Agent Manager platform, built as a Rush monorepo.
+React/TypeScript web application for the Agent Manager platform, built as a pnpm + Turborepo monorepo.
 
 ## Tech Stack
 
 - **React 19** - UI framework
 - **TypeScript** - Type safety
 - **Vite** - Build tool and dev server
-- **Rush** - Monorepo management
+- **Turborepo** - Monorepo task orchestration
 - **pnpm** - Package manager
 
 ## Prerequisites
 
 Before you begin, ensure you have the following installed:
 
-- **Node.js**: Version 18.20.3+ or 20.14.0+ (see supported versions in rush.json)
-- **Rush**: The monorepo management tool
-- **pnpm**: Package manager (installed automatically by Rush)
+- **Node.js**: Version 18.20.3+ or 20.14.0+ (see engines in package.json)
+- **pnpm**: Package manager, pinned via `packageManager` in package.json and activated through Corepack
 
-### Installing Rush
+### Installing pnpm
 
-Install Rush globally:
+Enable Corepack (ships with Node.js):
 
 ```bash
-npm install -g @microsoft/rush
+corepack enable
 ```
 
 Verify installation:
 ```bash
-rush --version
+pnpm --version
 ```
+
+Corepack activates the pinned pnpm 9.12.3 automatically based on the `packageManager` field in `console/package.json`.
 
 ## Getting Started
 
@@ -43,8 +44,7 @@ make install
 ```
 
 This command will:
-- Install Rush's local copy of pnpm
-- Install all dependencies for all projects in the monorepo
+- Install all dependencies for all projects in the monorepo via pnpm
 - Create symlinks between local packages
 
 ### 2. Build Libraries
@@ -107,61 +107,45 @@ make build
 # Clean build outputs
 make clean
 
-# Purge Rush cache
+# Remove node_modules and all caches
 make purge
 
 # Show all available commands
 make help
 ```
 
-### Rush Commands
+### pnpm / Turbo Commands
 
 ```bash
-# Install dependencies
-rush install
-
-# Build all projects
-rush build
-
-# Build specific project and its dependencies
-rush build --to @agent-management-platform/webapp
-
-# Run linting for all projects
-rush lint
-
-# Run tests for all projects
-rush test
-
-# Clean all build outputs
-rush purge
-
-# Update dependencies
-rush update
-
+pnpm install                                    # was: rush install
+pnpm build                                      # was: rush build
+pnpm turbo run build --filter=<package-name>... # was: rush build --to <package-name>
+pnpm lint                                       # was: rush lint
+pnpm lint:fix                                   # eslint --fix across packages
+make purge                                      # was: rush purge / rush update
 ```
 
 ### Project-Specific Commands
 
-Navigate to any project directory and use `rushx`:
+Navigate to any project directory and use `pnpm run`:
 
 ```bash
-cd apps/webapp
+cd apps/web-ui
 
 # Start development server
-rushx dev
+pnpm run dev
 
 # Build for production
-rushx build
+pnpm run build
 
 # Run linting
-rushx lint
-
-# Fix linting issues
-rushx lint:fix
+pnpm run lint
 
 # Preview production build
-rushx preview
+pnpm run preview
 ```
+
+Note: `lint:fix` is only defined in some packages (e.g. `am-core-ui`, `api-client`, `auth`, `types`) — use `pnpm lint:fix` from the repo root to run ESLint `--fix` everywhere via Turbo.
 
 ## Project Structure Details
 

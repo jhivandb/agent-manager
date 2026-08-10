@@ -50,7 +50,7 @@ export default defineConfig({
   build: {
     // The main app chunk sits at ~5 MB; PR builds bundle the branch merged with
     // main, which pushes it just past a 5000 kB limit. Keep headroom so the Vite
-    // chunk-size warning (treated as a build failure by Rush) doesn't trip.
+    // chunk-size warning (treated as a build failure in CI) doesn't trip.
     chunkSizeWarningLimit: 6000,
   },
 })
