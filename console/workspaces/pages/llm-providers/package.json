@@ -18,6 +18,7 @@
   "scripts": {
     "format": "prettier --write --parser typescript '**/*.{ts,tsx}'",
     "lint": "eslint --config ./eslint.config.js",
+    "lint:fix": "eslint --config ./eslint.config.js --fix",
     "test": "vitest run",
     "test-watch": "vitest",
     "test:ui": "vitest --ui",
