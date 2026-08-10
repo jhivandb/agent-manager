@@ -52,7 +52,7 @@ import (
 //			DeleteUserFunc: func(ctx context.Context, userID string) error {
 //				panic("mock out the DeleteUser method")
 //			},
-//			EnsureProxyResourceServerFunc: func(ctx context.Context, proxyHandle string, displayName string, actions []string) (string, error) {
+//			EnsureProxyResourceServerFunc: func(ctx context.Context, proxyHandle string, displayName string, identifier string, actions []string) (string, error) {
 //				panic("mock out the EnsureProxyResourceServer method")
 //			},
 //			GetAgentGroupsFunc: func(ctx context.Context, ouID string, agentID string) ([]thundersvc.ThunderGroup, error) {
@@ -186,7 +186,7 @@ type EnvIdentityClientMock struct {
 	DeleteUserFunc func(ctx context.Context, userID string) error
 
 	// EnsureProxyResourceServerFunc mocks the EnsureProxyResourceServer method.
-	EnsureProxyResourceServerFunc func(ctx context.Context, proxyHandle string, displayName string, actions []string) (string, error)
+	EnsureProxyResourceServerFunc func(ctx context.Context, proxyHandle string, displayName string, identifier string, actions []string) (string, error)
 
 	// GetAgentGroupsFunc mocks the GetAgentGroups method.
 	GetAgentGroupsFunc func(ctx context.Context, ouID string, agentID string) ([]thundersvc.ThunderGroup, error)
@@ -379,6 +379,8 @@ type EnvIdentityClientMock struct {
 			ProxyHandle string
 			// DisplayName is the displayName argument value.
 			DisplayName string
+			// Identifier is the identifier argument value.
+			Identifier string
 			// Actions is the actions argument value.
 			Actions []string
 		}
@@ -1127,7 +1129,7 @@ func (mock *EnvIdentityClientMock) DeleteUserCalls() []struct {
 }
 
 // EnsureProxyResourceServer calls EnsureProxyResourceServerFunc.
-func (mock *EnvIdentityClientMock) EnsureProxyResourceServer(ctx context.Context, proxyHandle string, displayName string, actions []string) (string, error) {
+func (mock *EnvIdentityClientMock) EnsureProxyResourceServer(ctx context.Context, proxyHandle string, displayName string, identifier string, actions []string) (string, error) {
 	if mock.EnsureProxyResourceServerFunc == nil {
 		panic("EnvIdentityClientMock.EnsureProxyResourceServerFunc: method is nil but EnvIdentityClient.EnsureProxyResourceServer was just called")
 	}
@@ -1135,17 +1137,19 @@ func (mock *EnvIdentityClientMock) EnsureProxyResourceServer(ctx context.Context
 		Ctx         context.Context
 		ProxyHandle string
 		DisplayName string
+		Identifier  string
 		Actions     []string
 	}{
 		Ctx:         ctx,
 		ProxyHandle: proxyHandle,
 		DisplayName: displayName,
+		Identifier:  identifier,
 		Actions:     actions,
 	}
 	mock.lockEnsureProxyResourceServer.Lock()
 	mock.calls.EnsureProxyResourceServer = append(mock.calls.EnsureProxyResourceServer, callInfo)
 	mock.lockEnsureProxyResourceServer.Unlock()
-	return mock.EnsureProxyResourceServerFunc(ctx, proxyHandle, displayName, actions)
+	return mock.EnsureProxyResourceServerFunc(ctx, proxyHandle, displayName, identifier, actions)
 }
 
 // EnsureProxyResourceServerCalls gets all the calls that were made to EnsureProxyResourceServer.
@@ -1156,12 +1160,14 @@ func (mock *EnvIdentityClientMock) EnsureProxyResourceServerCalls() []struct {
 	Ctx         context.Context
 	ProxyHandle string
 	DisplayName string
+	Identifier  string
 	Actions     []string
 } {
 	var calls []struct {
 		Ctx         context.Context
 		ProxyHandle string
 		DisplayName string
+		Identifier  string
 		Actions     []string
 	}
 	mock.lockEnsureProxyResourceServer.RLock()

@@ -286,7 +286,7 @@ func (p *LLMProxyProvisioner) ProvisionProxy(ctx context.Context, params Provisi
 		rb.ProxySecretLoc = &proxySecretLoc
 	}
 
-	proxyURL := buildProxyURL(params.Gateway, proxy.Configuration.Context, true)
+	proxyURL := buildProxyURL(params.Gateway, proxy.Configuration.Context)
 
 	p.logger.Info(
 		"Provisioned LLM proxy",
