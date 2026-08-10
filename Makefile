@@ -168,8 +168,8 @@ setup-gateway:
 .make/console-deps-installed: console/pnpm-lock.yaml | .make
 	@echo "📦 Installing console dependencies locally..."
 	@if ! command -v pnpm &> /dev/null; then \
-		echo "⚠️  pnpm not found. Installing pnpm globally..."; \
-		npm install -g pnpm; \
+		echo "⚠️  pnpm not found. Enabling via corepack..."; \
+		corepack enable || npm install -g pnpm@9.12.3; \
 	fi
 	@echo "📥 Running pnpm install..."
 	@cd console && pnpm install --frozen-lockfile

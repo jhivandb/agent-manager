@@ -1,14 +1,15 @@
-.PHONY: help install build dev clean purge
+.PHONY: help install build build-webapp dev clean purge
 
 # Default target
 help:
 	@echo "Console Development Commands:"
 	@echo ""
-	@echo "  make install     - Install all dependencies"
-	@echo "  make build       - Build all projects"
-	@echo "  make dev         - Start development"
-	@echo "  make clean       - Clean build outputs"
-	@echo "  make purge       - Remove node_modules and all caches"
+	@echo "  make install       - Install all dependencies"
+	@echo "  make build         - Build all projects"
+	@echo "  make build-webapp  - Build core-ui and its dependencies"
+	@echo "  make dev           - Start development"
+	@echo "  make clean         - Clean build outputs"
+	@echo "  make purge         - Remove node_modules and all caches"
 	@echo ""
 
 # Install dependencies

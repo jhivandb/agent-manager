@@ -6,7 +6,7 @@ MONOREPO_ROOT="$PWD"
 
 echo "==> Linking dependencies for container environment..."
 cd "$MONOREPO_ROOT"
-pnpm install
+pnpm install --frozen-lockfile
 
 echo "==> Generating runtime config..."
 cd "$MONOREPO_ROOT/apps/web-ui"
@@ -16,6 +16,7 @@ echo "==> Starting core-ui in watch mode..."
 cd "$MONOREPO_ROOT/workspaces/core-ui"
 pnpm run dev &
 CORE_UI_PID=$!
+trap 'kill $CORE_UI_PID 2>/dev/null' EXIT
 
 echo "==> Waiting for initial core-ui build..."
 sleep 10
