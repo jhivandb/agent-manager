@@ -19,17 +19,8 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          package_json_file: console/package.json
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: "20.19.0"
-          cache: pnpm
-          cache-dependency-path: console/pnpm-lock.yaml
+      - name: Setup Node.js and pnpm
+        uses: ./.github/actions/setup-console-node
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -48,17 +39,8 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          package_json_file: console/package.json
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: "20.19.0"
-          cache: pnpm
-          cache-dependency-path: console/pnpm-lock.yaml
+      - name: Setup Node.js and pnpm
+        uses: ./.github/actions/setup-console-node
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile

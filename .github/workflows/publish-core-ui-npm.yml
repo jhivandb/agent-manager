@@ -47,15 +47,9 @@ jobs:
         with:
           ref: ${{ inputs.source_ref }}
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+      - name: Setup Node.js and pnpm for npm registry
+        uses: ./.github/actions/setup-console-node
         with:
-          package_json_file: console/package.json
-
-      - name: Setup Node.js for npm registry
-        uses: actions/setup-node@v6
-        with:
-          node-version: 20
           registry-url: https://registry.npmjs.org
           scope: ${{ inputs.npm_scope }}
 
@@ -68,8 +62,7 @@ jobs:
       - name: Build core-ui package
         run: |
           cd console
-          PACKAGE_NAME=$(node -p "require('./workspaces/core-ui/package.json').name")
-          pnpm turbo run build --filter="${PACKAGE_NAME}..."
+          pnpm build:core-ui
         shell: bash
 
       - name: Ensure package scope matches target
