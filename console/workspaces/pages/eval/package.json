@@ -26,8 +26,8 @@
     "storybook": "storybook dev -p 6007",
     "build-storybook": "storybook build",
     "clean": "rm -rf dist",
-    "build": "rushx clean && tsc -project tsconfig.lib.json",
-    "dev": "rushx clean && tsc -project tsconfig.lib.json --watch"
+    "build": "pnpm run clean && tsc -project tsconfig.lib.json",
+    "dev": "pnpm run clean && tsc -project tsconfig.lib.json --watch"
   },
   "keywords": [
     "ai",
