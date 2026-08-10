@@ -17,7 +17,7 @@ For the Oxygen UI component library itself (theming, which components exist, imp
 | `workspaces/libs/shared-component/` | `@…/shared-component` | Business components (ConfirmationDialog, PolicyListSection) |
 | `workspaces/pages/<feature>/` | `@…/<feature>` | One package per feature page (configure-agent, deploy, gateways, llm-providers, …) |
 
-`pnpm-workspace.yaml` is the authoritative project list. Vite (dev) resolves each `@agent-management-platform/*` import to the package's **`src/`** for hot reload — no separate TS build step in dev.
+`pnpm-workspace.yaml` is the authoritative project list. Vite (dev) resolves each `@agent-management-platform/*` import to the package's **`src/`** for hot reload — no separate TS build step in dev. The one exception is core-ui's `dist/index.css`, which `make dev` produces via core-ui's watch build.
 
 ## Commands
 
@@ -25,7 +25,7 @@ For the Oxygen UI component library itself (theming, which components exist, imp
 make install          # pnpm install (only after package.json / dep changes)
 make dev              # core-ui watch + web-ui dev server → http://localhost:3000
 make build            # pnpm build (turbo run build, all packages)
-make build-webapp     # pnpm turbo run build --filter=@agent-management-platform/am-core-ui...
+make build-webapp     # pnpm build:core-ui (core-ui and its dependencies)
 make clean            # remove dist/ everywhere
 ```
 
