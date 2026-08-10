@@ -37,7 +37,6 @@ export default [
     ignores: [
       '**/dist/**',
       '**/node_modules/**',
-      '**/common/temp/**',
       '**/coverage/**',
       "**.config.js",
       "**.config.cjs"
