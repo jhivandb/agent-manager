@@ -47,6 +47,11 @@ jobs:
         with:
           ref: ${{ inputs.source_ref }}
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          package_json_file: console/package.json
+
       - name: Setup Node.js for npm registry
         uses: actions/setup-node@v6
         with:
@@ -57,15 +62,14 @@ jobs:
       - name: Install monorepo dependencies
         run: |
           cd console
-          corepack enable
-          node common/scripts/install-run-rush.js install --bypass-policy
+          pnpm install --frozen-lockfile
         shell: bash
 
       - name: Build core-ui package
         run: |
           cd console
           PACKAGE_NAME=$(node -p "require('./workspaces/core-ui/package.json').name")
-          node common/scripts/install-run-rush.js build --to "$PACKAGE_NAME"
+          pnpm turbo run build --filter="${PACKAGE_NAME}..."
         shell: bash
 
       - name: Ensure package scope matches target
