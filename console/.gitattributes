@@ -1,12 +1,8 @@
-# Don't allow people to merge changes to these generated lockfiles, because the result
-# may be invalid. Regenerate the lockfile instead (e.g. "pnpm install").
+# pnpm-lock.yaml is generated. Resolve conflicts by re-running "pnpm install",
+# not by hand-merging the conflict markers — the merged result may be invalid.
 pnpm-lock.yaml               merge=text
-shrinkwrap.yaml              merge=binary
-npm-shrinkwrap.json          merge=binary
-yarn.lock                    merge=binary
 
-# Several config files in this repo (tsconfig.json, turbo.json, ...) use JavaScript-style code
-# comments. The rule below prevents pedantic syntax highlighters such as GitHub's from
-# highlighting these comments as errors. Your text editor may also require a special
-# configuration to allow comments in JSON.
-*.json                       linguist-language=JSON-with-Comments
+# TypeScript's tsconfig files use JavaScript-style code comments. The rule below prevents
+# pedantic syntax highlighters such as GitHub's from highlighting these comments as errors.
+# Your text editor may also require a special configuration to allow comments in JSON.
+tsconfig*.json               linguist-language=JSON-with-Comments
