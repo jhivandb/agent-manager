@@ -262,6 +262,9 @@ importers:
       react-router-dom:
         specifier: 6.28.0
         version: 6.28.0(react-dom@19.1.1(react@19.1.1))(react@19.1.1)
+      rollup:
+        specifier: 4.62.4
+        version: 4.62.4
       rollup-plugin-dts:
         specifier: ~6.4.1
         version: 6.4.1(rollup@4.62.4)(typescript@5.9.3)
