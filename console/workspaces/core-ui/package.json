@@ -25,7 +25,7 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "preview": "vite preview",
-    "generate-route": "cd ../../libs/types && npm run generate-route"
+    "generate-route": "pnpm --filter @agent-management-platform/types run generate-route"
   },
   "scarfSettings": {
     "enabled": false
