@@ -14,7 +14,7 @@ WORKDIR ${WORKDIR_PATH}
 
 # Copy workspace configuration and entire monorepo structure
 # This is needed for proper dependency resolution
-COPY package.json pnpm-workspace.yaml pnpm-lock.yaml turbo.json ./
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml turbo.json .npmrc ./
 COPY apps/ apps/
 COPY workspaces/ workspaces/
 COPY dev-start.sh ./dev-start.sh
