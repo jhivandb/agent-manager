@@ -75,7 +75,6 @@ export default defineConfig({
         '**/node_modules/**',
         '**/common/temp/**',
         '**/.git/**',
-        '**/.rush/**',
       ],
     } : undefined,
     lib: {
