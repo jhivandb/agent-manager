@@ -74,7 +74,7 @@ fi
 echo ""
 echo "2️⃣  Start platform services"
 # Export console host path so docker-compose can align WORKDIR with the host,
-# preventing Rush temp-file / node_modules path mismatches.
+# preventing pnpm virtual-store / node_modules path mismatches.
 export CONSOLE_HOST_PATH="$(cd "$SCRIPT_DIR/../../console" && pwd)"
 
 # Must migrate before agent-manager-service starts: it crashes on a fresh volume
