@@ -101,6 +101,3 @@ jspm_packages/
 # Build outputs
 dist/
 dist-storybook/
-
-# Turborepo cache
-.turbo/

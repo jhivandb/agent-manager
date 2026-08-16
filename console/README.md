@@ -106,16 +106,16 @@ make purge
 make help
 ```
 
-### pnpm / Turbo Commands
+### pnpm Commands
 
 The `make` targets wrap these. Reach for them directly when you need a filter:
 
 ```bash
-pnpm build                                      # all packages
-pnpm build:core-ui                              # core-ui and its dependencies
-pnpm turbo run build --filter=<package-name>... # any package and its dependencies
-pnpm lint                                       # eslint across packages
-pnpm lint:fix                                   # eslint --fix across packages
+pnpm build                                        # all packages
+pnpm build:core-ui                                # core-ui and its dependencies
+pnpm -r --filter <package-name>... run build      # any package and its dependencies
+pnpm lint                                         # eslint across packages
+pnpm lint:fix                                     # eslint --fix across packages
 ```
 
 ### Project-Specific Commands

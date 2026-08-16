@@ -24,7 +24,7 @@ For the Oxygen UI component library itself (theming, which components exist, imp
 ```bash
 make install          # pnpm install (only after package.json / dep changes)
 make dev              # core-ui watch + web-ui dev server → http://localhost:3000
-make build            # pnpm build (turbo run build, all packages)
+make build            # pnpm build (pnpm -r run build, all packages)
 make build-webapp     # pnpm build:core-ui (core-ui and its dependencies)
 make clean            # remove dist/ everywhere
 ```

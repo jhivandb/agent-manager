@@ -37,9 +37,8 @@ clean:
 	@find apps -name "dist" -type d -exec rm -rf {} + 2>/dev/null || true
 	@echo "Done!"
 
-# Remove installed dependencies and caches
+# Remove installed dependencies
 purge: clean
-	@echo "Purging node_modules and caches..."
+	@echo "Purging node_modules..."
 	@find . -name "node_modules" -type d -prune -exec rm -rf {} + 2>/dev/null || true
-	@rm -rf .turbo
 	@echo "Done!"
