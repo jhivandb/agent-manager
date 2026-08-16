@@ -160,8 +160,7 @@ setup-platform: gen-keys
 setup-gateway:
 	@cd deployments/setup && ./setup-gateway.sh
 
-# Console local setup. The install is gated on console/pnpm-lock.yaml; the build always runs
-# because turbo caches it by source hash, which a timestamp sentinel cannot do correctly.
+# Console local setup. The install is gated on console/pnpm-lock.yaml.
 .make:
 	@mkdir -p .make
 

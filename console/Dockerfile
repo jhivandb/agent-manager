@@ -16,7 +16,7 @@ RUN corepack enable
 WORKDIR /app
 
 # Copy workspace configuration
-COPY package.json pnpm-workspace.yaml pnpm-lock.yaml turbo.json .npmrc ./
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml .npmrc ./
 
 # Copy all project sources
 COPY apps/ apps/
@@ -27,7 +27,7 @@ COPY workspaces/ workspaces/
 # published version at build time.
 RUN pnpm install --frozen-lockfile
 
-# Build all projects (topological order via turbo; includes core-ui and web-ui)
+# Build all projects (pnpm walks the workspace graph topologically)
 RUN pnpm build
 
 # Stage 2: Production stage with nginx
