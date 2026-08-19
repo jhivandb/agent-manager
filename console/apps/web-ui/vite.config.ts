@@ -8,9 +8,6 @@ export default defineConfig({
   resolve: {
     dedupe: ['react', 'react-dom', 'react-router-dom'],
     alias: [
-      // More specific aliases MUST come before general ones (prefix matching order matters)
-      { find: '@agent-management-platform/am-core-ui/dist/index.css', replacement: path.resolve(import.meta.dirname, '../../workspaces/core-ui/dist/index.css') },
-
       // Resolve core-ui and all its sub-packages to source for hot-reload
       { find: '@agent-management-platform/am-core-ui', replacement: path.resolve(import.meta.dirname, '../../workspaces/core-ui/src') },
 
