@@ -1,6 +1,6 @@
 # console — agent guide
 
-React 19 + TypeScript web UI. **pnpm + Turborepo monorepo**, built with **Vite**. Server state via **TanStack Query**; UI from **Oxygen UI** (WSO2's MUI 7 layer). Every package is scoped `@agent-management-platform/*` (the app shell `web-ui` is the one unscoped exception).
+React 19 + TypeScript web UI. **pnpm workspaces monorepo**, built with **Vite**. Server state via **TanStack Query**; UI from **Oxygen UI** (WSO2's MUI 7 layer). Every package is scoped `@agent-management-platform/*` (the app shell `web-ui` is the one unscoped exception).
 
 For the Oxygen UI component library itself (theming, which components exist, import rules), see **`.ai/oxygen-ui/AGENTS.md`** — always import UI from `@wso2/oxygen-ui`, never `@mui/material` directly.
 
