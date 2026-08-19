@@ -11,10 +11,14 @@ permissions:
   contents: read
 
 jobs:
-  lint:
-    name: Lint
+  check:
+    name: ${{ matrix.task }}
     runs-on:
       - codebuild-wso2_agent-manager-${{ github.run_id }}-${{ github.run_attempt }}
+    strategy:
+      fail-fast: false
+      matrix:
+        task: [lint, build]
     defaults:
       run:
         working-directory: console
@@ -28,25 +32,5 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Lint
-        run: pnpm lint
-
-  build:
-    name: Build
-    runs-on:
-      - codebuild-wso2_agent-manager-${{ github.run_id }}-${{ github.run_attempt }}
-    defaults:
-      run:
-        working-directory: console
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
-
-      - name: Setup Node.js and pnpm
-        uses: ./.github/actions/setup-console-node
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build
-        run: pnpm build
+      - name: Run ${{ matrix.task }}
+        run: pnpm ${{ matrix.task }}
