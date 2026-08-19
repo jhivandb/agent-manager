@@ -43,8 +43,7 @@
       "@agent-management-platform/identities": ["../pages/identities/src"],
       "@agent-management-platform/agent-security": ["../pages/agent-security/src"],
       "@agent-management-platform/agent-kind": ["../pages/agent-kind/src"],
-      "@agent-management-platform/deployment-pipelines": ["../pages/deployment-pipelines/src"],
-      "@agent-management-platform/profile-settings": ["../pages/profile-settings/src"]
+      "@agent-management-platform/deployment-pipelines": ["../pages/deployment-pipelines/src"]
     }
   },
   "include": ["src/index.ts"]
