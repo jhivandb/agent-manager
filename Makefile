@@ -19,7 +19,7 @@ help:
 	@echo "  make setup-kata              - Join a real (non-Docker) node to the cluster and install Kata there (needs nested virt; run after make setup)"
 	@echo "  make setup-platform          - Build images and start core platform services"
 	@echo "  make setup-gateway           - Install API Platform Gateway (run via make setup)"
-	@echo "  make setup-console-local     - Install console deps (only if changed)"
+	@echo "  make setup-console-local     - Install console deps (only if changed), then build"
 	@echo "  make setup-console-local-force - Force reinstall console deps"
 	@echo ""
 	@echo "💻 Daily Development:"
