@@ -8,7 +8,6 @@
   "scripts": {
     "build": "tsc",
     "clean": "rm -rf dist",
-    "rebuild": "pnpm run clean && pnpm run build",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "dev": "tsc -b --watch"
