@@ -53,14 +53,14 @@ make dev
 ```
 
 This will:
-- Start all library dependencies in watch mode
 - Launch the Vite dev server at `http://localhost:3000`
-- Automatically rebuild dependencies when you make changes
-- Hot-reload the webapp when dependencies update
+- Hot-reload on edits to any workspace package, not just the app
 
-Press `Ctrl+C` to stop all processes. No separate build step is needed for development —
-Vite resolves `@agent-management-platform/*` imports straight to each package's `src/`.
-Run `make build` only to produce production output.
+No separate build step is needed for development — Vite resolves
+`@agent-management-platform/*` imports straight to each package's `src/`, so there are
+no library watchers to run. Run `make build` only to produce production output.
+
+Press `Ctrl+C` to stop.
 
 ### 3. Environment Configuration
 

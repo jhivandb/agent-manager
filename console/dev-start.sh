@@ -12,26 +12,7 @@ echo "==> Generating runtime config..."
 cd "$MONOREPO_ROOT/apps/web-ui"
 envsubst < public/config.template.js > public/config.js
 
-echo "==> Starting core-ui in watch mode..."
-cd "$MONOREPO_ROOT/workspaces/core-ui"
-pnpm run dev &
-CORE_UI_PID=$!
-trap 'kill $CORE_UI_PID 2>/dev/null' EXIT
-
-# Gate the dev server on core-ui's watch build having emitted its bundle once. core-ui is
-# Emotion-styled and imports no stylesheets, so it never produces a dist/index.css to wait on.
-echo "==> Waiting for initial core-ui build..."
-CORE_UI_BUNDLE="$MONOREPO_ROOT/workspaces/core-ui/dist/index.js"
-WAITED=0
-while [ ! -f "$CORE_UI_BUNDLE" ]; do
-  if [ "$WAITED" -ge 180 ]; then
-    echo "core-ui did not produce dist/index.js within 180s" >&2
-    exit 1
-  fi
-  sleep 1
-  WAITED=$((WAITED + 1))
-done
-
+# No core-ui build step: apps/web-ui/vite.config.ts aliases every workspace package
+# to its src/, so the dev server compiles them itself and picks up edits directly.
 echo "==> Starting web-ui dev server..."
-cd "$MONOREPO_ROOT/apps/web-ui"
 exec pnpm run dev --host 0.0.0.0
