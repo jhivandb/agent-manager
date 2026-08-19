@@ -18,13 +18,14 @@ pnpm run dev &
 CORE_UI_PID=$!
 trap 'kill $CORE_UI_PID 2>/dev/null' EXIT
 
-# web-ui's vite config aliases core-ui's dist/index.css, so it must exist before the dev server starts
+# Gate the dev server on core-ui's watch build having emitted its bundle once. core-ui is
+# Emotion-styled and imports no stylesheets, so it never produces a dist/index.css to wait on.
 echo "==> Waiting for initial core-ui build..."
-CORE_UI_CSS="$MONOREPO_ROOT/workspaces/core-ui/dist/index.css"
+CORE_UI_BUNDLE="$MONOREPO_ROOT/workspaces/core-ui/dist/index.js"
 WAITED=0
-while [ ! -f "$CORE_UI_CSS" ]; do
+while [ ! -f "$CORE_UI_BUNDLE" ]; do
   if [ "$WAITED" -ge 180 ]; then
-    echo "core-ui did not produce dist/index.css within 180s" >&2
+    echo "core-ui did not produce dist/index.js within 180s" >&2
     exit 1
   fi
   sleep 1

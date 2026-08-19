@@ -17,7 +17,7 @@ For the Oxygen UI component library itself (theming, which components exist, imp
 | `workspaces/libs/shared-component/` | `@…/shared-component` | Business components (ConfirmationDialog, PolicyListSection) |
 | `workspaces/pages/<feature>/` | `@…/<feature>` | One package per feature page (configure-agent, deploy, gateways, llm-providers, …) |
 
-`pnpm-workspace.yaml` is the authoritative project list. Vite (dev) resolves each `@agent-management-platform/*` import to the package's **`src/`** for hot reload — no separate TS build step in dev. The one exception is core-ui's `dist/index.css`, which `make dev` produces via core-ui's watch build.
+`pnpm-workspace.yaml` is the authoritative project list. Vite (dev) resolves each `@agent-management-platform/*` import to the package's **`src/`** for hot reload — no separate TS build step in dev. This holds for core-ui's own build too, so `make dev` needs no prior `make build`. core-ui is Emotion-styled and emits no stylesheet, so nothing consumes a `dist/index.css`.
 
 ## Commands
 
