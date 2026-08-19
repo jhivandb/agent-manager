@@ -27,7 +27,7 @@ build-webapp:
 	@pnpm build:core-ui
 
 dev:
-	@echo "Starting development mode (core-ui watch + web-ui dev server)..."
+	@echo "Starting web-ui dev server..."
 	@pnpm dev
 
 # Clean build outputs
