@@ -1,13 +1,12 @@
 # Agent Manager Console
 
-React/TypeScript web application for the Agent Manager platform, built as a pnpm + Turborepo monorepo.
+React/TypeScript web application for the Agent Manager platform, built as a pnpm workspaces monorepo.
 
 ## Tech Stack
 
 - **React 19** - UI framework
 - **TypeScript** - Type safety
 - **Vite** - Build tool and dev server
-- **Turborepo** - Monorepo task orchestration
 - **pnpm** - Package manager
 
 ## Prerequisites
