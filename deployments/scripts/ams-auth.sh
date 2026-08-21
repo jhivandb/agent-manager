@@ -28,12 +28,18 @@ get_ams_token() {
 
   # Explicit scope required: an unscoped client_credentials token gets HTTP 403
   # from AMS's RBAC check on the thunder-system-client route (confirmed live).
+  # Thunder grants requested ∩ allowed, so a caller that needs more than the
+  # thunder-system-client route (e.g. also creating an environment or rewriting a
+  # deployment pipeline) sets AMS_TOKEN_SCOPES to the full space-separated set it
+  # needs — requesting one scope would leave every other route 403.
+  local scopes="${AMS_TOKEN_SCOPES:-amp:org:manage-service-account}"
+
   local token_response
   token_response="$(curl -sf --max-time 30 --retry "$max_retries" --retry-delay 5 \
     -X POST "${idp_token_url}" \
     -u "${idp_client_id}:${idp_client_secret}" \
     -d "grant_type=client_credentials" \
-    --data-urlencode "scope=amp:org:manage-service-account" 2>/dev/null)" || return 1
+    --data-urlencode "scope=${scopes}" 2>/dev/null)" || return 1
 
   local access_token
   access_token="$(printf '%s' "${token_response}" | grep -o '"access_token":"[^"]*"' | cut -d'"' -f4)"

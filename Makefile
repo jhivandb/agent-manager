@@ -1,4 +1,4 @@
-.PHONY: help setup setup-colima setup-k3d setup-openchoreo setup-default-env-thunder setup-sandbox setup-gvisor setup-kata setup-platform setup-gateway setup-console-local setup-console-local-force setup-amp teardown-amp reset-amp dev-up dev-down dev-restart dev-rebuild dev-logs dev-migrate openchoreo-up openchoreo-down openchoreo-status thunder-up thunder-down thunder-restart thunder-reset teardown db-connect db-logs service-logs service-shell console-logs port-forward stop-port-forward gen-eval-artifacts gen-instrumentation-contract check-contract-drift check-matrix-manifest e2e-test
+.PHONY: help setup setup-colima setup-k3d setup-openchoreo setup-default-env-thunder setup-prod-env setup-sandbox setup-gvisor setup-kata setup-platform setup-gateway setup-console-local setup-console-local-force setup-amp teardown-amp reset-amp dev-up dev-down dev-restart dev-rebuild dev-logs dev-migrate openchoreo-up openchoreo-down openchoreo-status thunder-up thunder-down thunder-restart thunder-reset teardown db-connect db-logs service-logs service-shell console-logs port-forward stop-port-forward gen-eval-artifacts gen-instrumentation-contract check-contract-drift check-matrix-manifest e2e-test
 
 # Absolute path to the console directory on the host. Passed to docker-compose
 # so the container mounts and builds at the same path, keeping rush/pnpm
@@ -21,6 +21,9 @@ help:
 	@echo "  make setup-gateway           - Install API Platform Gateway (run via make setup)"
 	@echo "  make setup-console-local     - Install console deps (only if changed)"
 	@echo "  make setup-console-local-force - Force reinstall console deps"
+	@echo ""
+	@echo "🌍 Environments:"
+	@echo "  make setup-prod-env          - Add a 'prod' environment and set the default pipeline to default → prod"
 	@echo ""
 	@echo "💻 Daily Development:"
 	@echo "  make dev-up                  - Start platform services (console, service, db)"
@@ -145,6 +148,12 @@ setup-default-env-thunder:
 	    echo "      AMP_API_URL=http://localhost:9000/api/v1 \\"; \
 	    echo "      bash deployments/scripts/add-environment-thunder.sh"; \
 	  }
+
+# Adds a second environment ("prod") on top of an existing install and points the
+# default deployment pipeline at it. Opt-in rather than part of `make setup`: a
+# second environment means another Thunder release plus another gateway install.
+setup-prod-env:
+	@cd deployments/setup && ./setup-prod-env.sh
 
 setup-sandbox:
 	@cd deployments/scripts && ./setup-sandbox.sh
