@@ -4552,14 +4552,35 @@ func (s *agentManagerService) assertMCPBindingsSurvivePromotion(
 
 	brokenList := strings.Join(brokenByPromotion, ", ")
 	s.logPromotionBlocked(ouID, projectName, agentName, targetEnv,
-		"MCP connection(s) resolve in the source environment but have no endpoint in the target — promoting would "+
-			"deploy the agent with an empty MCP URL and API key, so it would start and then fail on every tool call",
+		"MCP configurations are bound to an MCP server in the source environment but to none in the target — "+
+			"promoting would deploy the agent with an empty MCP URL and API key, so it would start and then fail "+
+			"on every tool call",
 		"sourceEnvironment", sourceEnv, "connections", brokenList)
-	return utils.NewInvalidInputError(
-		fmt.Sprintf("Promotion blocked: MCP connection(s) %s have no endpoint in %q",
-			briefConnectionList(brokenByPromotion), targetEnv),
-		fmt.Sprintf("bind them to an endpoint in %q, then promote", targetEnv),
-	)
+	message, reason := mcpPromotionBlockText(brokenByPromotion, targetEnv)
+	return utils.NewInvalidInputError(message, reason)
+}
+
+// mcpPromotionBlockText renders the caller-facing halves of a promotion blocked
+// by unbound MCP configurations, agreeing with how many there are rather than
+// hedging with "configuration(s)".
+//
+// The message reports only what was observed — the configuration resolves to no
+// MCP server in the target — and not why. Whether the server has an endpoint
+// there is never checked: an absent mapping row alone produces this state, so
+// naming a missing endpoint would send the caller after the wrong problem.
+//
+// A lone name is quoted because it reads as a name; a list is left bare, since
+// briefConnectionList may end it with a "(+N more)" count that must not appear
+// to be part of a name. names must not be empty.
+func mcpPromotionBlockText(names []string, targetEnv string) (message, reason string) {
+	problem := fmt.Sprintf("MCP configuration %q has no MCP server", names[0])
+	remedy := "its MCP server"
+	if len(names) > 1 {
+		problem = fmt.Sprintf("MCP configurations %s have no MCP server", briefConnectionList(names))
+		remedy = "their MCP servers"
+	}
+	return fmt.Sprintf("Promotion blocked: %s in %q", problem, targetEnv),
+		fmt.Sprintf("deploy %s to %q, then promote", remedy, targetEnv)
 }
 
 // maxBriefUIDetail caps how much of an unbounded upstream detail (a Thunder

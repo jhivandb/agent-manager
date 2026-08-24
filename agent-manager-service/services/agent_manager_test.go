@@ -752,7 +752,7 @@ func TestPromoteAgent_BlocksWhenMCPConnectionUnresolvableInTarget(t *testing.T) 
 
 	ve := requireBriefPromotionBlock(t, err)
 	assert.Contains(t, ve.Message, "booking", "the message must name the connection that blocks the promotion")
-	assert.Contains(t, ve.Reason, "bind")
+	assert.Contains(t, ve.Reason, "deploy")
 	assert.False(t, *promoteCalled,
 		"promotion must be refused before PromoteComponent — otherwise the agent is already running with an empty MCP URL by the time this error is returned")
 }
@@ -809,6 +809,60 @@ func TestPromoteAgent_ListsBrokenMCPConnectionsInStableOrder(t *testing.T) {
 
 	ve := requireBriefPromotionBlock(t, err)
 	assert.Contains(t, ve.Message, "booking, payments")
+}
+
+// The block reports what was actually checked — that the configuration has no
+// MCP server bound in the target — rather than asserting the server has no
+// endpoint there. Only the absent mapping row is observed; the server may well
+// be deployed to the target, with just the binding missing, and sending the
+// user to look for a missing endpoint would send them after the wrong problem.
+func TestPromoteAgent_BlockedMCPPromotion_ReportsTheMissingBindingNotAnUncheckedCause(t *testing.T) {
+	s, _ := promoteAgentTestFixture(t, []client.EnvVar{{Key: "AMP_AGENTID_CLIENT_ID", Value: "staging-client-id"}}, nil)
+	stubUnresolvedMCPs(t, s, "staging", "booking")
+
+	err := s.PromoteAgent(auditableCtx(t), "acme", "proj1", "my-agent", &spec.PromoteAgentRequest{
+		SourceEnvironment: "dev",
+		TargetEnvironment: "staging",
+	})
+
+	ve := requireBriefPromotionBlock(t, err)
+	assert.Contains(t, ve.Message, `MCP configuration "booking" has no MCP server in "staging"`)
+	assert.NotContains(t, ve.Message, "endpoint",
+		"whether the MCP server has an endpoint in the target is never checked, so the block must not claim it")
+}
+
+// "Bind them to an endpoint" named no control the console or the CLI offers.
+// Deploying the MCP server to the target is what actually clears the block:
+// this configuration is already mapped in the source, so ReconcileMCPBindingsForProxy
+// backfills the target mapping as soon as the server lands there.
+func TestPromoteAgent_BlockedMCPPromotion_TellsUserToDeployTheMCPServer(t *testing.T) {
+	s, _ := promoteAgentTestFixture(t, []client.EnvVar{{Key: "AMP_AGENTID_CLIENT_ID", Value: "staging-client-id"}}, nil)
+	stubUnresolvedMCPs(t, s, "staging", "booking")
+
+	err := s.PromoteAgent(auditableCtx(t), "acme", "proj1", "my-agent", &spec.PromoteAgentRequest{
+		SourceEnvironment: "dev",
+		TargetEnvironment: "staging",
+	})
+
+	ve := requireBriefPromotionBlock(t, err)
+	assert.Equal(t, `deploy its MCP server to "staging", then promote`, ve.Reason)
+}
+
+// One broken configuration is the common case, so the block reads as a sentence
+// about it instead of hedging with "configuration(s)" and "their".
+func TestPromoteAgent_BlockedMCPPromotion_ReadsAsPluralOnlyWhenSeveralAreBroken(t *testing.T) {
+	s, _ := promoteAgentTestFixture(t, []client.EnvVar{{Key: "AMP_AGENTID_CLIENT_ID", Value: "staging-client-id"}}, nil)
+	stubUnresolvedMCPs(t, s, "staging", "payments", "booking")
+
+	err := s.PromoteAgent(auditableCtx(t), "acme", "proj1", "my-agent", &spec.PromoteAgentRequest{
+		SourceEnvironment: "dev",
+		TargetEnvironment: "staging",
+	})
+
+	ve := requireBriefPromotionBlock(t, err)
+	assert.Contains(t, ve.Message, `MCP configurations booking, payments have no MCP server in "staging"`)
+	assert.Equal(t, `deploy their MCP servers to "staging", then promote`, ve.Reason)
+	assert.NotContains(t, renderedUIError(ve), "(s)", "the wording agrees with the count instead of hedging")
 }
 
 func TestPromoteAgent_TargetIdentityReady_PromotesWithTargetOnlyCredentials(t *testing.T) {
