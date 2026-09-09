@@ -95,6 +95,7 @@ type agentManagerService struct {
 	monitorManagerService     MonitorManagerService
 	agentIdentityInjection    AgentIdentityInjectionService
 	identityClient            thundersvc.IdentityClient
+	a2aPublicationRepo        repositories.A2APublicationRepository
 	logger                    *slog.Logger
 }
 
@@ -114,6 +115,7 @@ func NewAgentManagerService(
 	monitorManagerService MonitorManagerService,
 	agentIdentityInjection AgentIdentityInjectionService,
 	identityClient thundersvc.IdentityClient,
+	a2aPublicationRepo repositories.A2APublicationRepository,
 	logger *slog.Logger,
 ) AgentManagerService {
 	return &agentManagerService{
@@ -129,6 +131,7 @@ func NewAgentManagerService(
 		monitorManagerService:     monitorManagerService,
 		agentIdentityInjection:    agentIdentityInjection,
 		identityClient:            identityClient,
+		a2aPublicationRepo:        a2aPublicationRepo,
 		artifactRepo:              artifactRepo,
 		aiApplicationService:      aiApplicationService,
 		gatewayRepo:               gatewayRepo,
@@ -3334,6 +3337,21 @@ func (s *agentManagerService) DeployAgent(ctx context.Context, ouID string, proj
 		}
 	}
 
+	if isA2AAgent {
+		// The artifact row is created for every API agent kind, A2A included: it
+		// is what the agent's API keys are already bound to and what the gateway
+		// is told about, so the entire API-key path is inherited with no new code.
+		apiArtifact, artifactErr := ensureAgentEnvAPIArtifact(s.db, s.artifactRepo, ouID, projectName, agentName, targetEnv.UUID)
+		if artifactErr != nil {
+			return "", fmt.Errorf("cannot deploy A2A agent without environment API artifact record: %w", artifactErr)
+		}
+		envUUID, parseErr := uuid.Parse(targetEnv.UUID)
+		if parseErr != nil {
+			return "", fmt.Errorf("environment %q has an unparseable UUID %q: %w", lowestEnv, targetEnv.UUID, parseErr)
+		}
+		s.enqueueA2APublication(ctx, ouID, projectName, agentName, lowestEnv, envUUID, apiArtifact.UUID)
+	}
+
 	// Persist instrumentation config to database. Passing the pinned
 	// instrumentation_version (captured above) preserves it across the
 	// Upsert — the repo's DoUpdates map includes that column, so omitting
@@ -5973,4 +5991,39 @@ func buildNameOf(build *models.BuildResponse) string {
 		return ""
 	}
 	return build.Name
+}
+
+// enqueueA2APublication records that an A2A agent's gateway resource is due to
+// be emitted for one environment.
+//
+// The publication cannot happen here. upstream.url is read from the release
+// binding's status, which OpenChoreo populates only once the binding
+// reconciles — after this call returns — so an inline publish would emit an
+// Agent with an empty upstream that routes nowhere while looking healthy. The
+// A2A publication reconciler picks the row up and finishes the job.
+//
+// Best effort: the agent is deployed and running by this point, and failing the
+// deploy over a queue write would report a false failure for work that
+// succeeded. A missed row surfaces as an agent that never appears on its
+// gateway, which the next redeploy re-queues.
+func (s *agentManagerService) enqueueA2APublication(
+	ctx context.Context,
+	ouID, projectName, agentName, environmentName string,
+	environmentUUID, artifactUUID uuid.UUID,
+) {
+	if s.a2aPublicationRepo == nil {
+		return
+	}
+	pub := &models.A2APublication{
+		OUID:            ouID,
+		ProjectName:     projectName,
+		AgentName:       agentName,
+		EnvironmentName: environmentName,
+		EnvironmentUUID: environmentUUID,
+		ArtifactUUID:    artifactUUID,
+	}
+	if err := s.a2aPublicationRepo.Enqueue(ctx, pub); err != nil {
+		s.logger.Error("Failed to queue A2A agent gateway publication; the agent is deployed but will not reach its gateway until the next redeploy",
+			"agentName", agentName, "environment", environmentName, "error", err)
+	}
 }
