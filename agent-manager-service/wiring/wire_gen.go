@@ -8,9 +8,6 @@ package wiring
 
 import (
 	"fmt"
-	"log/slog"
-	"time"
-
 	"github.com/google/wire"
 	"github.com/wso2/agent-manager/agent-manager-service/audit"
 	"github.com/wso2/agent-manager/agent-manager-service/clients/observersvc"
@@ -28,6 +25,8 @@ import (
 	"github.com/wso2/agent-manager/agent-manager-service/utils"
 	"github.com/wso2/agent-manager/agent-manager-service/websocket"
 	"gorm.io/gorm"
+	"log/slog"
+	"time"
 )
 
 // Injectors from wire.go:
@@ -173,6 +172,8 @@ func InitializeAppParams(cfg *config.Config, db *gorm.DB, authProvider client.Au
 	agentIdentityController := controllers.NewAgentIdentityController(envThunderResolver, agentThunderClientRepository, mcpProxyRepository, mcpProxyScopeRepository, mcpProxyService)
 	monitorSchedulerService := services.NewMonitorSchedulerService(openChoreoClient, publisherCredentialProvisioner, logger, monitorExecutor, monitorRepository)
 	agentThunderReconcilerService := services.NewAgentThunderReconcilerService(agentThunderProvisioning, agentIdentityInjectionService, agentThunderClientRepository, logger)
+	a2APublicationRepository := ProvideA2APublicationRepository(db)
+	a2APublicationReconcilerService := services.NewA2APublicationReconcilerService(a2APublicationRepository, deploymentRepository, gatewayRepository, agentConfigRepository, openChoreoClient, gatewayEventsService, logger)
 	appParams := &AppParams{
 		AuthMiddleware:                   middleware,
 		Logger:                           logger,
@@ -207,6 +208,7 @@ func InitializeAppParams(cfg *config.Config, db *gorm.DB, authProvider client.Au
 		AgentIdentityController:          agentIdentityController,
 		MonitorScheduler:                 monitorSchedulerService,
 		AgentThunderReconciler:           agentThunderReconcilerService,
+		A2APublicationReconciler:         a2APublicationReconcilerService,
 		LLMTemplateStore:                 llmTemplateStore,
 		InfraResourceManager:             infraResourceManager,
 		AgentManagerService:              agentManagerService,
@@ -353,6 +355,8 @@ func InitializeTestAppParamsWithClientMocks(cfg *config.Config, db *gorm.DB, aut
 	agentIdentityController := controllers.NewAgentIdentityController(envThunderResolver, agentThunderClientRepository, mcpProxyRepository, mcpProxyScopeRepository, mcpProxyService)
 	monitorSchedulerService := services.NewMonitorSchedulerService(openChoreoClient, publisherCredentialProvisioner, logger, monitorExecutor, monitorRepository)
 	agentThunderReconcilerService := services.NewAgentThunderReconcilerService(agentThunderProvisioningService, agentIdentityInjectionService, agentThunderClientRepository, logger)
+	a2APublicationRepository := ProvideA2APublicationRepository(db)
+	a2APublicationReconcilerService := services.NewA2APublicationReconcilerService(a2APublicationRepository, deploymentRepository, gatewayRepository, agentConfigRepository, openChoreoClient, gatewayEventsService, logger)
 	appParams := &AppParams{
 		AuthMiddleware:                   authMiddleware,
 		Logger:                           logger,
@@ -387,6 +391,7 @@ func InitializeTestAppParamsWithClientMocks(cfg *config.Config, db *gorm.DB, aut
 		AgentIdentityController:          agentIdentityController,
 		MonitorScheduler:                 monitorSchedulerService,
 		AgentThunderReconciler:           agentThunderReconcilerService,
+		A2APublicationReconciler:         a2APublicationReconcilerService,
 		LLMTemplateStore:                 llmTemplateStore,
 		InfraResourceManager:             infraResourceManager,
 		AgentManagerService:              agentManagerService,
@@ -421,7 +426,7 @@ var clientProviderSet = wire.NewSet(
 	ProvideEnvThunderResolver,
 )
 
-var serviceProviderSet = wire.NewSet(services.NewAgentManagerService, services.NewAgentKindService, services.NewInfraResourceManager, services.NewAgentTokenManagerService, ProvideGitCredentialsService, services.NewRepositoryService, services.NewMonitorExecutor, services.NewMonitorManagerService, ProvideThunderConfig, services.NewMonitorSchedulerService, ProvideAgentIdentityInjectionService, services.NewAgentThunderReconcilerService, services.NewEvaluatorManagerService, services.NewEnvironmentService, services.NewPlatformGatewayService, services.NewLLMProviderTemplateService, services.NewLLMProviderService, services.NewLLMProxyService, services.NewLLMProviderDeploymentService, services.NewLLMProviderAPIKeyService, services.NewLLMProxyAPIKeyService, services.NewAgentAPIKeyService, services.NewLLMProxyDeploymentService, services.NewMCPProxyService, services.NewMCPProxyScopeService, wire.Bind(new(services.MCPProxyRedeployer), new(*services.MCPProxyService)), wire.Bind(new(controllers.MCPResourceServerIdentifierResolver), new(*services.MCPProxyService)), services.NewGatewayInternalAPIService, services.NewMonitorScoresService, services.NewCatalogService, services.NewLLMProxyProvisioner, services.NewAgentConfigurationService, services.NewLLMTemplateStore, services.NewGitSecretService, services.NewAIApplicationService)
+var serviceProviderSet = wire.NewSet(services.NewAgentManagerService, services.NewAgentKindService, services.NewInfraResourceManager, services.NewAgentTokenManagerService, ProvideGitCredentialsService, services.NewRepositoryService, services.NewMonitorExecutor, services.NewMonitorManagerService, ProvideThunderConfig, services.NewMonitorSchedulerService, ProvideAgentIdentityInjectionService, services.NewAgentThunderReconcilerService, services.NewA2APublicationReconcilerService, services.NewEvaluatorManagerService, services.NewEnvironmentService, services.NewPlatformGatewayService, services.NewLLMProviderTemplateService, services.NewLLMProviderService, services.NewLLMProxyService, services.NewLLMProviderDeploymentService, services.NewLLMProviderAPIKeyService, services.NewLLMProxyAPIKeyService, services.NewAgentAPIKeyService, services.NewLLMProxyDeploymentService, services.NewMCPProxyService, services.NewMCPProxyScopeService, wire.Bind(new(services.MCPProxyRedeployer), new(*services.MCPProxyService)), wire.Bind(new(controllers.MCPResourceServerIdentifierResolver), new(*services.MCPProxyService)), services.NewGatewayInternalAPIService, services.NewMonitorScoresService, services.NewCatalogService, services.NewLLMProxyProvisioner, services.NewAgentConfigurationService, services.NewLLMTemplateStore, services.NewGitSecretService, services.NewAIApplicationService)
 
 var instrumentationProviderSet = wire.NewSet(
 	ProvideInstrumentationCatalog,
@@ -642,6 +647,7 @@ var repositoryProviderSet = wire.NewSet(
 	ProvideLLMProviderRepository,
 	ProvideLLMProxyRepository,
 	ProvideMCPProxyRepository, repositories.NewMCPProxyEndpointRepository, ProvideDeploymentRepository,
+	ProvideA2APublicationRepository,
 	ProvideArtifactRepository,
 	ProvideScoreRepository,
 	ProvideCatalogRepository,
@@ -744,6 +750,10 @@ func ProvideMCPProxyRepository(db *gorm.DB) repositories.MCPProxyRepository {
 
 func ProvideDeploymentRepository(db *gorm.DB) repositories.DeploymentRepository {
 	return repositories.NewDeploymentRepo(db)
+}
+
+func ProvideA2APublicationRepository(db *gorm.DB) repositories.A2APublicationRepository {
+	return repositories.NewA2APublicationRepository(db)
 }
 
 func ProvideArtifactRepository(db *gorm.DB) repositories.ArtifactRepository {
