@@ -17,10 +17,16 @@
 package services
 
 import (
+	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 
+	"github.com/google/uuid"
 	"gopkg.in/yaml.v3"
+
+	"github.com/wso2/agent-manager/agent-manager-service/models"
+	"github.com/wso2/agent-manager/agent-manager-service/repositories"
 )
 
 const (
@@ -193,4 +199,69 @@ func buildA2AAgentDeploymentYAML(in A2AAgentDeploymentInput) (*A2AAgentDeploymen
 			},
 		},
 	}, nil
+}
+
+// broadcastA2AAgentDeletion tells every gateway that could be holding this
+// Agent to drop it.
+//
+// The recipient set is the union of the gateways the artifact has deployment
+// rows for and every active gateway in the org — the same union
+// gatewayIDsForDeletion builds for MCP proxies, and for the same reason: a
+// gateway left holding a deleted agent keeps routing to a workload that is
+// gone, so a redundant delete is much cheaper than a missed one.
+//
+// Best effort. Deletion of the agent itself has already happened by the time
+// this runs; failing it here would leave the caller unable to complete a delete
+// it cannot undo.
+func broadcastA2AAgentDeletion(
+	ctx context.Context,
+	events *GatewayEventsService,
+	deploymentRepo repositories.DeploymentRepository,
+	gatewayRepo repositories.GatewayRepository,
+	artifactUUID uuid.UUID,
+	ouID string,
+	logger *slog.Logger,
+) {
+	_ = ctx
+	if events == nil || artifactUUID == uuid.Nil {
+		return
+	}
+
+	gatewayIDs := map[string]struct{}{}
+	if deploymentRepo != nil {
+		deployed, err := deploymentRepo.GetDeployedGatewaysByProvider(artifactUUID, ouID)
+		if err != nil {
+			logger.Warn("Failed to list deployed gateways for A2A agent deletion",
+				"artifactID", artifactUUID, "error", err)
+		}
+		for _, id := range deployed {
+			if strings.TrimSpace(id) != "" {
+				gatewayIDs[id] = struct{}{}
+			}
+		}
+	}
+	if gatewayRepo != nil {
+		active := true
+		gateways, err := gatewayRepo.ListWithFilters(repositories.GatewayFilterOptions{
+			OrganizationID: ouID,
+			Status:         &active,
+		})
+		if err != nil {
+			logger.Warn("Failed to list active gateways for A2A agent deletion",
+				"artifactID", artifactUUID, "error", err)
+		}
+		for _, gw := range gateways {
+			if gw != nil {
+				gatewayIDs[gw.UUID.String()] = struct{}{}
+			}
+		}
+	}
+
+	event := &models.AgentDeletionEvent{AgentID: artifactUUID.String()}
+	for gatewayID := range gatewayIDs {
+		if err := events.BroadcastAgentDeletionEvent(gatewayID, event); err != nil {
+			logger.Warn("Failed to broadcast A2A agent deletion event",
+				"artifactID", artifactUUID, "gatewayID", gatewayID, "error", err)
+		}
+	}
 }

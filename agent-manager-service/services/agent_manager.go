@@ -96,6 +96,8 @@ type agentManagerService struct {
 	agentIdentityInjection    AgentIdentityInjectionService
 	identityClient            thundersvc.IdentityClient
 	a2aPublicationRepo        repositories.A2APublicationRepository
+	deploymentRepo            repositories.DeploymentRepository
+	gatewayEventsService      *GatewayEventsService
 	logger                    *slog.Logger
 }
 
@@ -116,6 +118,8 @@ func NewAgentManagerService(
 	agentIdentityInjection AgentIdentityInjectionService,
 	identityClient thundersvc.IdentityClient,
 	a2aPublicationRepo repositories.A2APublicationRepository,
+	deploymentRepo repositories.DeploymentRepository,
+	gatewayEventsService *GatewayEventsService,
 	logger *slog.Logger,
 ) AgentManagerService {
 	return &agentManagerService{
@@ -132,6 +136,8 @@ func NewAgentManagerService(
 		agentIdentityInjection:    agentIdentityInjection,
 		identityClient:            identityClient,
 		a2aPublicationRepo:        a2aPublicationRepo,
+		deploymentRepo:            deploymentRepo,
+		gatewayEventsService:      gatewayEventsService,
 		artifactRepo:              artifactRepo,
 		aiApplicationService:      aiApplicationService,
 		gatewayRepo:               gatewayRepo,
@@ -2808,6 +2814,20 @@ func (s *agentManagerService) deleteAgentAPIArtifact(ctx context.Context, ouID, 
 	artifact, err := s.artifactRepo.GetByHandle(agentEnvAPIArtifactHandle(projectName, agentName, environment.UUID), ouID)
 	if err != nil {
 		return
+	}
+	// Before the row goes: the gateway keys its Agent on this UUID, and once the
+	// row is gone there is nothing left to name in the event.
+	//
+	// Unconditional rather than gated on the subtype: deleting an agent that was
+	// never an A2A agent sends a delete for an artifact no gateway holds, which
+	// every gateway ignores — and the alternative, reading the subtype off a
+	// component that may already be gone, is the fragile half of the trade.
+	broadcastA2AAgentDeletion(ctx, s.gatewayEventsService, s.deploymentRepo, s.gatewayRepo, artifact.UUID, ouID, s.logger)
+	if s.a2aPublicationRepo != nil {
+		if pubErr := s.a2aPublicationRepo.DeleteForAgent(ctx, ouID, projectName, agentName); pubErr != nil {
+			s.logger.Warn("Failed to clear A2A publication queue rows for deleted agent",
+				"agentName", agentName, "error", pubErr)
+		}
 	}
 	if delErr := s.artifactRepo.Delete(s.db, artifact.UUID.String()); delErr != nil {
 		s.logger.Warn("Failed to delete agent API artifact record", "agentName", agentName, "environment", environmentName, "environmentUUID", environment.UUID, "error", delErr)
