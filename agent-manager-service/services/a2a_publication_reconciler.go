@@ -61,6 +61,10 @@ var errUpstreamNotReady = errors.New("release binding has not published a servic
 type A2APublicationReconcilerService interface {
 	Start(ctx context.Context) error
 	Stop() error
+	// RunOnce drains the currently-due batch once. It is the same cycle the
+	// ticker drives, exposed so a caller — a test, or an operator tool — can
+	// advance the queue deterministically instead of waiting out a tick.
+	RunOnce(ctx context.Context)
 }
 
 type a2aPublicationReconcilerService struct {
@@ -126,6 +130,11 @@ func (s *a2aPublicationReconcilerService) runLoop(ctx context.Context) {
 			return
 		}
 	}
+}
+
+// RunOnce drains the currently-due batch once.
+func (s *a2aPublicationReconcilerService) RunOnce(ctx context.Context) {
+	s.runCycle(ctx)
 }
 
 // runCycle claims the due batch under an advisory lock so only one replica
