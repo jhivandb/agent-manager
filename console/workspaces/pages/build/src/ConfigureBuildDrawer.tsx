@@ -242,6 +242,17 @@ export function ConfigureBuildDrawer({
   const resolvedInterfaceType: InputInterfaceType =
     interfaceTypeBySubType[agent.agentType?.subType ?? ""] ??
     (isCustomInterface ? "CUSTOM" : "DEFAULT");
+  // A2A-ness is fixed at creation — an A2A agent is provisioned without the REST
+  // api-configuration trait and published to the gateway as a kind: Agent, so the
+  // service rejects a build update that moves an agent across that line. Only
+  // offer the interfaces on the agent's own side of it.
+  const selectableInterfaces = useMemo(
+    () =>
+      inputInterfaces.filter(
+        (option) => (option.value === "A2A") === (resolvedInterfaceType === "A2A"),
+      ),
+    [resolvedInterfaceType],
+  );
   const repo = agent.provisioning?.repository;
   const buildpackConfig = agent.build?.type === 'buildpack' ? agent.build.buildpack : undefined;
   const dockerConfig = agent.build?.type === 'docker' ? agent.build.docker : undefined;
@@ -598,7 +609,7 @@ export function ConfigureBuildDrawer({
                   </Typography>
                   <Box display="flex" flexDirection="column" gap={1}>
                     <Box display="flex" flexDirection="row" gap={1}>
-                      {inputInterfaces.map((interfaceOption) => (
+                      {selectableInterfaces.map((interfaceOption) => (
                         <Card
                           key={interfaceOption.value}
                           variant="outlined"
