@@ -2089,6 +2089,17 @@ func (s *agentManagerService) UpdateAgentBuildParameters(ctx context.Context, ou
 		return nil, fmt.Errorf("%w: agent type cannot be changed", utils.ErrImmutableFieldChange)
 	}
 
+	// Check immutable fields - an agent cannot cross the A2A boundary. An A2A
+	// agent provisions without the api-configuration trait and is published to
+	// the gateway as a kind: Agent, so turning one into a REST agent (or the
+	// reverse) would leave the deployed shape and the recorded subtype apart.
+	// Switching between chat-api and custom-api stays allowed: both are REST.
+	requestedSubType := utils.StrPointerAsStr(req.AgentType.SubType, "")
+	if utils.IsA2AAgentSubType(requestedSubType) != utils.IsA2AAgentSubType(existingAgent.Type.SubType) {
+		s.logger.Error("Cannot change agent sub type across the A2A boundary", "existingSubType", existingAgent.Type.SubType, "requestedSubType", requestedSubType)
+		return nil, fmt.Errorf("%w: agent sub type cannot be changed between an A2A agent and a REST agent", utils.ErrImmutableFieldChange)
+	}
+
 	// Check immutable fields - provisioning type cannot be changed if provided
 	if req.Provisioning.Type != existingAgent.Provisioning.Type {
 		s.logger.Error("Cannot change provisioning type", "existingType", existingAgent.Provisioning.Type, "requestedType", req.Provisioning.Type)
