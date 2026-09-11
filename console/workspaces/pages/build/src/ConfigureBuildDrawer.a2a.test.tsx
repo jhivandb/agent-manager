@@ -91,16 +91,38 @@ describe("ConfigureBuildDrawer A2A interface", () => {
     expect(submittedBody().inputInterface).toEqual({ type: "HTTP", port: 9099 });
   });
 
-  it("submits the a2a-agent subtype with a port and no schema", async () => {
+  // An A2A agent is provisioned without the REST api-configuration trait and is
+  // published to the gateway as a kind: Agent, so the service refuses to move an
+  // agent across that line. The drawer must not offer the crossing either.
+  it("offers no A2A option to an agent built as a chat agent", () => {
     renderDrawer(makeAgent());
 
-    fireEvent.click(screen.getByText("A2A Agent"));
-    fireEvent.change(screen.getByLabelText(/Port/), { target: { value: "9099" } });
-    fireEvent.click(screen.getByRole("button", { name: "Update Build Configuration" }));
+    expect(screen.getByText("Chat Agent")).toBeInTheDocument();
+    expect(screen.getByText("Custom API Agent")).toBeInTheDocument();
+    expect(screen.queryByText("A2A Agent")).not.toBeInTheDocument();
+  });
 
-    await waitFor(() => expect(mutate).toHaveBeenCalled());
-    expect(submittedBody().agentType.subType).toBe("a2a-agent");
-    expect(submittedBody().inputInterface).toEqual({ type: "HTTP", port: 9099 });
+  it("offers an A2A agent no way back to chat or custom API", () => {
+    renderDrawer(
+      makeAgent({
+        agentType: { type: "agent-api", subType: "a2a-agent" },
+        inputInterface: { type: "HTTP", port: 9099 },
+      }),
+    );
+
+    expect(screen.getByText("A2A Agent")).toBeInTheDocument();
+    expect(screen.queryByText("Chat Agent")).not.toBeInTheDocument();
+    expect(screen.queryByText("Custom API Agent")).not.toBeInTheDocument();
+  });
+
+  // An agent created before subtypes were recorded carries none. It is not A2A,
+  // so it keeps the two REST choices and is offered no promotion.
+  it("treats an agent with no recorded subtype as a REST agent", () => {
+    renderDrawer(makeAgent({ agentType: undefined }));
+
+    expect(screen.getByText("Chat Agent")).toBeInTheDocument();
+    expect(screen.getByText("Custom API Agent")).toBeInTheDocument();
+    expect(screen.queryByText("A2A Agent")).not.toBeInTheDocument();
   });
 
   it("keeps a custom API agent's schema and base path when it stays custom", async () => {
