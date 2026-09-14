@@ -282,7 +282,7 @@ export const InputInterface = ({
             <Alert severity="info">
               The gateway exposes both A2A transports — JSON-RPC at{" "}
               <strong>/rpc</strong> and HTTP+JSON at <strong>/rest</strong> — and
-              serves the agent's own card at the well-known path.
+              serves the agent&apos;s own card at the well-known path.
             </Alert>
             <Box>
               <Form.ElementWrapper label="Port" name="port">
