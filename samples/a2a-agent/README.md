@@ -78,6 +78,20 @@ What that means in code:
 | **Language Version** | `3.11` |
 | **Start Command** | `python main.py` |
 | **Port** | `9099` |
+| **Enable auto instrumentation** | **Off** — see the note below |
+
+Auto instrumentation has to be off for this agent. AMP's instrumentation init
+container injects its own Python packages onto `PYTHONPATH` and ships
+`protobuf` 7.x, while the A2A SDK requires `protobuf<7` and reads
+`FieldDescriptor.label`, which protobuf 7 removed. With instrumentation on,
+every A2A message fails with JSON-RPC `-32603` and this in the agent's logs:
+
+```text
+a2a/utils/proto_utils.py:217: AttributeError: 'google._upb._message.FieldDescriptor' object has no attribute 'label'
+```
+
+Turning it off leaves the agent on the protobuf its own build installed. The
+cost is that the OpenAI calls no longer emit traces.
 
 ### Step 3: Select the agent interface
 
@@ -104,6 +118,40 @@ Optional, with defaults:
 ### Step 5: Deploy
 
 Review the configuration, click **Deploy**, and wait for the build to finish.
+
+## Deploy it with amctl
+
+The same deployment without the console. `amctl` needs a build that knows the
+`a2a-agent` subtype — check `amctl agent create --help` says so before you start.
+
+```bash
+amctl agent create a2a-notes-agent \
+  --display-name "A2A Notes Agent" \
+  --subtype a2a-agent \
+  --port 9099 \
+  --repo-url https://github.com/wso2/agent-manager \
+  --repo-branch main \
+  --repo-path /samples/a2a-agent \
+  --build-type buildpack \
+  --language python \
+  --language-version 3.11 \
+  --run-command "python main.py" \
+  --env-secret OPENAI_API_KEY=<your-openai-key> \
+  --no-auto-instrumentation
+
+amctl agent build create a2a-notes-agent     # takes a few minutes
+amctl agent deploy a2a-notes-agent           # deploys the newest build
+amctl agent status a2a-notes-agent           # waits out in-progress -> active
+```
+
+`amctl agent status` prints the agent's gateway URL. That is the base the
+transports hang off:
+
+```text
+http://<gateway-host>/<agent-name>          card and context
+http://<gateway-host>/<agent-name>/rpc      JSON-RPC transport
+http://<gateway-host>/<agent-name>/rest     HTTP+JSON transport
+```
 
 ## Call the deployed agent
 
@@ -266,9 +314,15 @@ asyncio.run(main())
   pretending to store a webhook. The agent publishes **no extended card**
   either: `extendedAgentCard` is false, and the gateway only serves an extended
   card to a caller whose policy chain authenticated the request.
-- **Observability.** With auto-instrumentation on (the default), the OpenAI calls
-  inside both skills appear as traces under **OBSERVABILITY → Traces**, the same
-  as for any platform-hosted Python agent.
+- **Observability is off for this agent.** Because auto instrumentation has to be
+  disabled (see Step 2), the OpenAI calls do not emit traces. Point
+  `amp-instrumentation` at the exporter yourself if you want them — see the
+  `manual-instrumentation-agent` sample for that path.
+- **The card the gateway serves is the agent's own body.** As of this writing the
+  gateway's passthrough rewrite does not touch A2A 1.0 `supportedInterfaces`
+  URLs, so a card fetched through the gateway still advertises the agent's own
+  address. Use the gateway paths above (`/<agent-name>/rpc`, `/rest`) when you
+  wire up a client, or resolve the card and rewrite the URL yourself.
 
 ## File guide
 
