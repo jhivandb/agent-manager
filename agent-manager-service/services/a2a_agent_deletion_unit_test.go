@@ -65,11 +65,11 @@ func TestBroadcastA2AAgentDeletionReachesEveryCandidateGateway(t *testing.T) {
 		assert.Equal(t, eventhub.EventType("agent.deleted"), evt.EventType)
 		var envelope struct {
 			Payload struct {
-				AgentID string `json:"agentId"`
+				ProxyID string `json:"proxyId"`
 			} `json:"payload"`
 		}
 		require.NoError(t, json.Unmarshal([]byte(evt.EventData), &envelope))
-		assert.Equal(t, artifactUUID.String(), envelope.Payload.AgentID)
+		assert.Equal(t, artifactUUID.String(), envelope.Payload.ProxyID)
 		assert.False(t, seen[evt.GatewayID], "no gateway is told twice")
 		seen[evt.GatewayID] = true
 	}

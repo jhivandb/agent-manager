@@ -257,7 +257,7 @@ func broadcastA2AAgentDeletion(
 		}
 	}
 
-	event := &models.AgentDeletionEvent{AgentID: artifactUUID.String()}
+	event := &models.AgentDeletionEvent{ProxyID: artifactUUID.String()}
 	for gatewayID := range gatewayIDs {
 		if err := events.BroadcastAgentDeletionEvent(gatewayID, event); err != nil {
 			logger.Warn("Failed to broadcast A2A agent deletion event",

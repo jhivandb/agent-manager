@@ -260,7 +260,7 @@ func (s *a2aPublicationReconcilerService) attemptPublish(ctx context.Context, pu
 	}
 
 	event := &models.AgentDeploymentEvent{
-		AgentID:      pub.ArtifactUUID.String(),
+		ProxyID:      pub.ArtifactUUID.String(),
 		DeploymentID: deploymentID.String(),
 		PerformedAt:  time.Now().Truncate(time.Millisecond),
 	}

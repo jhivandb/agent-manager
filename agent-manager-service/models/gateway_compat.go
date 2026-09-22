@@ -118,13 +118,12 @@ type ApplicationUpdatedEvent struct {
 	Mappings        []ApplicationAPIKeyMapping `json:"mappings"`
 }
 
-// AgentDeploymentEvent represents an A2A Agent deployment event.
-//
-// The field names and JSON tags are fixed by the gateway's
-// AgentDeployedEventPayload (gateway-controller/pkg/controlplane/events.go);
-// they are matched here, not chosen.
+// AgentDeploymentEvent represents an A2A Agent deployment event. The shape is
+// fixed by the gateway's AgentDeployedEventPayload
+// (gateway-controller/pkg/controlplane/events.go), which names the agent
+// proxyId, as its MCP and LLM counterparts do.
 type AgentDeploymentEvent struct {
-	AgentID      string    `json:"agentId"`
+	ProxyID      string    `json:"proxyId"`
 	DeploymentID string    `json:"deploymentId"`
 	PerformedAt  time.Time `json:"performedAt"`
 }
@@ -132,5 +131,5 @@ type AgentDeploymentEvent struct {
 // AgentDeletionEvent represents an A2A Agent deletion event. Matches the
 // gateway's AgentDeletedEventPayload, which carries only the agent ID.
 type AgentDeletionEvent struct {
-	AgentID string `json:"agentId"`
+	ProxyID string `json:"proxyId"`
 }

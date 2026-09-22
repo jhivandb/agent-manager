@@ -63,7 +63,7 @@ func TestBroadcastAgentDeploymentEvent(t *testing.T) {
 
 	performedAt := time.Date(2026, 9, 9, 12, 0, 0, 0, time.UTC)
 	err := svc.BroadcastAgentDeploymentEvent("gw-1", &models.AgentDeploymentEvent{
-		AgentID:      "0192f4c1-9a7d-7c3e-b4f2-1a2b3c4d5e6f",
+		ProxyID:      "0192f4c1-9a7d-7c3e-b4f2-1a2b3c4d5e6f",
 		DeploymentID: "dep-1",
 		PerformedAt:  performedAt,
 	})
@@ -78,14 +78,14 @@ func TestBroadcastAgentDeploymentEvent(t *testing.T) {
 	var envelope struct {
 		Type    string `json:"type"`
 		Payload struct {
-			AgentID      string    `json:"agentId"`
+			ProxyID      string    `json:"proxyId"`
 			DeploymentID string    `json:"deploymentId"`
 			PerformedAt  time.Time `json:"performedAt"`
 		} `json:"payload"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(evt.EventData), &envelope))
 	assert.Equal(t, "agent.deployed", envelope.Type)
-	assert.Equal(t, "0192f4c1-9a7d-7c3e-b4f2-1a2b3c4d5e6f", envelope.Payload.AgentID)
+	assert.Equal(t, "0192f4c1-9a7d-7c3e-b4f2-1a2b3c4d5e6f", envelope.Payload.ProxyID)
 	assert.Equal(t, "dep-1", envelope.Payload.DeploymentID)
 	assert.True(t, performedAt.Equal(envelope.Payload.PerformedAt))
 }
@@ -95,7 +95,7 @@ func TestBroadcastAgentDeletionEvent(t *testing.T) {
 	svc := NewGatewayEventsService(hub)
 
 	err := svc.BroadcastAgentDeletionEvent("gw-1", &models.AgentDeletionEvent{
-		AgentID: "0192f4c1-9a7d-7c3e-b4f2-1a2b3c4d5e6f",
+		ProxyID: "0192f4c1-9a7d-7c3e-b4f2-1a2b3c4d5e6f",
 	})
 	require.NoError(t, err)
 	require.Len(t, hub.published, 1)
@@ -107,10 +107,10 @@ func TestBroadcastAgentDeletionEvent(t *testing.T) {
 	var envelope struct {
 		Type    string `json:"type"`
 		Payload struct {
-			AgentID string `json:"agentId"`
+			ProxyID string `json:"proxyId"`
 		} `json:"payload"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(evt.EventData), &envelope))
 	assert.Equal(t, "agent.deleted", envelope.Type)
-	assert.Equal(t, "0192f4c1-9a7d-7c3e-b4f2-1a2b3c4d5e6f", envelope.Payload.AgentID)
+	assert.Equal(t, "0192f4c1-9a7d-7c3e-b4f2-1a2b3c4d5e6f", envelope.Payload.ProxyID)
 }
