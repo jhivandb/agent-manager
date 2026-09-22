@@ -8,12 +8,36 @@ things, both backed by OpenAI:
 
 | Skill | What it does | Result |
 |---|---|---|
-| `summarize-notes` | Condenses the notes into at most three sentences | A `text/plain` artifact, streamed as it is written |
-| `extract-action-items` | Pulls out who owes what, and when | An `application/json` artifact |
+| `summarize-notes` | Condenses the notes into at most three sentences | `summary.txt`, a `text/plain` artifact, streamed as it is written |
+| `extract-action-items` | Pulls out who owes what, and when | `action-items.json`, an `application/json` data artifact |
 
 It is built on the official [`a2a-sdk`](https://github.com/a2aproject/a2a-python)
 and FastAPI. The point of the sample is the protocol surface: an agent card, both
 of the transports AMP publishes, the task lifecycle, and streaming.
+
+## Choosing a skill
+
+A2A has no field for picking one skill over another, so the sample reads the
+caller's choice in this order, and the card says so:
+
+1. a `skill` key in the **message metadata** (`message.metadata`) or in the
+   **request metadata** (`SendMessageRequest.metadata`) — whichever the client
+   filled in;
+2. failing that, the directive the card's own examples open with: `Summarize:`
+   or `Extract action items:`;
+3. failing that, `summarize-notes`.
+
+A `skill` id the agent does not have is **rejected**, with the ids it does have
+in the status message. That matters more than it looks: a caller who asks for
+`extract-action-items` must never be handed a summary, so the agent refuses
+rather than falling back to something plausible. The completed status names the
+skill that ran and the artifact it wrote, and each artifact carries
+`metadata.skill`, so which skill answered is visible in the result itself.
+
+That last point is the only way to tell, if something in the path drops the
+metadata: a proxy that strips it leaves the agent nothing to route on, and the
+call falls to the text directive or to a summary. The result says which skill
+ran, so read the status rather than assuming the one you asked for was reached.
 
 ## What this demonstrates
 
@@ -40,18 +64,22 @@ What that means in code:
 
 - **The card** (`/.well-known/agent-card.json`) declares both interfaces at
   `protocolBinding: JSONRPC` under `/rpc` and `protocolBinding: HTTP+JSON` under
-  `/rest`, plus the two skills. These are the paths AMP's gateway publishes an
-  A2A agent under, and it rewrites the card it serves so clients dial the
-  gateway rather than the agent.
+  `/rest`, plus the two skills, each with the media type its result comes back in
+  and how to select it. These are the paths AMP's gateway publishes an A2A agent
+  under, and it rewrites the card it serves so clients dial the gateway rather
+  than the agent.
 - **One process serves both transports** (`app.py`), over one request handler and
   one task store, so a task sent over JSON-RPC is readable over HTTP+JSON.
 - **Streaming works for free** (`SendStreamingMessage`, `/message:stream`): the
   executor publishes artifact chunks, and the SDK renders them either as an SSE
-  stream or as one merged artifact, depending on how the client asked. This is
-  the traffic AMP's gateway deliberately leaves its route timeout off for.
+  stream or as one merged artifact, depending on how the client asked. Chunks are
+  cut at word boundaries, so a client rendering them as they arrive never gets
+  half a word. This is the traffic AMP's gateway deliberately leaves its route
+  timeout off for.
 - **The task lifecycle is explicit**: `submitted -> working -> completed`, or
-  `rejected` when there are no notes to work on and `failed` when the model call
-  fails. Task state is readable by id afterwards.
+  `rejected` when the message carries no notes or names a skill the agent does
+  not have, and `failed` when the model call fails. Task state is readable by id
+  afterwards.
 
 ## Prerequisites
 
@@ -182,7 +210,14 @@ curl -X POST "https://<gateway-url>/<agent-name>/rpc" \
   }'
 ```
 
-The reply is a `Task` in a terminal state carrying the `summary.txt` artifact.
+The reply is a `Task` in a terminal state carrying the `summary.txt` artifact,
+and its status message says so:
+
+```json
+"status": {"state": "TASK_STATE_COMPLETED", "message": {"parts": [
+  {"text": "summary.txt is ready (summarize-notes, 214 characters)."}]}}
+```
+
 Ask for the other skill by naming it in the message metadata:
 
 ```json
@@ -194,6 +229,14 @@ Ask for the other skill by naming it in the message metadata:
     "parts": [{"text": "...the notes..."}]
   }
 }
+```
+
+An unknown skill id comes back as a task in the `rejected` state, with the ids
+this agent does have in the status message - not as a summary:
+
+```json
+"status": {"state": "TASK_STATE_REJECTED", "message": {"parts": [
+  {"text": "There is no 'book-a-room' skill. This agent offers: summarize-notes, extract-action-items."}]}}
 ```
 
 Any A2A client works too — see [Call it from an A2A client](#call-it-from-an-a2a-client).
@@ -264,7 +307,25 @@ curl -s -N -X POST http://localhost:9099/rpc \
 ```
 
 Each event is a line of SSE: first the `Task`, then a `working` status update,
-then the summary arriving as artifact chunks, then `completed`.
+then the summary arriving as artifact chunks cut at word boundaries, then
+`completed`.
+
+The two examples the card carries work verbatim, because each opens with the
+skill it advertises: sending `Extract action items: ...the notes...` reaches the
+JSON skill with no metadata at all.
+
+## Check it without OpenAI
+
+```bash
+python smoke_test.py
+```
+
+`smoke_test.py` stubs the model and drives the agent in-process over ASGI, so it
+needs neither a key nor a network. It asserts what the card promises: which skill
+each spelling of a call reaches, the artifact name and media type each skill
+produces, the chunking of a streaming call, and that an unknown skill is rejected
+instead of answered with a summary. No test framework to install — a non-zero
+exit code means a check failed.
 
 ## Call it from an A2A client
 
@@ -309,6 +370,12 @@ asyncio.run(main())
 - **Tasks live in memory.** `InMemoryTaskStore` means a restart forgets task
   history. Swap in the SDK's database task store if you need tasks to survive;
   the sample is about the protocol, not about durable task storage.
+- **Skill selection is a convention, not protocol.** A2A 1.0 has no field for
+  choosing between an agent's skills, and no standard metadata key either, so
+  this sample defines one (`skill`) and reads it from either metadata field. A
+  client that does not know the convention can still select a skill by opening
+  its text the way the card's examples do. If your own agent has one job, drop
+  the convention and treat every message alike.
 - **Push notifications are declared off** in the card, so the four
   `*PushNotificationConfig` operations answer `FAILED_PRECONDITION` rather than
   pretending to store a webhook. The agent publishes **no extended card**
@@ -331,5 +398,6 @@ asyncio.run(main())
 | `agent.py` | The agent: the OpenAI calls, the two skills, and the task events they publish |
 | `app.py` | The A2A server: agent card, JSON-RPC and HTTP+JSON routes, one handler and task store behind both |
 | `main.py` | Local runner (`python main.py`), and the deployed start command |
+| `smoke_test.py` | Drives the agent in-process with a stubbed model: skill selection, artifacts, streaming, rejections |
 | `requirements.txt` | `a2a-sdk[fastapi]`, `openai`, `uvicorn`, `python-dotenv` |
 | `.env.example` | Environment variable template for local runs |

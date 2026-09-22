@@ -86,12 +86,19 @@ def build_agent_card() -> AgentCard:
     ``supportedInterfaces`` lists one entry per transport, which is what a
     client picks from. The URLs are this agent's own address; the gateway
     rewrites them to its own when it serves the card.
+
+    The skills carry the two things a client needs to call the right one: how to
+    select it, and which media type its result comes back in.
     """
     base_url = os.getenv("AGENT_PUBLIC_BASE_URL", f"http://localhost:{PORT}").rstrip("/")
     return AgentCard(
         name="a2a-notes-agent",
         description=(
             "Summarizes meeting notes and extracts their action items. "
+            "Name the skill to run in the message metadata as "
+            '{"skill": "extract-action-items"}, or open the text with '
+            "'Summarize:' or 'Extract action items:'. Notes that do neither are "
+            "summarized. "
             "The worked example of AMP's A2A agent support."
         ),
         version="1.0.0",
@@ -114,19 +121,29 @@ def build_agent_card() -> AgentCard:
             AgentSkill(
                 id=SKILL_SUMMARIZE,
                 name="Summarize notes",
-                description="Condenses meeting notes into a short summary.",
+                description=(
+                    "Condenses meeting notes into a short summary. Runs when "
+                    "the text opens with 'Summarize:' or when no other skill "
+                    "is named."
+                ),
                 tags=["summarize", "notes"],
                 examples=[SUMMARY_EXAMPLE],
+                input_modes=["text/plain"],
+                output_modes=["text/plain"],
             ),
             AgentSkill(
                 id=SKILL_ACTION_ITEMS,
                 name="Extract action items",
                 description=(
                     "Pulls the action items out of meeting notes, with owner and "
-                    "due date where the notes give them, as JSON."
+                    "due date where the notes give them, as JSON. Select it with "
+                    '{"skill": "extract-action-items"} in the message metadata, '
+                    "or by opening the text with 'Extract action items:'."
                 ),
                 tags=["extract", "action-items", "json"],
                 examples=[ACTION_ITEMS_EXAMPLE],
+                input_modes=["text/plain"],
+                output_modes=["application/json"],
             ),
         ],
     )
