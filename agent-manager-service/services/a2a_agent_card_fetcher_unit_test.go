@@ -70,6 +70,7 @@ func TestA2AAgentCardFetcherRejectsNonCardResponses(t *testing.T) {
 		{"unavailable", http.StatusServiceUnavailable, ""},
 		{"not json", http.StatusOK, "<html>starting</html>"},
 		{"json but not an object", http.StatusOK, `["a","b"]`},
+		{"json null", http.StatusOK, "null"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

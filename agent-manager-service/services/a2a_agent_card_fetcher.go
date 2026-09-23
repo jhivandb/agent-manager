@@ -95,5 +95,8 @@ func (f *a2aAgentCardFetcher) Fetch(ctx context.Context, upstreamURL string) (ma
 	if err := json.Unmarshal(body, &card); err != nil {
 		return nil, fmt.Errorf("agent card from %s is not a JSON object: %w", endpoint, err)
 	}
+	if card == nil {
+		return nil, fmt.Errorf("agent card from %s is not a JSON object", endpoint)
+	}
 	return card, nil
 }
