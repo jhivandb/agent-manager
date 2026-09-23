@@ -91,6 +91,10 @@ func TestDomainActionsMatchRouteDerivedActions(t *testing.T) {
 			"POST /orgs/{orgName}/projects/{projName}/agents/{agentName}/deployments/state",
 			nil, ActionAgentChangeDeploymentState,
 		},
+		{
+			"POST /orgs/{orgName}/projects/{projName}/agents/{agentName}/environments/{envID}/agent-card/refresh",
+			nil, ActionA2AAgentCardRefresh,
+		},
 		{"DELETE /orgs/{orgName}/projects/{projName}/agents/{agentName}", []rbac.Permission{rbac.AgentDelete}, ActionAgentDelete},
 		{"DELETE /orgs/{orgName}/projects/{projName}", []rbac.Permission{rbac.ProjectDelete}, ActionProjectDelete},
 		{"POST /orgs/{orgName}/gateways/{gatewayID}/environments/{envID}", nil, ActionGatewayAssignEnvironment},

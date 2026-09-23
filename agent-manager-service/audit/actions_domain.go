@@ -86,6 +86,7 @@ const (
 	ActionAgentChangeDeploymentState Action = "agent:change-deployment-state"
 	ActionAgentDelete                Action = "agent:delete"
 	ActionProjectDelete              Action = "project:delete"
+	ActionA2AAgentCardRefresh        Action = "a2a-agent-card:refresh"
 
 	// Agent configuration (model and MCP configs attached to an agent).
 	ActionAgentConfigUpdate Action = "agent-config:update"
@@ -364,6 +365,13 @@ func init() {
 		"agentName":   KindName,
 		"environment": KindName,
 		"toState":     KindEnum,
+	})
+	// Requeues the next reconciler tick to republish; no credential or
+	// privilege changes hands, so the envelope record is enough on its own.
+	Register(ActionA2AAgentCardRefresh, ClassDeployment, SeverityNotice)
+	RegisterDetailSchema(ActionA2AAgentCardRefresh, map[string]FieldKind{
+		"agentName":   KindName,
+		"environment": KindName,
 	})
 
 	// Deletions are irreversible, so they rank above other config changes.

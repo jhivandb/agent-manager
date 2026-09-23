@@ -7852,6 +7852,129 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /orgs/{orgName}/projects/{projName}/agents/{agentName}/environments/{envID}/agent-card:
+    parameters:
+      - name: orgName
+        in: path
+        required: true
+        description: Organization name/handle
+        schema:
+          type: string
+      - name: projName
+        in: path
+        required: true
+        description: Project name
+        schema:
+          type: string
+      - name: agentName
+        in: path
+        required: true
+        description: Agent name
+        schema:
+          type: string
+      - name: envID
+        in: path
+        required: true
+        description: Environment name or UUID
+        schema:
+          type: string
+    get:
+      tags:
+        - A2A Agent Card
+      summary: Get the stored A2A agent card for one environment
+      description: |
+        Returns the agent card document the gateway currently serves for this
+        agent-environment pair, together with the publication state that
+        explains its presence or absence. `card` is null until the first
+        successful fetch. 404 only when the pair has never been recorded — the
+        agent is not A2A, or it was never deployed to this environment; every
+        other combination of card and status is a 200.
+      operationId: getA2AAgentCard
+      responses:
+        "200":
+          description: Agent card publication state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/A2AAgentCardResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: No agent card publication recorded for this agent-environment pair
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /orgs/{orgName}/projects/{projName}/agents/{agentName}/environments/{envID}/agent-card/refresh:
+    parameters:
+      - name: orgName
+        in: path
+        required: true
+        description: Organization name/handle
+        schema:
+          type: string
+      - name: projName
+        in: path
+        required: true
+        description: Project name
+        schema:
+          type: string
+      - name: agentName
+        in: path
+        required: true
+        description: Agent name
+        schema:
+          type: string
+      - name: envID
+        in: path
+        required: true
+        description: Environment name or UUID
+        schema:
+          type: string
+    post:
+      tags:
+        - A2A Agent Card
+      summary: Re-run the agent card fetch for one environment
+      description: |
+        Requeues the publication row for a fresh card fetch and publish on the
+        next reconciler tick; the fetch is not performed inline, so one code
+        path owns publication. From `failed` this is the recovery action; from
+        `rejected` it is the retry once the cause is fixed; from `published` it
+        picks up a card the agent changed without a redeploy.
+      operationId: refreshA2AAgentCard
+      responses:
+        "202":
+          description: Card refresh requeued; the fetch runs on the next reconciler tick
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: No agent card publication recorded for this agent-environment pair
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /orgs/{orgName}/projects/{projName}/agents/{agentName}/monitors:
     get:
       summary: List all evaluation monitors for an agent
@@ -11373,6 +11496,33 @@ components:
             websocket connection to the control plane when the key was issued.
             When false, the key has been stored but will only become usable
             once the gateway reconnects and syncs.
+
+    A2AAgentCardResponse:
+      type: object
+      description: The stored A2A agent card and the publication state that explains its presence or absence.
+      required:
+        - card
+        - status
+        - fetchedAt
+        - lastError
+      properties:
+        card:
+          type: object
+          additionalProperties: true
+          nullable: true
+          description: The agent card document the gateway serves, or null before the first successful fetch.
+        status:
+          type: string
+          enum: [pending, routed, published, failed, rejected]
+          description: Publication lifecycle state for this agent-environment pair.
+        fetchedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the stored card was last fetched successfully. Null until the first fetch.
+        lastError:
+          type: string
+          description: The last failure, or empty when clean.
 
     RotateLLMAPIKeyRequest:
       type: object

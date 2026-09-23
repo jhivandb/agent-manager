@@ -75,6 +75,7 @@ type AppParams struct {
 	IdentityController               controllers.IdentityController
 	MCPProxyScopeController          controllers.MCPProxyScopeController
 	AgentIdentityController          controllers.AgentIdentityController
+	A2AAgentCardController           controllers.A2AAgentCardController
 	MonitorScheduler                 services.MonitorSchedulerService
 	AgentThunderReconciler           services.AgentThunderReconcilerService
 	A2APublicationReconciler         services.A2APublicationReconcilerService

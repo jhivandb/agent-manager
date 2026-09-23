@@ -220,6 +220,9 @@ var actionOverrides = map[string]Action{
 	"POST /orgs/{orgName}/projects/{projName}/llm-proxies/{id}/deployments/undeploy":         "llm-proxy:undeploy",
 	"POST /orgs/{orgName}/projects/{projName}/llm-proxies/{id}/deployments/restore":          "llm-proxy:restore",
 	"DELETE /orgs/{orgName}/projects/{projName}/llm-proxies/{id}/deployments/{deploymentId}": "llm-proxy:delete-deployment",
+	// AgentUpdate also gates config/identity/basic-info routes; this one alone
+	// causes a gateway republish, which the trail should distinguish.
+	"POST /orgs/{orgName}/projects/{projName}/agents/{agentName}/environments/{envID}/agent-card/refresh": "a2a-agent-card:refresh",
 
 	// One permission, several operations — agent OAuth identity.
 	"PUT /orgs/{orgName}/projects/{projName}/agents/{agentName}/identities":        "agent-identity:provision",

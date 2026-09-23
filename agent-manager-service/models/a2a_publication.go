@@ -88,3 +88,12 @@ type A2APublication struct {
 }
 
 func (A2APublication) TableName() string { return "a2a_publications" }
+
+// A2AAgentCardView is the read model behind the agent-card API: the stored
+// card plus the publication state that explains its presence or absence.
+type A2AAgentCardView struct {
+	Card      map[string]interface{}
+	Status    A2APublicationStatus
+	FetchedAt *time.Time
+	LastError string
+}

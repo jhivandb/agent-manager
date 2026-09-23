@@ -109,6 +109,7 @@ var serviceProviderSet = wire.NewSet(
 	services.NewLLMTemplateStore,
 	services.NewGitSecretService,
 	services.NewAIApplicationService,
+	services.NewA2AAgentCardService,
 )
 
 var instrumentationProviderSet = wire.NewSet(
@@ -145,6 +146,7 @@ var controllerProviderSet = wire.NewSet(
 	controllers.NewIdentityController,
 	controllers.NewMCPProxyScopeController,
 	controllers.NewAgentIdentityController,
+	controllers.NewA2AAgentCardController,
 )
 
 var testClientProviderSet = wire.NewSet(
