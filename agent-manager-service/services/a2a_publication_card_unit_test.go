@@ -157,6 +157,24 @@ func TestReconcilerPhaseTwoRepublishesAnUnchangedCardWithNoAcceptedPublish(t *te
 	require.Len(t, h.pubRepo.MarkCardPublishedCalls(), 1)
 }
 
+// A failed last attempt may have recorded a deployment ID it never broadcast,
+// so an unchanged card is republished rather than trusted.
+func TestReconcilerPhaseTwoRepublishesAnUnchangedCardAfterAFailedAttempt(t *testing.T) {
+	h := newA2AReconcilerHarness("http://trip-planner.dp-default:9099")
+
+	pub := routedPublication()
+	pub.AgentCard = gatewayCardFor(t, h)
+	attempted := uuid.New()
+	pub.CardDeploymentID = &attempted
+	pub.LastError = "failed to broadcast agent deployment event: hub unavailable"
+
+	h.svc.publishOne(context.Background(), pub)
+
+	require.Len(t, h.deploymentRepo.CreateWithLimitEnforcementCalls(), 1)
+	assert.Len(t, h.hub.published, 1)
+	require.Len(t, h.pubRepo.MarkCardPublishedCalls(), 1)
+}
+
 // Phase 2 exhausting its budget leaves routing live and the stored card intact:
 // a stale card beats a broken discovery endpoint.
 func TestReconcilerPhaseTwoFailureLeavesRoutingLive(t *testing.T) {

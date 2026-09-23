@@ -330,3 +330,19 @@ func TestA2APublicationRequeueCardClearsTheDeploymentOnlyWhenRejected(t *testing
 	require.NotNil(t, got.CardDeploymentID)
 	assert.Equal(t, accepted, *got.CardDeploymentID, "an accepted publish is still known")
 }
+
+// A redeploy after a rejection starts card-less: republishing the known-bad
+// document in phase 1 would get the new revision's routing refused too.
+func TestA2APublicationEnqueueDropsARejectedCard(t *testing.T) {
+	repo := NewA2APublicationRepository(db.GetDB())
+	ctx := context.Background()
+	pub, _ := rejectedPublication(t, repo, "redeploy-rejected")
+
+	require.NoError(t, repo.Enqueue(ctx, newTestPublicationFor(pub)))
+
+	got, err := repo.GetForAgentEnv(ctx, pub.OUID, pub.ProjectName, pub.AgentName, pub.EnvironmentUUID)
+	require.NoError(t, err)
+	assert.Equal(t, models.A2APublicationStatusPending, got.Status)
+	assert.Nil(t, got.AgentCard, "the rejected card is not carried into the redeploy")
+	assert.Nil(t, got.CardDeploymentID)
+}

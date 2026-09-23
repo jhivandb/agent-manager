@@ -76,6 +76,13 @@ func (h *lifecycleEventHub) events() []eventhub.Event {
 	return append([]eventhub.Event(nil), h.published...)
 }
 
+// lifecycleCardFetcher stands in for the agent, which is not running in this test.
+type lifecycleCardFetcher struct{}
+
+func (lifecycleCardFetcher) Fetch(_ context.Context, _ string) (map[string]any, error) {
+	return map[string]any{"name": "A2A Lifecycle Agent", "protocolVersion": "1.0"}, nil
+}
+
 func (h *lifecycleEventHub) Initialize() error                      { return nil }
 func (h *lifecycleEventHub) RegisterGateway(gatewayID string) error { return nil }
 
@@ -176,6 +183,7 @@ func TestA2AAgentLifecycle(t *testing.T) {
 		pubRepo, deploymentRepo, gatewayRepo,
 		repositories.NewAgentConfigRepo(gdb),
 		openChoreoClient,
+		lifecycleCardFetcher{},
 		services.NewGatewayEventsService(hub),
 		testLifecycleLogger(),
 	)
@@ -300,8 +308,8 @@ func TestA2AAgentLifecycle(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, models.KindAgent, artifact.Kind)
 
-		assert.Equal(t, models.A2APublicationStatusPublished, duePublication(t).Status,
-			"a published row is no longer due")
+		assert.Equal(t, models.A2APublicationStatusRouted, duePublication(t).Status,
+			"phase 1 routes; the card is phase 2's")
 
 		events := hub.events()
 		require.Len(t, events, 1)
@@ -309,6 +317,25 @@ func TestA2AAgentLifecycle(t *testing.T) {
 		assert.Equal(t, "CREATE", events[0].Action)
 		assert.Equal(t, row.ArtifactUUID.String(), events[0].EntityID,
 			"the gateway fetches /agents/{agentId} by the artifact UUID")
+	})
+
+	t.Run("the next cycle publishes the agent's card", func(t *testing.T) {
+		row := duePublication(t)
+		require.NotNil(t, row)
+
+		reconciler.RunOnce(context.Background())
+
+		current, err := deploymentRepo.GetCurrentByGateway(row.ArtifactUUID.String(), gatewayID.String(), ouID)
+		require.NoError(t, err)
+		require.NotNil(t, current)
+		assert.Contains(t, string(current.Content), "mode: managed")
+
+		published := duePublication(t)
+		assert.Equal(t, models.A2APublicationStatusPublished, published.Status, "a published row is no longer due")
+		assert.Contains(t, string(published.AgentCard), "A2A Lifecycle Agent")
+		require.NotNil(t, published.CardDeploymentID)
+		assert.Equal(t, current.DeploymentID, *published.CardDeploymentID, "the row waits on the ack for this publish")
+		assert.Len(t, hub.events(), 2, "the card is a second broadcast")
 	})
 
 	t.Run("redeploy re-queues and re-publishes", func(t *testing.T) {
@@ -328,8 +355,8 @@ func TestA2AAgentLifecycle(t *testing.T) {
 		require.NoError(t, gdb.Model(&models.Deployment{}).
 			Where("artifact_uuid = ? AND ou_id = ?", requeued.ArtifactUUID, ouID).
 			Count(&deploymentCount).Error)
-		assert.EqualValues(t, 2, deploymentCount,
-			"a redeploy writes a fresh row and re-broadcasts CREATE, as MCP does")
+		assert.EqualValues(t, 3, deploymentCount,
+			"route and card publishes, then a redeploy writes a fresh row and re-broadcasts CREATE, as MCP does")
 	})
 
 	t.Run("delete clears the publication queue", func(t *testing.T) {

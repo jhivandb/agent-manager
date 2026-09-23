@@ -255,8 +255,9 @@ func (s *a2aPublicationReconcilerService) publishCard(ctx context.Context, pub m
 
 	// An unchanged card is the common case on a redeploy, and republishing it
 	// would cost a second gateway apply for a document the gateway already has.
-	// A nil CardDeploymentID means no accepted card publish is known, so republish even when equal.
-	if !sameAgentCard(pub.AgentCard, encoded) || pub.CardDeploymentID == nil {
+	// Skip only when an accepted publish is known: a set ID and a clean last attempt.
+	unchanged := sameAgentCard(pub.AgentCard, encoded) && pub.CardDeploymentID != nil && pub.LastError == ""
+	if !unchanged {
 		if err := s.attemptPublish(ctx, pub, pc, card); err != nil {
 			s.recordAttemptFailure(ctx, pub, err)
 			return

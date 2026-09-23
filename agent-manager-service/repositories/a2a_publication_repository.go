@@ -107,13 +107,18 @@ func (r *a2aPublicationRepository) Enqueue(ctx context.Context, pub *models.A2AP
 			{Name: "agent_name"},
 			{Name: "environment_name"},
 		},
-		DoUpdates: clause.AssignmentColumns([]string{
+		DoUpdates: append(clause.AssignmentColumns([]string{
 			"environment_uuid", "artifact_uuid", "status",
 			"attempt_count", "last_error", "next_attempt_at", "updated_at",
 			// Routing state is per-deploy and resets; card state is not and must
 			// not be listed here, or a redeploy loses the card phase 1
 			// republishes and downgrades itself to passthrough.
 			"routed_at", "card_deployment_id",
+		}), clause.Assignment{
+			// A rejected card is dropped, or phase 1 republishes a known-bad document with the new revision.
+			Column: clause.Column{Name: "agent_card"},
+			Value: gorm.Expr("CASE WHEN a2a_publications.status = ? THEN NULL ELSE a2a_publications.agent_card END",
+				models.A2APublicationStatusRejected),
 		}),
 	}).Create(pub).Error
 }
