@@ -192,7 +192,7 @@ func (s *a2aPublicationReconcilerService) publishOne(ctx context.Context, pub mo
 }
 
 // publishRoute is phase 1: get the agent routable. It emits the best card it
-// has — the stored one on a redeploy, none on a first deploy, where the
+// has — the stored one, recomputed, on a redeploy, none on a first deploy, where the
 // gateway's passthrough default rewrites the proxied card's URLs and only the
 // agent's own (usually absent) security declarations are stale.
 func (s *a2aPublicationReconcilerService) publishRoute(ctx context.Context, pub models.A2APublication) {
@@ -202,16 +202,16 @@ func (s *a2aPublicationReconcilerService) publishRoute(ctx context.Context, pub 
 		return
 	}
 
-	stored, err := storedAgentCard(pub)
+	card, err := s.rebuildStoredCard(pub, pc)
 	if err != nil {
 		// A card that no longer parses is not worth failing a deploy over;
 		// route without it and let phase 2 replace it.
-		s.logger.Warn("Stored A2A agent card is unreadable, routing without it",
+		s.logger.Warn("Stored A2A agent card is unusable, routing without it",
 			"agentName", pub.AgentName, "environment", pub.EnvironmentName, "error", err)
-		stored = nil
+		card = nil
 	}
 
-	if err := s.attemptPublish(ctx, pub, pc, stored); err != nil {
+	if err := s.attemptPublish(ctx, pub, pc, card); err != nil {
 		s.recordAttemptFailure(ctx, pub, err)
 		return
 	}
@@ -236,12 +236,7 @@ func (s *a2aPublicationReconcilerService) publishCard(ctx context.Context, pub m
 		return
 	}
 
-	contextPath := "/" + pub.AgentName
-	card, err := buildGatewayAgentCard(fetched, GatewayAgentCardInput{
-		PublicBaseURL:        buildPublicProxyURL(pc.gateway, &contextPath),
-		EnableAPIKeySecurity: pc.apiConfig.EnableApiKeySecurity,
-		EnableOAuthSecurity:  pc.apiConfig.EnableOAuthSecurity,
-	})
+	card, err := buildGatewayAgentCard(fetched, pc.cardInput(pub.AgentName))
 	if err != nil {
 		s.recordAttemptFailure(ctx, pub, err)
 		return
@@ -268,6 +263,21 @@ func (s *a2aPublicationReconcilerService) publishCard(ctx context.Context, pub m
 		s.logger.Error("Published the A2A agent card but failed to mark the queue row",
 			"agentName", pub.AgentName, "environment", pub.EnvironmentName, "error", err)
 	}
+}
+
+// rebuildStoredCard recomputes the gateway-owned fields of the stored card, so a
+// config change since it was stored cannot republish a stale scheme or address.
+func (s *a2aPublicationReconcilerService) rebuildStoredCard(
+	pub models.A2APublication, pc a2aPublishContext,
+) (map[string]any, error) {
+	stored, err := storedAgentCard(pub)
+	if err != nil {
+		return nil, err
+	}
+	if stored == nil {
+		return nil, nil //nolint:nilnil // no card is the ordinary first-deploy state
+	}
+	return buildGatewayAgentCard(stored, pc.cardInput(pub.AgentName))
 }
 
 // storedAgentCard decodes the card a previous cycle published, if any.
@@ -321,6 +331,16 @@ type a2aPublishContext struct {
 	upstreamURL string
 	gateway     *models.Gateway
 	apiConfig   resolvedCORSConfig
+}
+
+// cardInput is the one place both phases derive the card's gateway-owned fields from.
+func (pc a2aPublishContext) cardInput(agentName string) GatewayAgentCardInput {
+	contextPath := "/" + agentName
+	return GatewayAgentCardInput{
+		PublicBaseURL:        buildPublicProxyURL(pc.gateway, &contextPath),
+		EnableAPIKeySecurity: pc.apiConfig.EnableApiKeySecurity,
+		EnableOAuthSecurity:  pc.apiConfig.EnableOAuthSecurity,
+	}
 }
 
 func (s *a2aPublicationReconcilerService) resolvePublishContext(

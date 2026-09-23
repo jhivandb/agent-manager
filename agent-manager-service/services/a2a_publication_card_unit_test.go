@@ -28,6 +28,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/wso2/agent-manager/agent-manager-service/models"
+	"github.com/wso2/agent-manager/agent-manager-service/repositories/repomocks"
 )
 
 func routedPublication() models.A2APublication {
@@ -67,6 +68,29 @@ func TestReconcilerPhaseOneRepublishesTheStoredCard(t *testing.T) {
 	require.Len(t, h.deploymentRepo.CreateWithLimitEnforcementCalls(), 1)
 	assert.Contains(t, string(h.deploymentRepo.CreateWithLimitEnforcementCalls()[0].Deployment.Content), "mode: managed")
 	require.Len(t, h.pubRepo.SetCardDeploymentIDCalls(), 1, "a card publish records what it waits on")
+	require.Len(t, h.pubRepo.MarkRoutedCalls(), 1)
+}
+
+// Gateway-owned fields are recomputed on every publish: a redeploy after an
+// auth-mode change must not serve the old scheme under the new policy chain.
+func TestReconcilerPhaseOneRecomputesTheStoredCardsGatewayFields(t *testing.T) {
+	h := newA2AReconcilerHarness("http://trip-planner.dp-default:9099")
+	stored := gatewayCardFor(t, h)
+	h.svc.agentConfigRepo = &repomocks.AgentConfigRepositoryMock{
+		GetFunc: func(ctx context.Context, ouID, projectName, agentName, environmentName string) (*models.AgentConfig, error) {
+			return &models.AgentConfig{EnableOAuthSecurity: true, OAuthIssuers: []string{"https://idp.example.com"}}, nil
+		},
+	}
+
+	pub := pendingPublication()
+	pub.AgentCard = stored
+	h.svc.publishOne(context.Background(), pub)
+
+	require.Len(t, h.deploymentRepo.CreateWithLimitEnforcementCalls(), 1)
+	published := string(h.deploymentRepo.CreateWithLimitEnforcementCalls()[0].Deployment.Content)
+	assert.Contains(t, published, "mode: managed")
+	assert.Contains(t, published, "httpAuthSecurityScheme")
+	assert.NotContains(t, published, "apiKeySecurityScheme")
 	require.Len(t, h.pubRepo.MarkRoutedCalls(), 1)
 }
 
