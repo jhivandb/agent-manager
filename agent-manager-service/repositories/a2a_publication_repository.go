@@ -203,11 +203,12 @@ func (r *a2aPublicationRepository) SetCardDeploymentID(ctx context.Context, id, 
 func (r *a2aPublicationRepository) MarkCardPublished(
 	ctx context.Context, id uuid.UUID, card json.RawMessage, fetchedAt time.Time,
 ) error {
+	// Updates(map) bypasses GORM's serializer, so the card must be cast to jsonb explicitly.
 	return r.db.WithContext(ctx).Model(&models.A2APublication{}).
 		Where("id = ?", id).
 		Updates(map[string]interface{}{
 			"status":          models.A2APublicationStatusPublished,
-			"agent_card":      []byte(card),
+			"agent_card":      gorm.Expr("?::jsonb", string(card)),
 			"card_fetched_at": fetchedAt,
 			"last_error":      "",
 			"next_attempt_at": nil,
