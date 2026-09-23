@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -34,6 +35,10 @@ const (
 	// reconciler's retry loop is the real patience — a long per-attempt timeout
 	// would only hold a reconciler slot open while a pod starts.
 	a2aCardFetchTimeout = 10 * time.Second
+
+	// a2aCardConnectTimeout fails a silently dropped connection fast so one
+	// unreachable agent cannot hold the serial reconciler tick for the full timeout.
+	a2aCardConnectTimeout = 3 * time.Second
 
 	// a2aCardMaxResponseBytes is the ceiling the gateway applies to a card, and
 	// the largest object Kubernetes stores by default: a card past it could not
@@ -56,7 +61,14 @@ type a2aAgentCardFetcher struct {
 
 // NewA2AAgentCardFetcher creates an A2AAgentCardFetcher.
 func NewA2AAgentCardFetcher() A2AAgentCardFetcher {
-	return &a2aAgentCardFetcher{client: &http.Client{Timeout: a2aCardFetchTimeout}}
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.DialContext = (&net.Dialer{Timeout: a2aCardConnectTimeout}).DialContext
+	return &a2aAgentCardFetcher{client: &http.Client{
+		Timeout:   a2aCardFetchTimeout,
+		Transport: transport,
+		// Agent code answers this request, so a redirect could aim it at any internal endpoint.
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}}
 }
 
 // Fetch GETs the agent's card. Every failure is retryable by construction:

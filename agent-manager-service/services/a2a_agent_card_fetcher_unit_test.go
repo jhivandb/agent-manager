@@ -97,3 +97,35 @@ func TestA2AAgentCardFetcherCapsTheResponse(t *testing.T) {
 	_, err := NewA2AAgentCardFetcher().Fetch(context.Background(), srv.URL)
 	assert.Error(t, err)
 }
+
+// Agent code controls the card response, so a redirect must not steer the
+// fetch at anything else agent-manager can reach.
+func TestA2AAgentCardFetcherDoesNotFollowRedirects(t *testing.T) {
+	var targetHit bool
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		targetHit = true
+		fmt.Fprint(w, `{"name":"Elsewhere"}`)
+	}))
+	defer target.Close()
+	agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL+a2aCardWellKnownPath, http.StatusFound)
+	}))
+	defer agent.Close()
+
+	_, err := NewA2AAgentCardFetcher().Fetch(context.Background(), agent.URL)
+	assert.Error(t, err)
+	assert.False(t, targetHit, "redirect target must never be requested")
+}
+
+// A dropped connection must fail on connect, well inside the overall timeout,
+// without losing the default transport's proxy and TLS settings.
+func TestA2AAgentCardFetcherBoundsTheConnect(t *testing.T) {
+	f, ok := NewA2AAgentCardFetcher().(*a2aAgentCardFetcher)
+	require.True(t, ok)
+	transport, ok := f.client.Transport.(*http.Transport)
+	require.True(t, ok, "fetcher must use its own transport")
+	assert.NotNil(t, transport.DialContext)
+	assert.NotNil(t, transport.Proxy)
+	assert.Equal(t, http.DefaultTransport.(*http.Transport).TLSHandshakeTimeout, transport.TLSHandshakeTimeout)
+	assert.Less(t, a2aCardConnectTimeout, a2aCardFetchTimeout)
+}
