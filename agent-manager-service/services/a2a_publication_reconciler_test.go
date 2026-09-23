@@ -61,6 +61,23 @@ type a2aReconcilerHarness struct {
 	pubRepo        *repomocks.A2APublicationRepositoryMock
 	deploymentRepo *repomocks.DeploymentRepositoryMock
 	ocClient       *clientmocks.OpenChoreoClientMock
+	cardFetcher    *a2aFakeCardFetcher
+}
+
+// a2aFakeCardFetcher is the card half of the harness: tests set what the agent
+// serves, or the error it serves instead.
+type a2aFakeCardFetcher struct {
+	card  map[string]any
+	err   error
+	calls []string
+}
+
+func (f *a2aFakeCardFetcher) Fetch(_ context.Context, upstreamURL string) (map[string]any, error) {
+	f.calls = append(f.calls, upstreamURL)
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.card, nil
 }
 
 // newA2AReconcilerHarness wires a reconciler whose every dependency succeeds and
@@ -69,9 +86,13 @@ type a2aReconcilerHarness struct {
 func newA2AReconcilerHarness(serviceURL string) *a2aReconcilerHarness {
 	hub := &recordingEventHub{}
 	pubRepo := &repomocks.A2APublicationRepositoryMock{
-		MarkPublishedFunc:     func(ctx context.Context, id uuid.UUID) error { return nil },
-		MarkAttemptFailedFunc: func(ctx context.Context, id uuid.UUID, lastErr string, nextAttemptAt time.Time) error { return nil },
-		MarkFailedFunc:        func(ctx context.Context, id uuid.UUID, lastErr string) error { return nil },
+		MarkAttemptFailedFunc:   func(ctx context.Context, id uuid.UUID, lastErr string, nextAttemptAt time.Time) error { return nil },
+		MarkFailedFunc:          func(ctx context.Context, id uuid.UUID, lastErr string) error { return nil },
+		MarkRoutedFunc:          func(ctx context.Context, id uuid.UUID, routedAt time.Time) error { return nil },
+		SetCardDeploymentIDFunc: func(ctx context.Context, id, deploymentID uuid.UUID) error { return nil },
+		MarkCardPublishedFunc: func(ctx context.Context, id uuid.UUID, card json.RawMessage, fetchedAt time.Time) error {
+			return nil
+		},
 	}
 	deploymentRepo := &repomocks.DeploymentRepositoryMock{
 		CreateWithLimitEnforcementFunc: func(deployment *models.Deployment, maxDeployments int) error { return nil },
@@ -96,18 +117,21 @@ func newA2AReconcilerHarness(serviceURL string) *a2aReconcilerHarness {
 			return &models.AgentConfig{EnableApiKeySecurity: true, CORSEnabled: true}, nil
 		},
 	}
+	cardFetcher := &a2aFakeCardFetcher{card: map[string]any{"name": "Trip Planner", "protocolVersion": "1.0"}}
 
 	return &a2aReconcilerHarness{
 		hub:            hub,
 		pubRepo:        pubRepo,
 		deploymentRepo: deploymentRepo,
 		ocClient:       ocClient,
+		cardFetcher:    cardFetcher,
 		svc: &a2aPublicationReconcilerService{
 			pubRepo:         pubRepo,
 			deploymentRepo:  deploymentRepo,
 			gatewayRepo:     gatewayRepo,
 			agentConfigRepo: agentConfigRepo,
 			ocClient:        ocClient,
+			cardFetcher:     cardFetcher,
 			events:          NewGatewayEventsService(hub),
 			logger:          testLogger(),
 		},
@@ -181,6 +205,6 @@ func TestReconcilerPublishesOnceServiceURLIsAvailable(t *testing.T) {
 	assert.Equal(t, created[0].Deployment.DeploymentID.String(), envelope.Payload.DeploymentID,
 		"the event points at the row the gateway will fetch")
 
-	require.Len(t, h.pubRepo.MarkPublishedCalls(), 1)
+	require.Len(t, h.pubRepo.MarkRoutedCalls(), 1)
 	assert.Empty(t, h.pubRepo.MarkAttemptFailedCalls())
 }

@@ -43,9 +43,6 @@ import (
 //			MarkFailedFunc: func(ctx context.Context, id uuid.UUID, lastErr string) error {
 //				panic("mock out the MarkFailed method")
 //			},
-//			MarkPublishedFunc: func(ctx context.Context, id uuid.UUID) error {
-//				panic("mock out the MarkPublished method")
-//			},
 //			MarkRoutedFunc: func(ctx context.Context, id uuid.UUID, routedAt time.Time) error {
 //				panic("mock out the MarkRouted method")
 //			},
@@ -85,9 +82,6 @@ type A2APublicationRepositoryMock struct {
 
 	// MarkFailedFunc mocks the MarkFailed method.
 	MarkFailedFunc func(ctx context.Context, id uuid.UUID, lastErr string) error
-
-	// MarkPublishedFunc mocks the MarkPublished method.
-	MarkPublishedFunc func(ctx context.Context, id uuid.UUID) error
 
 	// MarkRoutedFunc mocks the MarkRouted method.
 	MarkRoutedFunc func(ctx context.Context, id uuid.UUID, routedAt time.Time) error
@@ -180,13 +174,6 @@ type A2APublicationRepositoryMock struct {
 			// LastErr is the lastErr argument value.
 			LastErr string
 		}
-		// MarkPublished holds details about calls to the MarkPublished method.
-		MarkPublished []struct {
-			// Ctx is the ctx argument value.
-			Ctx context.Context
-			// ID is the id argument value.
-			ID uuid.UUID
-		}
 		// MarkRouted holds details about calls to the MarkRouted method.
 		MarkRouted []struct {
 			// Ctx is the ctx argument value.
@@ -227,7 +214,6 @@ type A2APublicationRepositoryMock struct {
 	lockMarkCardPublished   sync.RWMutex
 	lockMarkCardRejected    sync.RWMutex
 	lockMarkFailed          sync.RWMutex
-	lockMarkPublished       sync.RWMutex
 	lockMarkRouted          sync.RWMutex
 	lockRequeueCard         sync.RWMutex
 	lockSetCardDeploymentID sync.RWMutex
@@ -566,42 +552,6 @@ func (mock *A2APublicationRepositoryMock) MarkFailedCalls() []struct {
 	mock.lockMarkFailed.RLock()
 	calls = mock.calls.MarkFailed
 	mock.lockMarkFailed.RUnlock()
-	return calls
-}
-
-// MarkPublished calls MarkPublishedFunc.
-func (mock *A2APublicationRepositoryMock) MarkPublished(ctx context.Context, id uuid.UUID) error {
-	if mock.MarkPublishedFunc == nil {
-		panic("A2APublicationRepositoryMock.MarkPublishedFunc: method is nil but A2APublicationRepository.MarkPublished was just called")
-	}
-	callInfo := struct {
-		Ctx context.Context
-		ID  uuid.UUID
-	}{
-		Ctx: ctx,
-		ID:  id,
-	}
-	mock.lockMarkPublished.Lock()
-	mock.calls.MarkPublished = append(mock.calls.MarkPublished, callInfo)
-	mock.lockMarkPublished.Unlock()
-	return mock.MarkPublishedFunc(ctx, id)
-}
-
-// MarkPublishedCalls gets all the calls that were made to MarkPublished.
-// Check the length with:
-//
-//	len(mockedA2APublicationRepository.MarkPublishedCalls())
-func (mock *A2APublicationRepositoryMock) MarkPublishedCalls() []struct {
-	Ctx context.Context
-	ID  uuid.UUID
-} {
-	var calls []struct {
-		Ctx context.Context
-		ID  uuid.UUID
-	}
-	mock.lockMarkPublished.RLock()
-	calls = mock.calls.MarkPublished
-	mock.lockMarkPublished.RUnlock()
 	return calls
 }
 

@@ -43,8 +43,6 @@ type A2APublicationRepository interface {
 	// first, capped at limit.
 	FindDue(ctx context.Context, now time.Time, limit int) ([]models.A2APublication, error)
 
-	MarkPublished(ctx context.Context, id uuid.UUID) error
-
 	// MarkRouted ends phase 1. The row is immediately due again so the card
 	// fetch runs on the next tick rather than after a fresh retry wait, and the
 	// retry budget resets because phase 2 is a different failure to survive.
@@ -137,17 +135,6 @@ func (r *a2aPublicationRepository) FindDue(ctx context.Context, now time.Time, l
 	return due, nil
 }
 
-func (r *a2aPublicationRepository) MarkPublished(ctx context.Context, id uuid.UUID) error {
-	return r.db.WithContext(ctx).Model(&models.A2APublication{}).
-		Where("id = ?", id).
-		Updates(map[string]interface{}{
-			"status":          models.A2APublicationStatusPublished,
-			"last_error":      "",
-			"next_attempt_at": nil,
-			"updated_at":      time.Now(),
-		}).Error
-}
-
 func (r *a2aPublicationRepository) MarkAttemptFailed(ctx context.Context, id uuid.UUID, lastErr string, nextAttemptAt time.Time) error {
 	return r.db.WithContext(ctx).Model(&models.A2APublication{}).
 		Where("id = ?", id).
@@ -179,8 +166,9 @@ func (r *a2aPublicationRepository) DeleteForAgent(ctx context.Context, ouID, pro
 
 func (r *a2aPublicationRepository) MarkRouted(ctx context.Context, id uuid.UUID, routedAt time.Time) error {
 	now := time.Now()
+	// A fast rejection ack may land before this write; rejected stays terminal.
 	return r.db.WithContext(ctx).Model(&models.A2APublication{}).
-		Where("id = ?", id).
+		Where("id = ? AND status <> ?", id, models.A2APublicationStatusRejected).
 		Updates(map[string]interface{}{
 			"status":          models.A2APublicationStatusRouted,
 			"routed_at":       routedAt,
@@ -204,13 +192,15 @@ func (r *a2aPublicationRepository) MarkCardPublished(
 	ctx context.Context, id uuid.UUID, card json.RawMessage, fetchedAt time.Time,
 ) error {
 	// Updates(map) bypasses GORM's serializer, so the card must be cast to jsonb explicitly.
+	// A rejection ack may land first; keep its status and error but still store the document.
+	rejected := models.A2APublicationStatusRejected
 	return r.db.WithContext(ctx).Model(&models.A2APublication{}).
 		Where("id = ?", id).
 		Updates(map[string]interface{}{
-			"status":          models.A2APublicationStatusPublished,
+			"status":          gorm.Expr("CASE WHEN status = ? THEN status ELSE ? END", rejected, models.A2APublicationStatusPublished),
 			"agent_card":      gorm.Expr("?::jsonb", string(card)),
 			"card_fetched_at": fetchedAt,
-			"last_error":      "",
+			"last_error":      gorm.Expr("CASE WHEN status = ? THEN last_error ELSE '' END", rejected),
 			"next_attempt_at": nil,
 			"updated_at":      time.Now(),
 		}).Error
@@ -235,9 +225,12 @@ func (r *a2aPublicationRepository) RequeueCard(
 		Where("ou_id = ? AND project_name = ? AND agent_name = ? AND environment_uuid = ?",
 			ouID, projectName, agentName, environmentUUID).
 		Updates(map[string]interface{}{
-			"status":          models.A2APublicationStatusRouted,
-			"attempt_count":   0,
-			"last_error":      "",
+			"status":        models.A2APublicationStatusRouted,
+			"attempt_count": 0,
+			"last_error":    "",
+			// A rejected card was never accepted, so phase 2 must republish even an unchanged one.
+			"card_deployment_id": gorm.Expr("CASE WHEN status = ? THEN NULL ELSE card_deployment_id END",
+				models.A2APublicationStatusRejected),
 			"next_attempt_at": now,
 			"updated_at":      now,
 		}).Error

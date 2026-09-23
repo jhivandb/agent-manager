@@ -81,6 +81,7 @@ var serviceProviderSet = wire.NewSet(
 	// reconciler that consumes it is wired here.
 	ProvideAgentIdentityInjectionService,
 	services.NewAgentThunderReconcilerService,
+	ProvideA2AAgentCardFetcher,
 	services.NewA2APublicationReconcilerService,
 	services.NewEvaluatorManagerService,
 	services.NewEnvironmentService,
@@ -448,6 +449,11 @@ func ProvideWebSocketController(
 ) controllers.WebSocketController {
 	rateLimitCount := cfg.WebSocket.RateLimitPerMin
 	return controllers.NewWebSocketController(manager, hub, gatewayService, ackHandler, rateLimitCount)
+}
+
+// ProvideA2AAgentCardFetcher creates the A2A agent card fetcher.
+func ProvideA2AAgentCardFetcher() services.A2AAgentCardFetcher {
+	return services.NewA2AAgentCardFetcher()
 }
 
 // ProvideDeploymentAckHandler creates a new deployment ack handler

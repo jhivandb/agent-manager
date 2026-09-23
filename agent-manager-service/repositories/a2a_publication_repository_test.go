@@ -125,14 +125,15 @@ func TestA2APublicationFindDueRespectsBackoff(t *testing.T) {
 
 // A published row is done: leaving it due would republish the same agent on
 // every tick forever.
-func TestA2APublicationMarkPublishedRemovesItFromTheQueue(t *testing.T) {
+func TestA2APublicationMarkCardPublishedRemovesItFromTheQueue(t *testing.T) {
 	repo := NewA2APublicationRepository(db.GetDB())
 	ctx := context.Background()
 
 	pub := newTestPublication("published-" + uuid.New().String()[:8])
 	cleanupPublication(t, repo, pub)
 	require.NoError(t, repo.Enqueue(ctx, pub))
-	require.NoError(t, repo.MarkPublished(ctx, pub.ID))
+	require.NoError(t, repo.MarkRouted(ctx, pub.ID, time.Now()))
+	require.NoError(t, repo.MarkCardPublished(ctx, pub.ID, json.RawMessage(`{"name":"Trip Planner"}`), time.Now()))
 
 	due, err := repo.FindDue(ctx, time.Now(), 100)
 	require.NoError(t, err)
@@ -249,4 +250,83 @@ func TestA2APublicationRequeueCardReturnsTheRowToPhaseTwo(t *testing.T) {
 	assert.Empty(t, got.LastError)
 	assert.NotNil(t, got.NextAttemptAt)
 	assert.JSONEq(t, string(card), string(got.AgentCard), "the live card is untouched")
+}
+
+// rejectedPublication is a row whose outstanding card publish the gateway refused.
+func rejectedPublication(t *testing.T, repo A2APublicationRepository, name string) (*models.A2APublication, json.RawMessage) {
+	t.Helper()
+	ctx := context.Background()
+	pub := newTestPublication(name + "-" + uuid.New().String()[:8])
+	cleanupPublication(t, repo, pub)
+	require.NoError(t, repo.Enqueue(ctx, pub))
+
+	card := json.RawMessage(`{"name":"Trip Planner"}`)
+	outstanding := uuid.New()
+	require.NoError(t, repo.MarkRouted(ctx, pub.ID, time.Now()))
+	require.NoError(t, repo.SetCardDeploymentID(ctx, pub.ID, outstanding))
+	require.NoError(t, repo.MarkCardPublished(ctx, pub.ID, card, time.Now()))
+	require.NoError(t, repo.MarkCardRejected(ctx, outstanding, "INVALID_CARD"))
+	return pub, card
+}
+
+// The gateway can ack before the reconciler's final write commits; that write
+// must not overwrite the rejection, but must still store the rejected document.
+func TestA2APublicationMarkCardPublishedAfterARejectionKeepsItRejected(t *testing.T) {
+	repo := NewA2APublicationRepository(db.GetDB())
+	ctx := context.Background()
+	pub, _ := rejectedPublication(t, repo, "late-publish")
+
+	newer := json.RawMessage(`{"name":"Trip Planner","version":"2"}`)
+	require.NoError(t, repo.MarkCardPublished(ctx, pub.ID, newer, time.Now()))
+
+	got, err := repo.GetForAgentEnv(ctx, pub.OUID, pub.ProjectName, pub.AgentName, pub.EnvironmentUUID)
+	require.NoError(t, err)
+	assert.Equal(t, models.A2APublicationStatusRejected, got.Status)
+	assert.Equal(t, "INVALID_CARD", got.LastError)
+	assert.JSONEq(t, string(newer), string(got.AgentCard), "the document the gateway refused is kept")
+}
+
+// A phase 1 publish racing a rejection ack must not route the row back out of rejected.
+func TestA2APublicationMarkRoutedAfterARejectionKeepsItRejected(t *testing.T) {
+	repo := NewA2APublicationRepository(db.GetDB())
+	ctx := context.Background()
+	pub, _ := rejectedPublication(t, repo, "late-route")
+
+	require.NoError(t, repo.MarkRouted(ctx, pub.ID, time.Now()))
+
+	got, err := repo.GetForAgentEnv(ctx, pub.OUID, pub.ProjectName, pub.AgentName, pub.EnvironmentUUID)
+	require.NoError(t, err)
+	assert.Equal(t, models.A2APublicationStatusRejected, got.Status)
+	assert.Equal(t, "INVALID_CARD", got.LastError)
+}
+
+// Refresh from rejected clears the outstanding deployment so phase 2 republishes
+// an unchanged card; from published it leaves it, so an unchanged card is skipped.
+func TestA2APublicationRequeueCardClearsTheDeploymentOnlyWhenRejected(t *testing.T) {
+	repo := NewA2APublicationRepository(db.GetDB())
+	ctx := context.Background()
+
+	rejected, card := rejectedPublication(t, repo, "requeue-rejected")
+	require.NoError(t, repo.RequeueCard(ctx, rejected.OUID, rejected.ProjectName, rejected.AgentName, rejected.EnvironmentUUID))
+	got, err := repo.GetForAgentEnv(ctx, rejected.OUID, rejected.ProjectName, rejected.AgentName, rejected.EnvironmentUUID)
+	require.NoError(t, err)
+	assert.Equal(t, models.A2APublicationStatusRouted, got.Status)
+	assert.Nil(t, got.CardDeploymentID, "no accepted publish is known after a rejection")
+	assert.Empty(t, got.LastError)
+	assert.JSONEq(t, string(card), string(got.AgentCard))
+
+	published := newTestPublication("requeue-published-" + uuid.New().String()[:8])
+	cleanupPublication(t, repo, published)
+	require.NoError(t, repo.Enqueue(ctx, published))
+	accepted := uuid.New()
+	require.NoError(t, repo.MarkRouted(ctx, published.ID, time.Now()))
+	require.NoError(t, repo.SetCardDeploymentID(ctx, published.ID, accepted))
+	require.NoError(t, repo.MarkCardPublished(ctx, published.ID, card, time.Now()))
+
+	require.NoError(t, repo.RequeueCard(ctx, published.OUID, published.ProjectName, published.AgentName, published.EnvironmentUUID))
+	got, err = repo.GetForAgentEnv(ctx, published.OUID, published.ProjectName, published.AgentName, published.EnvironmentUUID)
+	require.NoError(t, err)
+	assert.Equal(t, models.A2APublicationStatusRouted, got.Status)
+	require.NotNil(t, got.CardDeploymentID)
+	assert.Equal(t, accepted, *got.CardDeploymentID, "an accepted publish is still known")
 }
