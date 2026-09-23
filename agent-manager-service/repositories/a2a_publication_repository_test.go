@@ -322,8 +322,9 @@ func TestA2APublicationMarkRoutedAfterARejectionKeepsItRejected(t *testing.T) {
 	assert.Equal(t, "INVALID_CARD", got.LastError)
 }
 
-// Refresh from rejected clears the outstanding deployment so phase 2 republishes
-// an unchanged card; from published it leaves it, so an unchanged card is skipped.
+// Refresh from rejected clears the outstanding deployment and the refused card,
+// so an exhausted phase 2 cannot read as "still serving" a card the gateway
+// refused; from published it leaves both, so an unchanged card is skipped.
 func TestA2APublicationRequeueCardClearsTheDeploymentOnlyWhenRejected(t *testing.T) {
 	repo := NewA2APublicationRepository(db.GetDB())
 	ctx := context.Background()
@@ -335,7 +336,8 @@ func TestA2APublicationRequeueCardClearsTheDeploymentOnlyWhenRejected(t *testing
 	assert.Equal(t, models.A2APublicationStatusRouted, got.Status)
 	assert.Nil(t, got.CardDeploymentID, "no accepted publish is known after a rejection")
 	assert.Empty(t, got.LastError)
-	assert.JSONEq(t, string(card), string(got.AgentCard))
+	assert.Nil(t, got.AgentCard, "the refused card is dropped")
+	assert.Nil(t, got.CardFetchedAt)
 
 	published := newTestPublication("requeue-published-" + uuid.New().String()[:8])
 	cleanupPublication(t, repo, published)
@@ -351,6 +353,38 @@ func TestA2APublicationRequeueCardClearsTheDeploymentOnlyWhenRejected(t *testing
 	assert.Equal(t, models.A2APublicationStatusRouted, got.Status)
 	require.NotNil(t, got.CardDeploymentID)
 	assert.Equal(t, accepted, *got.CardDeploymentID, "an accepted publish is still known")
+	assert.JSONEq(t, string(card), string(got.AgentCard), "the accepted card is kept")
+	assert.NotNil(t, got.CardFetchedAt)
+}
+
+// A phase-1 rejection (the stored card, republished on a redeploy) leaves
+// routed_at NULL; refresh must drop the card or phase 1 republishes it forever.
+func TestA2APublicationRequeueCardFromANeverRoutedRejectionDropsTheCard(t *testing.T) {
+	repo := NewA2APublicationRepository(db.GetDB())
+	ctx := context.Background()
+
+	pub := newTestPublication("requeue-rejected-phase-one-" + uuid.New().String()[:8])
+	cleanupPublication(t, repo, pub)
+	require.NoError(t, repo.Enqueue(ctx, pub))
+	require.NoError(t, repo.MarkRouted(ctx, pub.ID, time.Now()))
+	require.NoError(t, repo.MarkCardPublished(ctx, pub.ID, json.RawMessage(`{"name":"Trip Planner"}`), time.Now()))
+
+	// The redeploy keeps the card and clears routing; phase 1's card publish is refused.
+	require.NoError(t, repo.Enqueue(ctx, newTestPublicationFor(pub)))
+	outstanding := uuid.New()
+	require.NoError(t, repo.SetCardDeploymentID(ctx, pub.ID, outstanding))
+	require.NoError(t, repo.MarkCardRejected(ctx, outstanding, "INVALID_CARD"))
+
+	require.NoError(t, repo.RequeueCard(ctx, pub.OUID, pub.ProjectName, pub.AgentName, pub.EnvironmentUUID))
+
+	got, err := repo.GetForAgentEnv(ctx, pub.OUID, pub.ProjectName, pub.AgentName, pub.EnvironmentUUID)
+	require.NoError(t, err)
+	assert.Equal(t, models.A2APublicationStatusPending, got.Status)
+	assert.Nil(t, got.RoutedAt)
+	assert.Nil(t, got.AgentCard, "phase 1 must not republish the refused card")
+	assert.Nil(t, got.CardFetchedAt)
+	assert.Nil(t, got.CardDeploymentID)
+	assert.Empty(t, got.LastError)
 }
 
 // A redeploy after a rejection starts card-less: republishing the known-bad

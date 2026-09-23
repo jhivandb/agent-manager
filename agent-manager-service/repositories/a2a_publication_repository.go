@@ -64,7 +64,8 @@ type A2APublicationRepository interface {
 
 	// RequeueCard re-queues the row for its next attempt: phase 1 (pending) when
 	// it was never routed, phase 2 (routed) otherwise; it never disturbs live
-	// routing or the stored card. This is what the refresh endpoint calls.
+	// routing, and keeps the stored card unless the gateway rejected it. This is
+	// what the refresh endpoint calls.
 	RequeueCard(ctx context.Context, ouID, projectName, agentName string, environmentUUID uuid.UUID) error
 
 	// GetForAgentEnv reads one pair's row. Nil, nil when there is none — the
@@ -227,6 +228,8 @@ func (r *a2aPublicationRepository) RequeueCard(
 	ctx context.Context, ouID, projectName, agentName string, environmentUUID uuid.UUID,
 ) error {
 	now := time.Now()
+	rejected := models.A2APublicationStatusRejected
+	// Every CASE reads the pre-update row.
 	return r.db.WithContext(ctx).Model(&models.A2APublication{}).
 		Where("ou_id = ? AND project_name = ? AND agent_name = ? AND environment_uuid = ?",
 			ouID, projectName, agentName, environmentUUID).
@@ -238,8 +241,10 @@ func (r *a2aPublicationRepository) RequeueCard(
 			"attempt_count": 0,
 			"last_error":    "",
 			// A rejected card was never accepted, so phase 2 must republish even an unchanged one.
-			"card_deployment_id": gorm.Expr("CASE WHEN status = ? THEN NULL ELSE card_deployment_id END",
-				models.A2APublicationStatusRejected),
+			"card_deployment_id": gorm.Expr("CASE WHEN status = ? THEN NULL ELSE card_deployment_id END", rejected),
+			// The refused card is dropped, or phase 1 republishes it forever and phase 2 misreports it as live.
+			"agent_card":      gorm.Expr("CASE WHEN status = ? THEN NULL ELSE agent_card END", rejected),
+			"card_fetched_at": gorm.Expr("CASE WHEN status = ? THEN NULL ELSE card_fetched_at END", rejected),
 			"next_attempt_at": now,
 			"updated_at":      now,
 		}).Error
