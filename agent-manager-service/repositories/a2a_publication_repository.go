@@ -18,6 +18,8 @@ package repositories
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
@@ -42,6 +44,33 @@ type A2APublicationRepository interface {
 	FindDue(ctx context.Context, now time.Time, limit int) ([]models.A2APublication, error)
 
 	MarkPublished(ctx context.Context, id uuid.UUID) error
+
+	// MarkRouted ends phase 1. The row is immediately due again so the card
+	// fetch runs on the next tick rather than after a fresh retry wait, and the
+	// retry budget resets because phase 2 is a different failure to survive.
+	MarkRouted(ctx context.Context, id uuid.UUID, routedAt time.Time) error
+
+	// SetCardDeploymentID records which publish the gateway's next ack will name.
+	// It must be written before the broadcast: an ack that arrives before the row
+	// knows what it is waiting on is dropped, which is exactly the rejection the
+	// ack feedback exists to catch.
+	SetCardDeploymentID(ctx context.Context, id, deploymentID uuid.UUID) error
+
+	// MarkCardPublished ends phase 2 and stores the document the gateway serves.
+	MarkCardPublished(ctx context.Context, id uuid.UUID, card json.RawMessage, fetchedAt time.Time) error
+
+	// MarkCardRejected records that the gateway refused the outstanding card
+	// publish. Matching is on deployment ID alone, so an ack for any superseded
+	// publish matches no row. The rejected document is deliberately kept.
+	MarkCardRejected(ctx context.Context, deploymentID uuid.UUID, errorCode string) error
+
+	// RequeueCard returns a row to phase 2 without disturbing live routing or the
+	// stored card. This is what the refresh endpoint calls.
+	RequeueCard(ctx context.Context, ouID, projectName, agentName string, environmentUUID uuid.UUID) error
+
+	// GetForAgentEnv reads one pair's row. Nil, nil when there is none — the
+	// agent is not A2A, or was never deployed to that environment.
+	GetForAgentEnv(ctx context.Context, ouID, projectName, agentName string, environmentUUID uuid.UUID) (*models.A2APublication, error)
 
 	// MarkAttemptFailed records a retryable failure and schedules the next try.
 	MarkAttemptFailed(ctx context.Context, id uuid.UUID, lastErr string, nextAttemptAt time.Time) error
@@ -70,6 +99,8 @@ func (r *a2aPublicationRepository) Enqueue(ctx context.Context, pub *models.A2AP
 	pub.LastError = ""
 	pub.NextAttemptAt = &now
 	pub.UpdatedAt = now
+	pub.RoutedAt = nil
+	pub.CardDeploymentID = nil
 
 	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns: []clause.Column{
@@ -81,6 +112,10 @@ func (r *a2aPublicationRepository) Enqueue(ctx context.Context, pub *models.A2AP
 		DoUpdates: clause.AssignmentColumns([]string{
 			"environment_uuid", "artifact_uuid", "status",
 			"attempt_count", "last_error", "next_attempt_at", "updated_at",
+			// Routing state is per-deploy and resets; card state is not and must
+			// not be listed here, or a redeploy loses the card phase 1
+			// republishes and downgrades itself to passthrough.
+			"routed_at", "card_deployment_id",
 		}),
 	}).Create(pub).Error
 }
@@ -88,8 +123,11 @@ func (r *a2aPublicationRepository) Enqueue(ctx context.Context, pub *models.A2AP
 func (r *a2aPublicationRepository) FindDue(ctx context.Context, now time.Time, limit int) ([]models.A2APublication, error) {
 	var due []models.A2APublication
 	err := r.db.WithContext(ctx).
-		Where("status = ? AND (next_attempt_at IS NULL OR next_attempt_at <= ?)",
-			models.A2APublicationStatusPending, now).
+		Where("status IN ? AND (next_attempt_at IS NULL OR next_attempt_at <= ?)",
+			[]models.A2APublicationStatus{
+				models.A2APublicationStatusPending,
+				models.A2APublicationStatusRouted,
+			}, now).
 		Order("next_attempt_at ASC, created_at ASC").
 		Limit(limit).
 		Find(&due).Error
@@ -137,4 +175,87 @@ func (r *a2aPublicationRepository) DeleteForAgent(ctx context.Context, ouID, pro
 	return r.db.WithContext(ctx).
 		Where("ou_id = ? AND project_name = ? AND agent_name = ?", ouID, projectName, agentName).
 		Delete(&models.A2APublication{}).Error
+}
+
+func (r *a2aPublicationRepository) MarkRouted(ctx context.Context, id uuid.UUID, routedAt time.Time) error {
+	now := time.Now()
+	return r.db.WithContext(ctx).Model(&models.A2APublication{}).
+		Where("id = ?", id).
+		Updates(map[string]interface{}{
+			"status":          models.A2APublicationStatusRouted,
+			"routed_at":       routedAt,
+			"attempt_count":   0,
+			"last_error":      "",
+			"next_attempt_at": now,
+			"updated_at":      now,
+		}).Error
+}
+
+func (r *a2aPublicationRepository) SetCardDeploymentID(ctx context.Context, id, deploymentID uuid.UUID) error {
+	return r.db.WithContext(ctx).Model(&models.A2APublication{}).
+		Where("id = ?", id).
+		Updates(map[string]interface{}{
+			"card_deployment_id": deploymentID,
+			"updated_at":         time.Now(),
+		}).Error
+}
+
+func (r *a2aPublicationRepository) MarkCardPublished(
+	ctx context.Context, id uuid.UUID, card json.RawMessage, fetchedAt time.Time,
+) error {
+	return r.db.WithContext(ctx).Model(&models.A2APublication{}).
+		Where("id = ?", id).
+		Updates(map[string]interface{}{
+			"status":          models.A2APublicationStatusPublished,
+			"agent_card":      []byte(card),
+			"card_fetched_at": fetchedAt,
+			"last_error":      "",
+			"next_attempt_at": nil,
+			"updated_at":      time.Now(),
+		}).Error
+}
+
+func (r *a2aPublicationRepository) MarkCardRejected(ctx context.Context, deploymentID uuid.UUID, errorCode string) error {
+	return r.db.WithContext(ctx).Model(&models.A2APublication{}).
+		Where("card_deployment_id = ?", deploymentID).
+		Updates(map[string]interface{}{
+			"status":          models.A2APublicationStatusRejected,
+			"last_error":      errorCode,
+			"next_attempt_at": nil,
+			"updated_at":      time.Now(),
+		}).Error
+}
+
+func (r *a2aPublicationRepository) RequeueCard(
+	ctx context.Context, ouID, projectName, agentName string, environmentUUID uuid.UUID,
+) error {
+	now := time.Now()
+	return r.db.WithContext(ctx).Model(&models.A2APublication{}).
+		Where("ou_id = ? AND project_name = ? AND agent_name = ? AND environment_uuid = ?",
+			ouID, projectName, agentName, environmentUUID).
+		Updates(map[string]interface{}{
+			"status":          models.A2APublicationStatusRouted,
+			"attempt_count":   0,
+			"last_error":      "",
+			"next_attempt_at": now,
+			"updated_at":      now,
+		}).Error
+}
+
+//nolint:nilnil // absence is not an error here; the caller turns it into a 404
+func (r *a2aPublicationRepository) GetForAgentEnv(
+	ctx context.Context, ouID, projectName, agentName string, environmentUUID uuid.UUID,
+) (*models.A2APublication, error) {
+	var pub models.A2APublication
+	err := r.db.WithContext(ctx).
+		Where("ou_id = ? AND project_name = ? AND agent_name = ? AND environment_uuid = ?",
+			ouID, projectName, agentName, environmentUUID).
+		First(&pub).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &pub, nil
 }

@@ -20,6 +20,7 @@ package repositories
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -47,6 +48,19 @@ func cleanupPublication(t *testing.T, repo A2APublicationRepository, pub *models
 	t.Cleanup(func() {
 		_ = repo.DeleteForAgent(context.Background(), pub.OUID, pub.ProjectName, pub.AgentName)
 	})
+}
+
+// newTestPublicationFor is the second Enqueue for a pair that already has a row:
+// same identity, fresh artifact, which is what a redeploy submits.
+func newTestPublicationFor(pub *models.A2APublication) *models.A2APublication {
+	return &models.A2APublication{
+		OUID:            pub.OUID,
+		ProjectName:     pub.ProjectName,
+		AgentName:       pub.AgentName,
+		EnvironmentName: pub.EnvironmentName,
+		EnvironmentUUID: pub.EnvironmentUUID,
+		ArtifactUUID:    uuid.New(),
+	}
 }
 
 // A redeploy must re-publish, and a pair that exhausted its budget must get
@@ -125,4 +139,114 @@ func TestA2APublicationMarkPublishedRemovesItFromTheQueue(t *testing.T) {
 	for _, row := range due {
 		assert.NotEqual(t, pub.AgentName, row.AgentName, "a published row is no longer due")
 	}
+}
+
+// A redeploy resets routing and retry state but must preserve the stored card:
+// phase 1 republishes it so discovery keeps working while the new pod starts.
+// Losing it here downgrades every redeploy to passthrough.
+func TestA2APublicationEnqueuePreservesTheCardAndClearsRoutingState(t *testing.T) {
+	repo := NewA2APublicationRepository(db.GetDB())
+	ctx := context.Background()
+
+	pub := newTestPublication("card-keeper-" + uuid.New().String()[:8])
+	cleanupPublication(t, repo, pub)
+	require.NoError(t, repo.Enqueue(ctx, pub))
+
+	fetchedAt := time.Now().UTC().Truncate(time.Second)
+	card := json.RawMessage(`{"name":"Trip Planner"}`)
+	require.NoError(t, repo.MarkRouted(ctx, pub.ID, fetchedAt))
+	require.NoError(t, repo.SetCardDeploymentID(ctx, pub.ID, uuid.New()))
+	require.NoError(t, repo.MarkCardPublished(ctx, pub.ID, card, fetchedAt))
+
+	require.NoError(t, repo.Enqueue(ctx, newTestPublicationFor(pub)))
+
+	got, err := repo.GetForAgentEnv(ctx, pub.OUID, pub.ProjectName, pub.AgentName, pub.EnvironmentUUID)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.JSONEq(t, string(card), string(got.AgentCard), "the card survives a redeploy")
+	assert.NotNil(t, got.CardFetchedAt, "and so does when it was fetched")
+	assert.Equal(t, models.A2APublicationStatusPending, got.Status)
+	assert.Nil(t, got.RoutedAt, "routing state is reset")
+	assert.Nil(t, got.CardDeploymentID,
+		"and the row waits on no ack — a late ack for the previous publish must not reject this one")
+}
+
+// Phase 2 rows are due alongside phase 1 rows; a scan that still filtered on
+// pending alone would route every agent and fetch no cards.
+func TestA2APublicationFindDueIncludesRoutedRows(t *testing.T) {
+	repo := NewA2APublicationRepository(db.GetDB())
+	ctx := context.Background()
+
+	pub := newTestPublication("due-routed-" + uuid.New().String()[:8])
+	cleanupPublication(t, repo, pub)
+	require.NoError(t, repo.Enqueue(ctx, pub))
+	require.NoError(t, repo.MarkRouted(ctx, pub.ID, time.Now()))
+
+	due, err := repo.FindDue(ctx, time.Now().Add(time.Minute), 50)
+	require.NoError(t, err)
+
+	var found bool
+	for _, row := range due {
+		if row.ID == pub.ID {
+			found = true
+			assert.Equal(t, models.A2APublicationStatusRouted, row.Status)
+			assert.Zero(t, row.AttemptCount, "the phase boundary resets the retry budget")
+		}
+	}
+	assert.True(t, found, "a routed row is due for its card fetch")
+}
+
+// The ack handler matches on deployment ID alone. A stale ID must match no row,
+// or an ack for a superseded publish could reject a live one.
+func TestA2APublicationMarkCardRejectedMatchesOnlyTheOutstandingDeployment(t *testing.T) {
+	repo := NewA2APublicationRepository(db.GetDB())
+	ctx := context.Background()
+
+	pub := newTestPublication("reject-" + uuid.New().String()[:8])
+	cleanupPublication(t, repo, pub)
+	require.NoError(t, repo.Enqueue(ctx, pub))
+
+	card := json.RawMessage(`{"name":"Trip Planner"}`)
+	outstanding := uuid.New()
+	require.NoError(t, repo.MarkRouted(ctx, pub.ID, time.Now()))
+	require.NoError(t, repo.SetCardDeploymentID(ctx, pub.ID, outstanding))
+	require.NoError(t, repo.MarkCardPublished(ctx, pub.ID, card, time.Now()))
+
+	require.NoError(t, repo.MarkCardRejected(ctx, uuid.New(), "INVALID_CARD"))
+	got, err := repo.GetForAgentEnv(ctx, pub.OUID, pub.ProjectName, pub.AgentName, pub.EnvironmentUUID)
+	require.NoError(t, err)
+	assert.Equal(t, models.A2APublicationStatusPublished, got.Status, "a stale ack changes nothing")
+
+	require.NoError(t, repo.MarkCardRejected(ctx, outstanding, "INVALID_CARD"))
+	got, err = repo.GetForAgentEnv(ctx, pub.OUID, pub.ProjectName, pub.AgentName, pub.EnvironmentUUID)
+	require.NoError(t, err)
+	assert.Equal(t, models.A2APublicationStatusRejected, got.Status)
+	assert.Equal(t, "INVALID_CARD", got.LastError)
+	assert.JSONEq(t, string(card), string(got.AgentCard),
+		"the rejected document is kept — it is what an operator needs to see")
+}
+
+// The refresh endpoint re-runs phase 2 without touching live routing.
+func TestA2APublicationRequeueCardReturnsTheRowToPhaseTwo(t *testing.T) {
+	repo := NewA2APublicationRepository(db.GetDB())
+	ctx := context.Background()
+
+	pub := newTestPublication("requeue-" + uuid.New().String()[:8])
+	cleanupPublication(t, repo, pub)
+	require.NoError(t, repo.Enqueue(ctx, pub))
+
+	card := json.RawMessage(`{"name":"Trip Planner"}`)
+	require.NoError(t, repo.MarkRouted(ctx, pub.ID, time.Now()))
+	require.NoError(t, repo.MarkCardPublished(ctx, pub.ID, card, time.Now()))
+	require.NoError(t, repo.MarkFailed(ctx, pub.ID, "fetch timed out"))
+
+	require.NoError(t, repo.RequeueCard(ctx, pub.OUID, pub.ProjectName, pub.AgentName, pub.EnvironmentUUID))
+
+	got, err := repo.GetForAgentEnv(ctx, pub.OUID, pub.ProjectName, pub.AgentName, pub.EnvironmentUUID)
+	require.NoError(t, err)
+	assert.Equal(t, models.A2APublicationStatusRouted, got.Status)
+	assert.Zero(t, got.AttemptCount)
+	assert.Empty(t, got.LastError)
+	assert.NotNil(t, got.NextAttemptAt)
+	assert.JSONEq(t, string(card), string(got.AgentCard), "the live card is untouched")
 }

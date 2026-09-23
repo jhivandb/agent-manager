@@ -5,6 +5,7 @@ package repomocks
 
 import (
 	"context"
+	"encoding/json"
 	"sync"
 	"time"
 
@@ -27,14 +28,32 @@ import (
 //			FindDueFunc: func(ctx context.Context, now time.Time, limit int) ([]models.A2APublication, error) {
 //				panic("mock out the FindDue method")
 //			},
+//			GetForAgentEnvFunc: func(ctx context.Context, ouID string, projectName string, agentName string, environmentUUID uuid.UUID) (*models.A2APublication, error) {
+//				panic("mock out the GetForAgentEnv method")
+//			},
 //			MarkAttemptFailedFunc: func(ctx context.Context, id uuid.UUID, lastErr string, nextAttemptAt time.Time) error {
 //				panic("mock out the MarkAttemptFailed method")
+//			},
+//			MarkCardPublishedFunc: func(ctx context.Context, id uuid.UUID, card json.RawMessage, fetchedAt time.Time) error {
+//				panic("mock out the MarkCardPublished method")
+//			},
+//			MarkCardRejectedFunc: func(ctx context.Context, deploymentID uuid.UUID, errorCode string) error {
+//				panic("mock out the MarkCardRejected method")
 //			},
 //			MarkFailedFunc: func(ctx context.Context, id uuid.UUID, lastErr string) error {
 //				panic("mock out the MarkFailed method")
 //			},
 //			MarkPublishedFunc: func(ctx context.Context, id uuid.UUID) error {
 //				panic("mock out the MarkPublished method")
+//			},
+//			MarkRoutedFunc: func(ctx context.Context, id uuid.UUID, routedAt time.Time) error {
+//				panic("mock out the MarkRouted method")
+//			},
+//			RequeueCardFunc: func(ctx context.Context, ouID string, projectName string, agentName string, environmentUUID uuid.UUID) error {
+//				panic("mock out the RequeueCard method")
+//			},
+//			SetCardDeploymentIDFunc: func(ctx context.Context, id uuid.UUID, deploymentID uuid.UUID) error {
+//				panic("mock out the SetCardDeploymentID method")
 //			},
 //		}
 //
@@ -52,14 +71,32 @@ type A2APublicationRepositoryMock struct {
 	// FindDueFunc mocks the FindDue method.
 	FindDueFunc func(ctx context.Context, now time.Time, limit int) ([]models.A2APublication, error)
 
+	// GetForAgentEnvFunc mocks the GetForAgentEnv method.
+	GetForAgentEnvFunc func(ctx context.Context, ouID string, projectName string, agentName string, environmentUUID uuid.UUID) (*models.A2APublication, error)
+
 	// MarkAttemptFailedFunc mocks the MarkAttemptFailed method.
 	MarkAttemptFailedFunc func(ctx context.Context, id uuid.UUID, lastErr string, nextAttemptAt time.Time) error
+
+	// MarkCardPublishedFunc mocks the MarkCardPublished method.
+	MarkCardPublishedFunc func(ctx context.Context, id uuid.UUID, card json.RawMessage, fetchedAt time.Time) error
+
+	// MarkCardRejectedFunc mocks the MarkCardRejected method.
+	MarkCardRejectedFunc func(ctx context.Context, deploymentID uuid.UUID, errorCode string) error
 
 	// MarkFailedFunc mocks the MarkFailed method.
 	MarkFailedFunc func(ctx context.Context, id uuid.UUID, lastErr string) error
 
 	// MarkPublishedFunc mocks the MarkPublished method.
 	MarkPublishedFunc func(ctx context.Context, id uuid.UUID) error
+
+	// MarkRoutedFunc mocks the MarkRouted method.
+	MarkRoutedFunc func(ctx context.Context, id uuid.UUID, routedAt time.Time) error
+
+	// RequeueCardFunc mocks the RequeueCard method.
+	RequeueCardFunc func(ctx context.Context, ouID string, projectName string, agentName string, environmentUUID uuid.UUID) error
+
+	// SetCardDeploymentIDFunc mocks the SetCardDeploymentID method.
+	SetCardDeploymentIDFunc func(ctx context.Context, id uuid.UUID, deploymentID uuid.UUID) error
 
 	// calls tracks calls to the methods.
 	calls struct {
@@ -90,6 +127,19 @@ type A2APublicationRepositoryMock struct {
 			// Limit is the limit argument value.
 			Limit int
 		}
+		// GetForAgentEnv holds details about calls to the GetForAgentEnv method.
+		GetForAgentEnv []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// OuID is the ouID argument value.
+			OuID string
+			// ProjectName is the projectName argument value.
+			ProjectName string
+			// AgentName is the agentName argument value.
+			AgentName string
+			// EnvironmentUUID is the environmentUUID argument value.
+			EnvironmentUUID uuid.UUID
+		}
 		// MarkAttemptFailed holds details about calls to the MarkAttemptFailed method.
 		MarkAttemptFailed []struct {
 			// Ctx is the ctx argument value.
@@ -100,6 +150,26 @@ type A2APublicationRepositoryMock struct {
 			LastErr string
 			// NextAttemptAt is the nextAttemptAt argument value.
 			NextAttemptAt time.Time
+		}
+		// MarkCardPublished holds details about calls to the MarkCardPublished method.
+		MarkCardPublished []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// ID is the id argument value.
+			ID uuid.UUID
+			// Card is the card argument value.
+			Card json.RawMessage
+			// FetchedAt is the fetchedAt argument value.
+			FetchedAt time.Time
+		}
+		// MarkCardRejected holds details about calls to the MarkCardRejected method.
+		MarkCardRejected []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// DeploymentID is the deploymentID argument value.
+			DeploymentID uuid.UUID
+			// ErrorCode is the errorCode argument value.
+			ErrorCode string
 		}
 		// MarkFailed holds details about calls to the MarkFailed method.
 		MarkFailed []struct {
@@ -117,13 +187,50 @@ type A2APublicationRepositoryMock struct {
 			// ID is the id argument value.
 			ID uuid.UUID
 		}
+		// MarkRouted holds details about calls to the MarkRouted method.
+		MarkRouted []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// ID is the id argument value.
+			ID uuid.UUID
+			// RoutedAt is the routedAt argument value.
+			RoutedAt time.Time
+		}
+		// RequeueCard holds details about calls to the RequeueCard method.
+		RequeueCard []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// OuID is the ouID argument value.
+			OuID string
+			// ProjectName is the projectName argument value.
+			ProjectName string
+			// AgentName is the agentName argument value.
+			AgentName string
+			// EnvironmentUUID is the environmentUUID argument value.
+			EnvironmentUUID uuid.UUID
+		}
+		// SetCardDeploymentID holds details about calls to the SetCardDeploymentID method.
+		SetCardDeploymentID []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// ID is the id argument value.
+			ID uuid.UUID
+			// DeploymentID is the deploymentID argument value.
+			DeploymentID uuid.UUID
+		}
 	}
-	lockDeleteForAgent    sync.RWMutex
-	lockEnqueue           sync.RWMutex
-	lockFindDue           sync.RWMutex
-	lockMarkAttemptFailed sync.RWMutex
-	lockMarkFailed        sync.RWMutex
-	lockMarkPublished     sync.RWMutex
+	lockDeleteForAgent      sync.RWMutex
+	lockEnqueue             sync.RWMutex
+	lockFindDue             sync.RWMutex
+	lockGetForAgentEnv      sync.RWMutex
+	lockMarkAttemptFailed   sync.RWMutex
+	lockMarkCardPublished   sync.RWMutex
+	lockMarkCardRejected    sync.RWMutex
+	lockMarkFailed          sync.RWMutex
+	lockMarkPublished       sync.RWMutex
+	lockMarkRouted          sync.RWMutex
+	lockRequeueCard         sync.RWMutex
+	lockSetCardDeploymentID sync.RWMutex
 }
 
 // DeleteForAgent calls DeleteForAgentFunc.
@@ -246,6 +353,54 @@ func (mock *A2APublicationRepositoryMock) FindDueCalls() []struct {
 	return calls
 }
 
+// GetForAgentEnv calls GetForAgentEnvFunc.
+func (mock *A2APublicationRepositoryMock) GetForAgentEnv(ctx context.Context, ouID string, projectName string, agentName string, environmentUUID uuid.UUID) (*models.A2APublication, error) {
+	if mock.GetForAgentEnvFunc == nil {
+		panic("A2APublicationRepositoryMock.GetForAgentEnvFunc: method is nil but A2APublicationRepository.GetForAgentEnv was just called")
+	}
+	callInfo := struct {
+		Ctx             context.Context
+		OuID            string
+		ProjectName     string
+		AgentName       string
+		EnvironmentUUID uuid.UUID
+	}{
+		Ctx:             ctx,
+		OuID:            ouID,
+		ProjectName:     projectName,
+		AgentName:       agentName,
+		EnvironmentUUID: environmentUUID,
+	}
+	mock.lockGetForAgentEnv.Lock()
+	mock.calls.GetForAgentEnv = append(mock.calls.GetForAgentEnv, callInfo)
+	mock.lockGetForAgentEnv.Unlock()
+	return mock.GetForAgentEnvFunc(ctx, ouID, projectName, agentName, environmentUUID)
+}
+
+// GetForAgentEnvCalls gets all the calls that were made to GetForAgentEnv.
+// Check the length with:
+//
+//	len(mockedA2APublicationRepository.GetForAgentEnvCalls())
+func (mock *A2APublicationRepositoryMock) GetForAgentEnvCalls() []struct {
+	Ctx             context.Context
+	OuID            string
+	ProjectName     string
+	AgentName       string
+	EnvironmentUUID uuid.UUID
+} {
+	var calls []struct {
+		Ctx             context.Context
+		OuID            string
+		ProjectName     string
+		AgentName       string
+		EnvironmentUUID uuid.UUID
+	}
+	mock.lockGetForAgentEnv.RLock()
+	calls = mock.calls.GetForAgentEnv
+	mock.lockGetForAgentEnv.RUnlock()
+	return calls
+}
+
 // MarkAttemptFailed calls MarkAttemptFailedFunc.
 func (mock *A2APublicationRepositoryMock) MarkAttemptFailed(ctx context.Context, id uuid.UUID, lastErr string, nextAttemptAt time.Time) error {
 	if mock.MarkAttemptFailedFunc == nil {
@@ -287,6 +442,90 @@ func (mock *A2APublicationRepositoryMock) MarkAttemptFailedCalls() []struct {
 	mock.lockMarkAttemptFailed.RLock()
 	calls = mock.calls.MarkAttemptFailed
 	mock.lockMarkAttemptFailed.RUnlock()
+	return calls
+}
+
+// MarkCardPublished calls MarkCardPublishedFunc.
+func (mock *A2APublicationRepositoryMock) MarkCardPublished(ctx context.Context, id uuid.UUID, card json.RawMessage, fetchedAt time.Time) error {
+	if mock.MarkCardPublishedFunc == nil {
+		panic("A2APublicationRepositoryMock.MarkCardPublishedFunc: method is nil but A2APublicationRepository.MarkCardPublished was just called")
+	}
+	callInfo := struct {
+		Ctx       context.Context
+		ID        uuid.UUID
+		Card      json.RawMessage
+		FetchedAt time.Time
+	}{
+		Ctx:       ctx,
+		ID:        id,
+		Card:      card,
+		FetchedAt: fetchedAt,
+	}
+	mock.lockMarkCardPublished.Lock()
+	mock.calls.MarkCardPublished = append(mock.calls.MarkCardPublished, callInfo)
+	mock.lockMarkCardPublished.Unlock()
+	return mock.MarkCardPublishedFunc(ctx, id, card, fetchedAt)
+}
+
+// MarkCardPublishedCalls gets all the calls that were made to MarkCardPublished.
+// Check the length with:
+//
+//	len(mockedA2APublicationRepository.MarkCardPublishedCalls())
+func (mock *A2APublicationRepositoryMock) MarkCardPublishedCalls() []struct {
+	Ctx       context.Context
+	ID        uuid.UUID
+	Card      json.RawMessage
+	FetchedAt time.Time
+} {
+	var calls []struct {
+		Ctx       context.Context
+		ID        uuid.UUID
+		Card      json.RawMessage
+		FetchedAt time.Time
+	}
+	mock.lockMarkCardPublished.RLock()
+	calls = mock.calls.MarkCardPublished
+	mock.lockMarkCardPublished.RUnlock()
+	return calls
+}
+
+// MarkCardRejected calls MarkCardRejectedFunc.
+func (mock *A2APublicationRepositoryMock) MarkCardRejected(ctx context.Context, deploymentID uuid.UUID, errorCode string) error {
+	if mock.MarkCardRejectedFunc == nil {
+		panic("A2APublicationRepositoryMock.MarkCardRejectedFunc: method is nil but A2APublicationRepository.MarkCardRejected was just called")
+	}
+	callInfo := struct {
+		Ctx          context.Context
+		DeploymentID uuid.UUID
+		ErrorCode    string
+	}{
+		Ctx:          ctx,
+		DeploymentID: deploymentID,
+		ErrorCode:    errorCode,
+	}
+	mock.lockMarkCardRejected.Lock()
+	mock.calls.MarkCardRejected = append(mock.calls.MarkCardRejected, callInfo)
+	mock.lockMarkCardRejected.Unlock()
+	return mock.MarkCardRejectedFunc(ctx, deploymentID, errorCode)
+}
+
+// MarkCardRejectedCalls gets all the calls that were made to MarkCardRejected.
+// Check the length with:
+//
+//	len(mockedA2APublicationRepository.MarkCardRejectedCalls())
+func (mock *A2APublicationRepositoryMock) MarkCardRejectedCalls() []struct {
+	Ctx          context.Context
+	DeploymentID uuid.UUID
+	ErrorCode    string
+} {
+	var calls []struct {
+		Ctx          context.Context
+		DeploymentID uuid.UUID
+		ErrorCode    string
+	}
+	mock.lockMarkCardRejected.RLock()
+	calls = mock.calls.MarkCardRejected
+	mock.lockMarkCardRejected.RUnlock()
 	return calls
 }
 
@@ -363,5 +602,133 @@ func (mock *A2APublicationRepositoryMock) MarkPublishedCalls() []struct {
 	mock.lockMarkPublished.RLock()
 	calls = mock.calls.MarkPublished
 	mock.lockMarkPublished.RUnlock()
+	return calls
+}
+
+// MarkRouted calls MarkRoutedFunc.
+func (mock *A2APublicationRepositoryMock) MarkRouted(ctx context.Context, id uuid.UUID, routedAt time.Time) error {
+	if mock.MarkRoutedFunc == nil {
+		panic("A2APublicationRepositoryMock.MarkRoutedFunc: method is nil but A2APublicationRepository.MarkRouted was just called")
+	}
+	callInfo := struct {
+		Ctx      context.Context
+		ID       uuid.UUID
+		RoutedAt time.Time
+	}{
+		Ctx:      ctx,
+		ID:       id,
+		RoutedAt: routedAt,
+	}
+	mock.lockMarkRouted.Lock()
+	mock.calls.MarkRouted = append(mock.calls.MarkRouted, callInfo)
+	mock.lockMarkRouted.Unlock()
+	return mock.MarkRoutedFunc(ctx, id, routedAt)
+}
+
+// MarkRoutedCalls gets all the calls that were made to MarkRouted.
+// Check the length with:
+//
+//	len(mockedA2APublicationRepository.MarkRoutedCalls())
+func (mock *A2APublicationRepositoryMock) MarkRoutedCalls() []struct {
+	Ctx      context.Context
+	ID       uuid.UUID
+	RoutedAt time.Time
+} {
+	var calls []struct {
+		Ctx      context.Context
+		ID       uuid.UUID
+		RoutedAt time.Time
+	}
+	mock.lockMarkRouted.RLock()
+	calls = mock.calls.MarkRouted
+	mock.lockMarkRouted.RUnlock()
+	return calls
+}
+
+// RequeueCard calls RequeueCardFunc.
+func (mock *A2APublicationRepositoryMock) RequeueCard(ctx context.Context, ouID string, projectName string, agentName string, environmentUUID uuid.UUID) error {
+	if mock.RequeueCardFunc == nil {
+		panic("A2APublicationRepositoryMock.RequeueCardFunc: method is nil but A2APublicationRepository.RequeueCard was just called")
+	}
+	callInfo := struct {
+		Ctx             context.Context
+		OuID            string
+		ProjectName     string
+		AgentName       string
+		EnvironmentUUID uuid.UUID
+	}{
+		Ctx:             ctx,
+		OuID:            ouID,
+		ProjectName:     projectName,
+		AgentName:       agentName,
+		EnvironmentUUID: environmentUUID,
+	}
+	mock.lockRequeueCard.Lock()
+	mock.calls.RequeueCard = append(mock.calls.RequeueCard, callInfo)
+	mock.lockRequeueCard.Unlock()
+	return mock.RequeueCardFunc(ctx, ouID, projectName, agentName, environmentUUID)
+}
+
+// RequeueCardCalls gets all the calls that were made to RequeueCard.
+// Check the length with:
+//
+//	len(mockedA2APublicationRepository.RequeueCardCalls())
+func (mock *A2APublicationRepositoryMock) RequeueCardCalls() []struct {
+	Ctx             context.Context
+	OuID            string
+	ProjectName     string
+	AgentName       string
+	EnvironmentUUID uuid.UUID
+} {
+	var calls []struct {
+		Ctx             context.Context
+		OuID            string
+		ProjectName     string
+		AgentName       string
+		EnvironmentUUID uuid.UUID
+	}
+	mock.lockRequeueCard.RLock()
+	calls = mock.calls.RequeueCard
+	mock.lockRequeueCard.RUnlock()
+	return calls
+}
+
+// SetCardDeploymentID calls SetCardDeploymentIDFunc.
+func (mock *A2APublicationRepositoryMock) SetCardDeploymentID(ctx context.Context, id uuid.UUID, deploymentID uuid.UUID) error {
+	if mock.SetCardDeploymentIDFunc == nil {
+		panic("A2APublicationRepositoryMock.SetCardDeploymentIDFunc: method is nil but A2APublicationRepository.SetCardDeploymentID was just called")
+	}
+	callInfo := struct {
+		Ctx          context.Context
+		ID           uuid.UUID
+		DeploymentID uuid.UUID
+	}{
+		Ctx:          ctx,
+		ID:           id,
+		DeploymentID: deploymentID,
+	}
+	mock.lockSetCardDeploymentID.Lock()
+	mock.calls.SetCardDeploymentID = append(mock.calls.SetCardDeploymentID, callInfo)
+	mock.lockSetCardDeploymentID.Unlock()
+	return mock.SetCardDeploymentIDFunc(ctx, id, deploymentID)
+}
+
+// SetCardDeploymentIDCalls gets all the calls that were made to SetCardDeploymentID.
+// Check the length with:
+//
+//	len(mockedA2APublicationRepository.SetCardDeploymentIDCalls())
+func (mock *A2APublicationRepositoryMock) SetCardDeploymentIDCalls() []struct {
+	Ctx          context.Context
+	ID           uuid.UUID
+	DeploymentID uuid.UUID
+} {
+	var calls []struct {
+		Ctx          context.Context
+		ID           uuid.UUID
+		DeploymentID uuid.UUID
+	}
+	mock.lockSetCardDeploymentID.RLock()
+	calls = mock.calls.SetCardDeploymentID
+	mock.lockSetCardDeploymentID.RUnlock()
 	return calls
 }
