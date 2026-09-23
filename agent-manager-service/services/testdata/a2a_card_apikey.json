@@ -1,0 +1,47 @@
+{
+  "capabilities": {
+    "streaming": true
+  },
+  "description": "Plans deterministic multi-day itineraries",
+  "name": "Trip Planner",
+  "protocolVersion": "1.0",
+  "securityRequirements": [
+    {
+      "schemes": {
+        "apiKey": {
+          "list": []
+        }
+      }
+    }
+  ],
+  "securitySchemes": {
+    "apiKey": {
+      "apiKeySecurityScheme": {
+        "location": "header",
+        "name": "X-API-Key"
+      }
+    }
+  },
+  "skills": [
+    {
+      "id": "plan_trip",
+      "name": "Plan a trip"
+    }
+  ],
+  "supportedInterfaces": [
+    {
+      "protocolBinding": "JSONRPC",
+      "protocolVersion": "1.0",
+      "url": "https://agents.example.com/trip-planner/rpc"
+    },
+    {
+      "protocolBinding": "HTTP+JSON",
+      "protocolVersion": "1.0",
+      "url": "https://agents.example.com/trip-planner/rest"
+    }
+  ],
+  "version": "1.0.0",
+  "x-vendor-feature": {
+    "beta": true
+  }
+}

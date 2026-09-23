@@ -48,6 +48,10 @@ const (
 	a2aTransportHTTPJSON = "HTTP+JSON"
 	a2aPathPrefixJSONRPC = "/rpc"
 	a2aPathPrefixHTTPRPC = "/rest"
+
+	// apiKeyAuthHeaderName is the header the api-key-auth policy reads
+	// (client.APIKeyAuthPolicy()); the card must name the same one, unchecked.
+	apiKeyAuthHeaderName = "X-API-Key"
 )
 
 // A2AAgentDeploymentYAML is the kind: Agent resource agent-manager publishes to
