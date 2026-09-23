@@ -36,7 +36,8 @@ type A2AAgentCardServiceInterface interface {
 	// controller turns into a 404.
 	GetAgentCard(ctx context.Context, ouID, projectName, agentName, envID string) (*models.A2AAgentCardView, error)
 	// RefreshAgentCard returns utils.ErrA2APublicationNotFound when no row
-	// exists for the pair.
+	// exists for the pair, and utils.ErrForbidden when the caller lacks the
+	// environment's tier.
 	RefreshAgentCard(ctx context.Context, ouID, projectName, agentName, envID string) error
 }
 
@@ -54,24 +55,26 @@ func NewA2AAgentCardService(
 	return &A2AAgentCardService{pubRepo: pubRepo, ocClient: ocClient}
 }
 
-// resolveEnvironmentUUID mirrors agentAPIKeyService.resolveAgentAPIArtifact's
+// resolveEnvironment mirrors agentAPIKeyService.resolveAgentAPIArtifact's
 // envID lookup: envID on the wire is the environment name, not its UUID.
-func (s *A2AAgentCardService) resolveEnvironmentUUID(ctx context.Context, ouID, envID string) (uuid.UUID, error) {
+func (s *A2AAgentCardService) resolveEnvironment(
+	ctx context.Context, ouID, envID string,
+) (*models.EnvironmentResponse, uuid.UUID, error) {
 	environment, err := s.ocClient.GetEnvironment(ctx, ouID, envID)
 	if err != nil {
-		return uuid.Nil, fmt.Errorf("failed to get environment: %w", translateEnvironmentError(err))
+		return nil, uuid.Nil, fmt.Errorf("failed to get environment: %w", translateEnvironmentError(err))
 	}
 	envUUID, err := uuid.Parse(environment.UUID)
 	if err != nil {
-		return uuid.Nil, fmt.Errorf("environment %q has an unparseable UUID %q: %w", envID, environment.UUID, err)
+		return nil, uuid.Nil, fmt.Errorf("environment %q has an unparseable UUID %q: %w", envID, environment.UUID, err)
 	}
-	return envUUID, nil
+	return environment, envUUID, nil
 }
 
 func (s *A2AAgentCardService) GetAgentCard(
 	ctx context.Context, ouID, projectName, agentName, envID string,
 ) (*models.A2AAgentCardView, error) {
-	envUUID, err := s.resolveEnvironmentUUID(ctx, ouID, envID)
+	_, envUUID, err := s.resolveEnvironment(ctx, ouID, envID)
 	if err != nil {
 		return nil, err
 	}
@@ -86,8 +89,12 @@ func (s *A2AAgentCardService) GetAgentCard(
 }
 
 func (s *A2AAgentCardService) RefreshAgentCard(ctx context.Context, ouID, projectName, agentName, envID string) error {
-	envUUID, err := s.resolveEnvironmentUUID(ctx, ouID, envID)
+	environment, envUUID, err := s.resolveEnvironment(ctx, ouID, envID)
 	if err != nil {
+		return err
+	}
+	// The route gates only the floor; a production gateway republish needs the production tier too.
+	if err := enforceEnvTier(ctx, ouID, envID, environment.IsProduction); err != nil {
 		return err
 	}
 	// Checked up front rather than trusting RequeueCard's rows-affected: the

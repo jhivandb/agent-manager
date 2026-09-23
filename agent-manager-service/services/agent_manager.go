@@ -3817,12 +3817,18 @@ func (s *agentManagerService) requireEnvTier(
 			"ouID", ouID, "environment", envName, "error", err)
 		return nil, translateEnvironmentError(err)
 	}
+	return env, enforceEnvTier(ctx, ouID, envName, env.IsProduction)
+}
+
+// enforceEnvTier is requireEnvTier's scope check, for a caller that has already
+// resolved the environment.
+func enforceEnvTier(ctx context.Context, ouID, envName string, isProduction bool) error {
 	// The floor is always required. Production adds to it rather than replacing
 	// it, so the missing scope reported is the first one the caller lacks —
 	// naming the production grant to someone who is also missing the floor would
 	// send them after the wrong permission.
 	required := []rbac.Permission{rbac.AgentEnvNonProduction}
-	if env.IsProduction {
+	if isProduction {
 		required = append(required, rbac.AgentEnvProduction)
 	}
 	if perm, short := jwtassertion.FirstMissingScope(ctx, required...); short {
@@ -3848,10 +3854,10 @@ func (s *agentManagerService) requireEnvTier(
 			audit.Detail("missingScope", perm.Scope()),
 			audit.Detail("grantedScopes", jwtassertion.GrantedScopeCount(ctx)),
 		)
-		return env, fmt.Errorf("%w: %s is required to act on environment %q",
+		return fmt.Errorf("%w: %s is required to act on environment %q",
 			utils.ErrForbidden, perm.Scope(), envName)
 	}
-	return env, nil
+	return nil
 }
 
 func findLowestEnvironment(promotionPaths []models.PromotionPath) string {

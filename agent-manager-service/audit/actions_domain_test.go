@@ -93,7 +93,8 @@ func TestDomainActionsMatchRouteDerivedActions(t *testing.T) {
 		},
 		{
 			"POST /orgs/{orgName}/projects/{projName}/agents/{agentName}/environments/{envID}/agent-card/refresh",
-			nil, ActionA2AAgentCardRefresh,
+			[]rbac.Permission{rbac.AgentUpdate, rbac.AgentEnvNonProduction},
+			ActionA2AAgentCardRefresh,
 		},
 		{"DELETE /orgs/{orgName}/projects/{projName}/agents/{agentName}", []rbac.Permission{rbac.AgentDelete}, ActionAgentDelete},
 		{"DELETE /orgs/{orgName}/projects/{projName}", []rbac.Permission{rbac.ProjectDelete}, ActionProjectDelete},

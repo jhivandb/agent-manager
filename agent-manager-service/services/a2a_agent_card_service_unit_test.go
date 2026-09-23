@@ -27,13 +27,19 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/wso2/agent-manager/agent-manager-service/audit"
 	"github.com/wso2/agent-manager/agent-manager-service/clients/clientmocks"
+	"github.com/wso2/agent-manager/agent-manager-service/middleware/jwtassertion"
 	"github.com/wso2/agent-manager/agent-manager-service/models"
+	"github.com/wso2/agent-manager/agent-manager-service/rbac"
 	"github.com/wso2/agent-manager/agent-manager-service/repositories/repomocks"
 	"github.com/wso2/agent-manager/agent-manager-service/utils"
 )
 
-const cardTestEnvID = "dev"
+const (
+	cardTestEnvID     = "dev"
+	cardTestProdEnvID = "prod"
+)
 
 var cardTestEnvUUID = uuid.MustParse("11111111-1111-1111-1111-111111111111")
 
@@ -42,10 +48,13 @@ var cardTestEnvUUID = uuid.MustParse("11111111-1111-1111-1111-111111111111")
 func cardServiceFixture(pubRepo *repomocks.A2APublicationRepositoryMock) A2AAgentCardServiceInterface {
 	ocClient := &clientmocks.OpenChoreoClientMock{
 		GetEnvironmentFunc: func(_ context.Context, _, envID string) (*models.EnvironmentResponse, error) {
-			if envID != cardTestEnvID {
-				return nil, utils.ErrNotFound
+			switch envID {
+			case cardTestEnvID:
+				return &models.EnvironmentResponse{Name: envID, UUID: cardTestEnvUUID.String()}, nil
+			case cardTestProdEnvID:
+				return &models.EnvironmentResponse{Name: envID, UUID: cardTestEnvUUID.String(), IsProduction: true}, nil
 			}
-			return &models.EnvironmentResponse{UUID: cardTestEnvUUID.String()}, nil
+			return nil, utils.ErrNotFound
 		},
 	}
 	return NewA2AAgentCardService(pubRepo, ocClient)
@@ -197,7 +206,7 @@ func TestRefreshAgentCard_NoRow_ReturnsNotFound(t *testing.T) {
 	}
 	svc := cardServiceFixture(pubRepo)
 
-	err := svc.RefreshAgentCard(context.Background(), "ou-1", "proj", "agent", cardTestEnvID)
+	err := svc.RefreshAgentCard(tierCtx(t, rbac.AgentEnvNonProduction), "ou-1", "proj", "agent", cardTestEnvID)
 
 	assert.ErrorIs(t, err, utils.ErrA2APublicationNotFound)
 }
@@ -230,7 +239,7 @@ func TestRefreshAgentCard_ExistingRow(t *testing.T) {
 			}
 			svc := cardServiceFixture(pubRepo)
 
-			err := svc.RefreshAgentCard(context.Background(), "ou-1", "proj", "agent", cardTestEnvID)
+			err := svc.RefreshAgentCard(tierCtx(t, rbac.AgentEnvNonProduction), "ou-1", "proj", "agent", cardTestEnvID)
 
 			require.NoError(t, err)
 			assert.Equal(t, 1, requeueCalls)
@@ -247,7 +256,74 @@ func TestRefreshAgentCard_EnvironmentNotFound(t *testing.T) {
 	}
 	svc := cardServiceFixture(pubRepo)
 
-	err := svc.RefreshAgentCard(context.Background(), "ou-1", "proj", "agent", "no-such-env")
+	err := svc.RefreshAgentCard(tierCtx(t, rbac.AgentEnvNonProduction), "ou-1", "proj", "agent", "no-such-env")
 
 	assert.ErrorIs(t, err, utils.ErrEnvironmentNotFound)
+}
+
+// refreshableRow is a pubRepo holding one row, counting the requeues it receives.
+func refreshableRow(requeueCalls *int) *repomocks.A2APublicationRepositoryMock {
+	return &repomocks.A2APublicationRepositoryMock{
+		GetForAgentEnvFunc: func(context.Context, string, string, string, uuid.UUID) (*models.A2APublication, error) {
+			return &models.A2APublication{Status: models.A2APublicationStatusPublished}, nil
+		},
+		RequeueCardFunc: func(context.Context, string, string, string, uuid.UUID) error {
+			*requeueCalls++
+			return nil
+		},
+	}
+}
+
+// A refresh republishes to the environment's gateway, so it needs the same
+// environment tier as every other env-scoped mutation, not just agent:update.
+func TestRefreshAgentCard_ProductionNeedsProductionScope(t *testing.T) {
+	requeueCalls := 0
+	svc := cardServiceFixture(refreshableRow(&requeueCalls))
+
+	err := svc.RefreshAgentCard(tierCtx(t, rbac.AgentUpdate, rbac.AgentEnvNonProduction), "ou-1", "proj", "agent", cardTestProdEnvID)
+
+	require.ErrorIs(t, err, utils.ErrForbidden)
+	assert.Contains(t, err.Error(), rbac.AgentEnvProduction.Scope())
+	assert.Zero(t, requeueCalls, "a denied refresh must not requeue")
+}
+
+func TestRefreshAgentCard_ProductionAllowedWithBothScopes(t *testing.T) {
+	requeueCalls := 0
+	svc := cardServiceFixture(refreshableRow(&requeueCalls))
+
+	err := svc.RefreshAgentCard(
+		tierCtx(t, rbac.AgentEnvNonProduction, rbac.AgentEnvProduction), "ou-1", "proj", "agent", cardTestProdEnvID,
+	)
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, requeueCalls)
+}
+
+func TestRefreshAgentCard_NonProductionDeniedWithoutFloor(t *testing.T) {
+	requeueCalls := 0
+	svc := cardServiceFixture(refreshableRow(&requeueCalls))
+
+	err := svc.RefreshAgentCard(tierCtx(t, rbac.AgentUpdate), "ou-1", "proj", "agent", cardTestEnvID)
+
+	require.ErrorIs(t, err, utils.ErrForbidden)
+	assert.Zero(t, requeueCalls)
+}
+
+// The tier denial is recorded exactly as the sibling env-scoped mutations record it.
+func TestRefreshAgentCard_TierDenialIsAudited(t *testing.T) {
+	requeueCalls := 0
+	svc := cardServiceFixture(refreshableRow(&requeueCalls))
+	ctx, sink, flush := capturingAuditCtx(t)
+	ctx = jwtassertion.ContextWithTokenClaimsAndScope(ctx,
+		&jwtassertion.TokenClaims{OuId: "ou-1", Scope: rbac.AgentEnvNonProduction.Scope()})
+
+	err := svc.RefreshAgentCard(ctx, "ou-1", "proj", "agent", cardTestProdEnvID)
+	require.ErrorIs(t, err, utils.ErrForbidden)
+	flush()
+
+	event, found := findEvent(sink.captured(), audit.ActionAuthzDeny)
+	require.True(t, found, "the tier denial was not recorded")
+	assert.Equal(t, cardTestProdEnvID, event.Environment)
+	assert.Equal(t, audit.OutcomeDeny, event.Outcome)
+	assert.Equal(t, rbac.AgentEnvProduction.Scope(), event.Details["missingScope"])
 }

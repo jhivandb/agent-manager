@@ -28,16 +28,22 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/wso2/agent-manager/agent-manager-service/audit"
 	"github.com/wso2/agent-manager/agent-manager-service/clients/clientmocks"
 	"github.com/wso2/agent-manager/agent-manager-service/middleware"
+	"github.com/wso2/agent-manager/agent-manager-service/middleware/jwtassertion"
 	"github.com/wso2/agent-manager/agent-manager-service/models"
+	"github.com/wso2/agent-manager/agent-manager-service/rbac"
 	"github.com/wso2/agent-manager/agent-manager-service/repositories/repomocks"
 	"github.com/wso2/agent-manager/agent-manager-service/services"
 	"github.com/wso2/agent-manager/agent-manager-service/spec"
 	"github.com/wso2/agent-manager/agent-manager-service/utils"
 )
 
-const cardCtrlEnvID = "dev"
+const (
+	cardCtrlEnvID     = "dev"
+	cardCtrlProdEnvID = "prod"
+)
 
 var cardCtrlEnvUUID = uuid.MustParse("22222222-2222-2222-2222-222222222222")
 
@@ -46,24 +52,34 @@ var cardCtrlEnvUUID = uuid.MustParse("22222222-2222-2222-2222-222222222222")
 func a2aAgentCardTestController(pubRepo *repomocks.A2APublicationRepositoryMock) A2AAgentCardController {
 	ocClient := &clientmocks.OpenChoreoClientMock{
 		GetEnvironmentFunc: func(_ context.Context, _, envID string) (*models.EnvironmentResponse, error) {
-			if envID != cardCtrlEnvID {
-				return nil, utils.ErrNotFound
+			switch envID {
+			case cardCtrlEnvID:
+				return &models.EnvironmentResponse{Name: envID, UUID: cardCtrlEnvUUID.String()}, nil
+			case cardCtrlProdEnvID:
+				return &models.EnvironmentResponse{Name: envID, UUID: cardCtrlEnvUUID.String(), IsProduction: true}, nil
 			}
-			return &models.EnvironmentResponse{UUID: cardCtrlEnvUUID.String()}, nil
+			return nil, utils.ErrNotFound
 		},
 	}
 	svc := services.NewA2AAgentCardService(pubRepo, ocClient)
 	return NewA2AAgentCardController(svc)
 }
 
+// cardRequest carries the route's floor, which is what reaches the handler for an ordinary caller.
 func cardRequest(method, envID string) *http.Request {
+	return cardRequestWithScopes(method, envID, rbac.AgentUpdate, rbac.AgentEnvNonProduction)
+}
+
+func cardRequestWithScopes(method, envID string, scopes ...rbac.Permission) *http.Request {
 	req := httptest.NewRequest(method,
 		"/orgs/default/projects/proj/agents/agent/environments/"+envID+"/agent-card", nil)
 	req.SetPathValue(utils.PathParamOrgName, "default")
 	req.SetPathValue(utils.PathParamProjName, "proj")
 	req.SetPathValue(utils.PathParamAgentName, "agent")
 	req.SetPathValue(utils.PathParamEnvID, envID)
-	return req.WithContext(middleware.WithResolvedOrg(req.Context(), middleware.ResolvedOrg{OUID: "ou-1"}))
+	ctx := middleware.WithResolvedOrg(req.Context(), middleware.ResolvedOrg{OUID: "ou-1"})
+	ctx = jwtassertion.ContextWithTokenClaimsAndScope(ctx, &jwtassertion.TokenClaims{OuId: "ou-1", Scope: audit.ScopesOf(scopes)})
+	return req.WithContext(ctx)
 }
 
 // TestGetAgentCard_SixStates covers every (card, status) row the API contract
@@ -219,4 +235,44 @@ func TestRefreshAgentCard_NoRow_Returns404(t *testing.T) {
 	ctrl.RefreshAgentCard(w, cardRequest(http.MethodPost, cardCtrlEnvID))
 
 	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
+// agent:update plus the non-production floor must not reach a production gateway.
+func TestRefreshAgentCard_ProductionWithoutProductionGrant_Returns403(t *testing.T) {
+	pubRepo := &repomocks.A2APublicationRepositoryMock{
+		GetForAgentEnvFunc: func(context.Context, string, string, string, uuid.UUID) (*models.A2APublication, error) {
+			return &models.A2APublication{Status: models.A2APublicationStatusPublished}, nil
+		},
+		RequeueCardFunc: func(context.Context, string, string, string, uuid.UUID) error {
+			t.Fatal("RequeueCard must not be called when the environment tier is denied")
+			return nil
+		},
+	}
+	ctrl := a2aAgentCardTestController(pubRepo)
+
+	w := httptest.NewRecorder()
+	ctrl.RefreshAgentCard(w, cardRequest(http.MethodPost, cardCtrlProdEnvID))
+
+	assert.Equal(t, http.StatusForbidden, w.Code)
+}
+
+func TestRefreshAgentCard_ProductionWithProductionGrant_Returns202(t *testing.T) {
+	requeueCalls := 0
+	pubRepo := &repomocks.A2APublicationRepositoryMock{
+		GetForAgentEnvFunc: func(context.Context, string, string, string, uuid.UUID) (*models.A2APublication, error) {
+			return &models.A2APublication{Status: models.A2APublicationStatusPublished}, nil
+		},
+		RequeueCardFunc: func(context.Context, string, string, string, uuid.UUID) error {
+			requeueCalls++
+			return nil
+		},
+	}
+	ctrl := a2aAgentCardTestController(pubRepo)
+
+	w := httptest.NewRecorder()
+	ctrl.RefreshAgentCard(w, cardRequestWithScopes(http.MethodPost, cardCtrlProdEnvID,
+		rbac.AgentUpdate, rbac.AgentEnvNonProduction, rbac.AgentEnvProduction))
+
+	assert.Equal(t, http.StatusAccepted, w.Code)
+	assert.Equal(t, 1, requeueCalls)
 }

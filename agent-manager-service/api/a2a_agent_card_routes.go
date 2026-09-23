@@ -28,10 +28,9 @@ func registerA2AAgentCardRoutes(rr *middleware.RouteRegistrar, ctrl controllers.
 		"GET /orgs/{orgName}/projects/{projName}/agents/{agentName}/environments/{envID}/agent-card",
 		rbac.AgentRead, ctrl.GetAgentCard,
 	)
-	// Gated on AgentUpdate, not a narrower scope: this requeues a gateway
-	// republish, the same class of change AgentUpdate already gates elsewhere.
-	rr.HandleFuncWithValidationAndAuthz(
+	// A gateway republish, so gated like the sibling env-scoped mutations; the service adds the production tier.
+	rr.HandleFuncWithValidationAndAllAuthz(
 		"POST /orgs/{orgName}/projects/{projName}/agents/{agentName}/environments/{envID}/agent-card/refresh",
-		rbac.AgentUpdate, ctrl.RefreshAgentCard,
+		ctrl.RefreshAgentCard, rbac.AgentUpdate, rbac.AgentEnvNonProduction,
 	)
 }

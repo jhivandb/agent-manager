@@ -97,6 +97,9 @@ func (c *a2aAgentCardController) RefreshAgentCard(w http.ResponseWriter, r *http
 		case errors.Is(err, utils.ErrEnvironmentNotFound):
 			log.Warn("RefreshAgentCard: environment not found", "ouID", ouID, "agentName", agentName, "envID", envID)
 			utils.WriteErrorResponse(w, http.StatusNotFound, "Environment not found")
+		case errors.Is(err, utils.ErrForbidden):
+			log.Warn("RefreshAgentCard: environment tier denied", "ouID", ouID, "agentName", agentName, "envID", envID, "error", err)
+			utils.WriteErrorResponse(w, http.StatusForbidden, "Forbidden")
 		case errors.Is(err, utils.ErrA2APublicationNotFound):
 			log.Warn("RefreshAgentCard: no publication recorded", "ouID", ouID, "agentName", agentName, "envID", envID)
 			utils.WriteErrorResponse(w, http.StatusNotFound, "No agent card publication recorded for this agent-environment pair")
