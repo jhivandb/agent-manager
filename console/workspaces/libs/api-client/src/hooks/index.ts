@@ -47,4 +47,5 @@ export * from './thunder-instances';
 export * from './mcp-proxy-scopes';
 export * from './agent-identity';
 export * from './token-scopes';
+export * from './a2a-agent-card';
 export { extractServerErrorMessage, MAX_SNACKBAR_REASON_LENGTH } from './react-query-notifications';

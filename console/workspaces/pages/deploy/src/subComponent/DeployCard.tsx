@@ -78,6 +78,7 @@ import {
   getUsagePercentVariant,
   useAgentEnvironmentAccess,
 } from "@agent-management-platform/shared-component";
+import { A2AAgentCardPanel } from "./A2AAgentCardPanel";
 import { EditDeployConfigDrawer } from "./EditDeployConfigDrawer";
 import {
   absoluteRouteMap,
@@ -417,6 +418,7 @@ export function DeployCard(props: DeployCardProps) {
   });
 
   const isApiAgent = agent?.agentType?.type === "agent-api";
+  const isA2AAgent = agent?.agentType?.subType === "a2a-agent";
   const agentLanguage = buildpackLanguage(agent);
   const isPythonBuildpack = agentLanguage === "python";
   const isBallerinaBuildpack = agentLanguage === "ballerina";
@@ -746,6 +748,15 @@ export function DeployCard(props: DeployCardProps) {
                   </Box>
                 </Stack>
               </Card>
+
+              {isA2AAgent && agentId && (
+                <A2AAgentCardPanel
+                  orgName={orgId ?? "default"}
+                  projName={projectId ?? "default"}
+                  agentName={agentId}
+                  environment={currentEnvironment.name}
+                />
+              )}
             </Stack>
           </Collapse>
           {agentId && (

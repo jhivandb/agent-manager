@@ -44,3 +44,4 @@ export * from './agent-kinds';
 export * from './agent-build-options';
 export * from './mcp-proxy-scopes';
 export * from './agent-identity';
+export * from './a2a-agent-card';
