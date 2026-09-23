@@ -73,11 +73,45 @@ func TestBuildA2AAgentDeploymentYAMLTransports(t *testing.T) {
 // Agent kind disables its route timeout so streaming operations survive. Both
 // are what M1 wants, so neither block is written — emitting them is the only
 // way to get them wrong.
-func TestGenerateA2AAgentDeploymentYAMLOmitsCardAndResilience(t *testing.T) {
+func TestGenerateA2AAgentDeploymentYAMLOmitsCardAndResilienceWithoutACard(t *testing.T) {
 	got, err := generateA2AAgentDeploymentYAML(a2aInput())
 	require.NoError(t, err)
 	assert.NotContains(t, got, "agentCard")
 	assert.NotContains(t, got, "resilience")
+}
+
+// A first deploy has no card yet and must emit exactly what it emits today —
+// the gateway's passthrough default, with its URL rewriting, is the right
+// interim behaviour.
+func TestBuildA2AAgentDeploymentYAMLOmitsTheCardBlockWhenThereIsNone(t *testing.T) {
+	got, err := buildA2AAgentDeploymentYAML(a2aInput())
+	require.NoError(t, err)
+	assert.Nil(t, got.Spec.A2A.AgentCard)
+}
+
+// With a card the gateway validates, stores and serves the document itself; the
+// request never reaches the agent.
+func TestGenerateA2AAgentDeploymentYAMLEmitsAManagedCard(t *testing.T) {
+	in := a2aInput()
+	in.AgentCard = map[string]any{
+		"name":            "Trip Planner",
+		"protocolVersion": "1.0",
+	}
+
+	built, err := buildA2AAgentDeploymentYAML(in)
+	require.NoError(t, err)
+	require.NotNil(t, built.Spec.A2A.AgentCard)
+	assert.Equal(t, "managed", built.Spec.A2A.AgentCard.Public.Mode)
+	assert.Equal(t, "Trip Planner", built.Spec.A2A.AgentCard.Public.Content["name"])
+
+	out, err := generateA2AAgentDeploymentYAML(in)
+	require.NoError(t, err)
+	assert.Contains(t, out, "mode: managed")
+	// rewriteUrls is valid only in passthrough mode and is rejected outright in
+	// managed mode; path is left to the gateway's /.well-known default.
+	assert.NotContains(t, out, "rewriteUrls")
+	assert.NotContains(t, out, "signing")
+	assert.NotContains(t, out, "protected")
 }
 
 func TestBuildA2AAgentDeploymentYAMLContextIsAgentName(t *testing.T) {

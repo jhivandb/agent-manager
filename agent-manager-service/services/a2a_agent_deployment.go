@@ -59,10 +59,10 @@ const (
 //
 // Two blocks are deliberately absent and must stay absent in M1:
 //
-//   - agentCard. The gateway's default for a proxied card is passthrough WITH
-//     URL rewriting, which is exactly what M1 wants — an un-rewritten card
-//     advertises the agent's own address and sends every client past the
-//     gateway. Writing the block out would only add a way to get it wrong.
+//   - agentCard. Omitted only until a card has been fetched; the gateway's
+//     default for a proxied card is passthrough WITH URL rewriting, which is
+//     exactly what M1 wants in the interim — an un-rewritten card advertises
+//     the agent's own address and sends every client past the gateway.
 //   - resilience. The gateway disables the Agent route's request timeout by
 //     default precisely because A2A streaming operations are long-lived.
 //     Writing agent-manager's resilienceTimeoutSeconds here would override that
@@ -92,6 +92,7 @@ type A2AUpstream struct {
 // A2AConfig carries the protocol version and the per-operation configuration.
 type A2AConfig struct {
 	ProtocolVersion  string              `yaml:"protocolVersion" json:"protocolVersion"`
+	AgentCard        *A2AAgentCard       `yaml:"agentCard,omitempty" json:"agentCard,omitempty"`
 	OperationConfigs A2AOperationConfigs `yaml:"operationConfigs" json:"operationConfigs"`
 }
 
@@ -108,6 +109,29 @@ type A2ATransport struct {
 	ProtocolBinding string `yaml:"protocolBinding" json:"protocolBinding"`
 	PathPrefix      string `yaml:"pathPrefix" json:"pathPrefix"`
 }
+
+// A2AAgentCard is the gateway's agentCard block. Only the public card is
+// written: the protected (extended) card and card signing are out of scope, and
+// omitting protected leaves it at passthrough, which fails closed without an
+// auth policy.
+type A2AAgentCard struct {
+	Public A2APublicAgentCard `yaml:"public" json:"public"`
+}
+
+// A2APublicAgentCard carries the document the gateway serves.
+//
+// rewriteUrls is deliberately absent: it is valid only in passthrough mode and
+// is rejected at deploy time in managed mode. path is left to the gateway's
+// /.well-known/agent-card.json default.
+type A2APublicAgentCard struct {
+	Mode    string         `yaml:"mode" json:"mode"`
+	Content map[string]any `yaml:"content" json:"content"`
+}
+
+// a2aAgentCardModeManaged makes the gateway validate, store and serve the card
+// itself — the request never reaches the agent, and the document is served as
+// supplied and never rewritten.
+const a2aAgentCardModeManaged = "managed"
 
 // A2AAgentDeploymentInput is everything the builder needs, already resolved.
 // Keeping resolution out of the builder is what lets the emitted contract be
@@ -126,6 +150,11 @@ type A2AAgentDeploymentInput struct {
 	// Policies is the output of buildPolicies — already in the gateway's
 	// {name, version, params} shape, so no translation layer is needed.
 	Policies []map[string]interface{}
+	// AgentCard is the gateway-facing document from buildGatewayAgentCard. Nil
+	// means "omit the block", which is what a first deploy emits: the gateway's
+	// passthrough default rewrites the proxied card's URLs, so routing is right
+	// and only the agent's own security declarations are stale in that window.
+	AgentCard map[string]any
 }
 
 // a2aAgentEnvArtifactName builds the per-environment Kubernetes resource name
@@ -178,6 +207,13 @@ func buildA2AAgentDeploymentYAML(in A2AAgentDeploymentInput) (*A2AAgentDeploymen
 		policies = []map[string]interface{}{}
 	}
 
+	var agentCard *A2AAgentCard
+	if len(in.AgentCard) > 0 {
+		agentCard = &A2AAgentCard{
+			Public: A2APublicAgentCard{Mode: a2aAgentCardModeManaged, Content: in.AgentCard},
+		}
+	}
+
 	return &A2AAgentDeploymentYAML{
 		ApiVersion: apiVersionA2AAgent,
 		Kind:       kindA2AAgent,
@@ -193,6 +229,7 @@ func buildA2AAgentDeploymentYAML(in A2AAgentDeploymentInput) (*A2AAgentDeploymen
 			Upstream: A2AUpstream{URL: upstreamURL},
 			A2A: A2AConfig{
 				ProtocolVersion: a2aProtocolVersion,
+				AgentCard:       agentCard,
 				OperationConfigs: A2AOperationConfigs{
 					Transports: []A2ATransport{
 						{ProtocolBinding: a2aTransportJSONRPC, PathPrefix: a2aPathPrefixJSONRPC},
