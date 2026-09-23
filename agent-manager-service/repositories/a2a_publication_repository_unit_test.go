@@ -32,3 +32,22 @@ func TestA2APublicationTableAndStatuses(t *testing.T) {
 	assert.Equal(t, models.A2APublicationStatus("published"), models.A2APublicationStatusPublished)
 	assert.Equal(t, models.A2APublicationStatus("failed"), models.A2APublicationStatusFailed)
 }
+
+// The reconciler's due-scan and the ack handler both filter on these exact
+// strings; a rename that missed one would silently strand rows.
+func TestA2APublicationCardStatuses(t *testing.T) {
+	assert.Equal(t, models.A2APublicationStatus("routed"), models.A2APublicationStatusRouted)
+	assert.Equal(t, models.A2APublicationStatus("rejected"), models.A2APublicationStatusRejected)
+}
+
+// The four card columns are nullable, so every one of them is a pointer or a
+// nil-able slice. A non-pointer time.Time would write a zero timestamp on the
+// first deploy and make "never fetched" indistinguishable from "fetched at the
+// epoch".
+func TestA2APublicationCardFieldsAreNullable(t *testing.T) {
+	var pub models.A2APublication
+	assert.Nil(t, pub.AgentCard)
+	assert.Nil(t, pub.CardFetchedAt)
+	assert.Nil(t, pub.RoutedAt)
+	assert.Nil(t, pub.CardDeploymentID)
+}

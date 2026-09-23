@@ -17,6 +17,7 @@
 package models
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
@@ -37,6 +38,13 @@ const (
 	// A2APublicationStatusFailed means the attempt budget was exhausted. The row
 	// is kept so an operator can see which agent never reached its gateway.
 	A2APublicationStatusFailed A2APublicationStatus = "failed"
+	// A2APublicationStatusRouted means the Agent resource is live and routing,
+	// and the agent's card has not been fetched yet. Phase 2 owns this state.
+	A2APublicationStatusRouted A2APublicationStatus = "routed"
+	// A2APublicationStatusRejected means the gateway refused the published card.
+	// Distinct from failed: the gateway is serving no card at all, where failed
+	// leaves it serving whatever it had before.
+	A2APublicationStatusRejected A2APublicationStatus = "rejected"
 )
 
 // A2APublication is one agent-environment pair's outstanding gateway
@@ -64,8 +72,19 @@ type A2APublication struct {
 	AttemptCount  int                  `gorm:"column:attempt_count;not null;default:0"`
 	LastError     string               `gorm:"column:last_error;not null;default:''"`
 	NextAttemptAt *time.Time           `gorm:"column:next_attempt_at"`
-	CreatedAt     time.Time            `gorm:"column:created_at;not null;default:NOW()"`
-	UpdatedAt     time.Time            `gorm:"column:updated_at;not null;default:NOW()"`
+	// AgentCard is the document published to the gateway, not the agent's own.
+	// Raw JSON rather than a map: jsonb does not preserve key order, so a
+	// round-tripped map is not byte-comparable and callers compare semantically.
+	AgentCard     json.RawMessage `gorm:"column:agent_card;type:jsonb"`
+	CardFetchedAt *time.Time      `gorm:"column:card_fetched_at"`
+	// RoutedAt is what separates "never routed" from "routed, card never
+	// arrived" once status is failed. The API needs that distinction.
+	RoutedAt *time.Time `gorm:"column:routed_at"`
+	// CardDeploymentID is the deployment the gateway's next ack will name if it
+	// rejects the card. Null whenever no card publish is outstanding.
+	CardDeploymentID *uuid.UUID `gorm:"column:card_deployment_id;type:uuid"`
+	CreatedAt        time.Time  `gorm:"column:created_at;not null;default:NOW()"`
+	UpdatedAt        time.Time  `gorm:"column:updated_at;not null;default:NOW()"`
 }
 
 func (A2APublication) TableName() string { return "a2a_publications" }
