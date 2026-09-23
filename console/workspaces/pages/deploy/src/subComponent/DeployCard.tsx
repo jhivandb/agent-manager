@@ -748,17 +748,23 @@ export function DeployCard(props: DeployCardProps) {
                   </Box>
                 </Stack>
               </Card>
-
-              {isA2AAgent && agentId && (
-                <A2AAgentCardPanel
-                  orgName={orgId ?? "default"}
-                  projName={projectId ?? "default"}
-                  agentName={agentId}
-                  environment={currentEnvironment.name}
-                />
-              )}
             </Stack>
           </Collapse>
+
+          {/* Outside the Collapse above (which only opens for
+              ACTIVE/ERROR/FAILED/DEPLOYING): a publication row can still be
+              failed/rejected while the deployment is SUSPENDED, and hiding
+              it there is exactly when an operator suspending to investigate
+              would need to see it. Visibility is gated on the GET's own 200,
+              not on deployment status — this only adds the a2a-agent check. */}
+          {isA2AAgent && agentId && (
+            <A2AAgentCardPanel
+              orgName={orgId ?? "default"}
+              projName={projectId ?? "default"}
+              agentName={agentId}
+              environment={currentEnvironment.name}
+            />
+          )}
           {agentId && (
             <EditResourceConfigsDrawer
               open={resourceConfigDrawerOpen}

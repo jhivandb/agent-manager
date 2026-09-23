@@ -76,7 +76,8 @@ function presentCardState(data: A2AAgentCardResponse): CardPresentation {
         return {
           ...DEFAULTS,
           severity: "warning",
-          heading: "Card never arrived — the gateway is serving the agent's own card directly",
+          heading:
+            "Card never arrived — the gateway is serving the agent's own card, with its URLs rewritten",
         };
       }
       return {
