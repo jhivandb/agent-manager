@@ -146,7 +146,7 @@ func InitializeAppParams(cfg *config.Config, db *gorm.DB, authProvider client.Au
 	agentAPIKeyController := controllers.NewAgentAPIKeyController(agentAPIKeyService)
 	llmProxyDeploymentController := controllers.NewLLMProxyDeploymentController(llmProxyDeploymentService)
 	mcpProxyController := controllers.NewMCPProxyController(mcpProxyService, agentConfigurationService)
-	deploymentAckHandler := ProvideDeploymentAckHandler(deploymentRepository)
+	deploymentAckHandler := ProvideDeploymentAckHandler(deploymentRepository, a2APublicationRepository)
 	webSocketController := ProvideWebSocketController(manager, eventHub, platformGatewayService, deploymentAckHandler, configConfig)
 	gatewayInternalAPIService := services.NewGatewayInternalAPIService(llmProviderRepository, llmProxyRepository, deploymentRepository, gatewayRepository, infraResourceManager, v)
 	gatewayInternalController := controllers.NewGatewayInternalController(platformGatewayService, gatewayInternalAPIService, apiKeyRepository, aiApplicationRepository)
@@ -330,7 +330,7 @@ func InitializeTestAppParamsWithClientMocks(cfg *config.Config, db *gorm.DB, aut
 	agentAPIKeyController := controllers.NewAgentAPIKeyController(agentAPIKeyService)
 	llmProxyDeploymentController := controllers.NewLLMProxyDeploymentController(llmProxyDeploymentService)
 	mcpProxyController := controllers.NewMCPProxyController(mcpProxyService, agentConfigurationService)
-	deploymentAckHandler := ProvideDeploymentAckHandler(deploymentRepository)
+	deploymentAckHandler := ProvideDeploymentAckHandler(deploymentRepository, a2APublicationRepository)
 	webSocketController := ProvideWebSocketController(manager, eventHub, platformGatewayService, deploymentAckHandler, configConfig)
 	gatewayInternalAPIService := services.NewGatewayInternalAPIService(llmProviderRepository, llmProxyRepository, deploymentRepository, gatewayRepository, infraResourceManager, v)
 	gatewayInternalController := controllers.NewGatewayInternalController(platformGatewayService, gatewayInternalAPIService, apiKeyRepository, aiApplicationRepository)
@@ -732,8 +732,11 @@ func ProvideA2AAgentCardFetcher() services.A2AAgentCardFetcher {
 }
 
 // ProvideDeploymentAckHandler creates a new deployment ack handler
-func ProvideDeploymentAckHandler(deploymentRepo repositories.DeploymentRepository) *services.DeploymentAckHandler {
-	return services.NewDeploymentAckHandler(deploymentRepo)
+func ProvideDeploymentAckHandler(
+	deploymentRepo repositories.DeploymentRepository,
+	pubRepo repositories.A2APublicationRepository,
+) *services.DeploymentAckHandler {
+	return services.NewDeploymentAckHandler(deploymentRepo, pubRepo)
 }
 
 func ProvideGatewayRepository(db *gorm.DB) repositories.GatewayRepository {

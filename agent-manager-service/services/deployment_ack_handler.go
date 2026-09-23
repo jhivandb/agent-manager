@@ -17,9 +17,11 @@
 package services
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 
+	"github.com/google/uuid"
 	"github.com/wso2/agent-manager/agent-manager-service/models"
 	"github.com/wso2/agent-manager/agent-manager-service/repositories"
 )
@@ -27,13 +29,18 @@ import (
 // DeploymentAckHandler processes deployment acknowledgment messages from gateways
 type DeploymentAckHandler struct {
 	deploymentRepo repositories.DeploymentRepository
+	// pubRepo carries gateway rejections back to the A2A publication row. The
+	// gateway validates an Agent after it fetches it, which is after the
+	// broadcast, so this is the only path by which a refused card is ever known.
+	pubRepo repositories.A2APublicationRepository
 }
 
 // NewDeploymentAckHandler creates a new deployment ack handler
-func NewDeploymentAckHandler(deploymentRepo repositories.DeploymentRepository) *DeploymentAckHandler {
-	return &DeploymentAckHandler{
-		deploymentRepo: deploymentRepo,
-	}
+func NewDeploymentAckHandler(
+	deploymentRepo repositories.DeploymentRepository,
+	pubRepo repositories.A2APublicationRepository,
+) *DeploymentAckHandler {
+	return &DeploymentAckHandler{deploymentRepo: deploymentRepo, pubRepo: pubRepo}
 }
 
 // HandleMessage parses a raw WebSocket message and processes it if it's a known event type.
@@ -109,7 +116,33 @@ func (h *DeploymentAckHandler) handleDeploymentAck(gatewayID string, payload jso
 		} else {
 			log.Info("DeploymentAckHandler: deployment status updated", "newStatus", status)
 		}
+
+		if ack.ResourceType == "agentproxy" && ack.Action == "deploy" && ack.Status == "failed" {
+			h.recordA2ACardRejection(ack, log)
+		}
 	default:
 		log.Debug("DeploymentAckHandler: skipping ack for unsupported resource type")
+	}
+}
+
+// recordA2ACardRejection marks the publication row whose outstanding card
+// publish the gateway just refused.
+//
+// Matching is on deployment ID alone: it is unique per publish, so an ack for a
+// superseded publish matches no row, and a card-less first deploy left the
+// column null so its rejection — a routing failure — is not mistaken for a card
+// failure. The stored card is deliberately preserved: it is what an operator
+// needs in order to see why.
+//
+// The ack path carries no context, so this uses a background one. It is a single
+// short update whose caller is a WebSocket read loop with nothing to cancel it.
+func (h *DeploymentAckHandler) recordA2ACardRejection(ack models.DeploymentAckPayload, log *slog.Logger) {
+	deploymentID, err := uuid.Parse(ack.DeploymentID)
+	if err != nil {
+		log.Warn("DeploymentAckHandler: agentproxy ack carries an unparseable deployment ID, skipping card rejection")
+		return
+	}
+	if err := h.pubRepo.MarkCardRejected(context.Background(), deploymentID, ack.ErrorCode); err != nil {
+		log.Error("DeploymentAckHandler: failed to record the A2A card rejection", "error", err)
 	}
 }

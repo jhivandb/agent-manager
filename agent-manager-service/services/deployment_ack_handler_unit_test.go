@@ -17,10 +17,12 @@
 package services
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -59,7 +61,7 @@ func TestDeploymentAckHandlerUpdatesAgentStatus(t *testing.T) {
 				},
 			}
 
-			handled := NewDeploymentAckHandler(repo).HandleMessage("gw-1", ackMessage(t, models.DeploymentAckPayload{
+			handled := NewDeploymentAckHandler(repo, &repomocks.A2APublicationRepositoryMock{}).HandleMessage("gw-1", ackMessage(t, models.DeploymentAckPayload{
 				DeploymentID: "dep-1",
 				ArtifactID:   "0192f4c1-9a7d-7c3e-b4f2-1a2b3c4d5e6f",
 				ResourceType: "agentproxy",
@@ -93,10 +95,95 @@ func TestDeploymentAckHandlerSkipsUnusableAcks(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := &repomocks.DeploymentRepositoryMock{}
-			handled := NewDeploymentAckHandler(repo).HandleMessage("gw-1", ackMessage(t, tc.ack))
+			handled := NewDeploymentAckHandler(repo, &repomocks.A2APublicationRepositoryMock{}).HandleMessage("gw-1", ackMessage(t, tc.ack))
 
 			assert.True(t, handled, "the message is still a deployment.ack")
 			assert.Empty(t, repo.UpdateStatusByDeploymentIDCalls())
 		})
 	}
+}
+
+// ackHandlerWithPublications builds the handler with both repositories, so tests
+// can assert on what the rejection branch did.
+func ackHandlerWithPublications(t *testing.T) (*DeploymentAckHandler, *repomocks.A2APublicationRepositoryMock) {
+	t.Helper()
+	deploymentRepo := &repomocks.DeploymentRepositoryMock{
+		UpdateStatusByDeploymentIDFunc: func(deploymentID, gatewayUUID string, status models.DeploymentStatus) (time.Time, error) {
+			return time.Now(), nil
+		},
+	}
+	pubRepo := &repomocks.A2APublicationRepositoryMock{
+		MarkCardRejectedFunc: func(ctx context.Context, deploymentID uuid.UUID, errorCode string) error { return nil },
+	}
+	return NewDeploymentAckHandler(deploymentRepo, pubRepo), pubRepo
+}
+
+// The gateway validates an Agent only after it fetches it, which is after the
+// broadcast. Without this the row would report published for a card the gateway
+// refused, and the API's whole value is honest status.
+func TestDeploymentAckHandlerRecordsACardRejection(t *testing.T) {
+	handler, pubRepo := ackHandlerWithPublications(t)
+	deploymentID := uuid.New()
+
+	handled := handler.HandleMessage("gw-1", ackMessage(t, models.DeploymentAckPayload{
+		DeploymentID: deploymentID.String(),
+		ArtifactID:   "0192f4c1-9a7d-7c3e-b4f2-1a2b3c4d5e6f",
+		ResourceType: "agentproxy",
+		Action:       "deploy",
+		Status:       "failed",
+		ErrorCode:    "INVALID_AGENT_CARD",
+	}))
+
+	assert.True(t, handled)
+	calls := pubRepo.MarkCardRejectedCalls()
+	require.Len(t, calls, 1)
+	assert.Equal(t, deploymentID, calls[0].DeploymentID)
+	assert.Equal(t, "INVALID_AGENT_CARD", calls[0].ErrorCode)
+}
+
+// A success ack needs no handling: MarkCardPublished already recorded it.
+func TestDeploymentAckHandlerIgnoresSuccessfulAgentAcks(t *testing.T) {
+	handler, pubRepo := ackHandlerWithPublications(t)
+
+	handler.HandleMessage("gw-1", ackMessage(t, models.DeploymentAckPayload{
+		DeploymentID: uuid.New().String(),
+		ResourceType: "agentproxy",
+		Action:       "deploy",
+		Status:       "success",
+	}))
+
+	assert.Empty(t, pubRepo.MarkCardRejectedCalls())
+}
+
+// The rejection branch is A2A's alone; an MCP proxy failing to deploy must not
+// touch a publication row.
+func TestDeploymentAckHandlerIgnoresOtherResourceTypes(t *testing.T) {
+	handler, pubRepo := ackHandlerWithPublications(t)
+
+	handler.HandleMessage("gw-1", ackMessage(t, models.DeploymentAckPayload{
+		DeploymentID: uuid.New().String(),
+		ResourceType: "mcpproxy",
+		Action:       "deploy",
+		Status:       "failed",
+		ErrorCode:    "BOOM",
+	}))
+
+	assert.Empty(t, pubRepo.MarkCardRejectedCalls())
+}
+
+// A deployment ID the gateway invented, or one from a publish so old it no
+// longer parses, must not reach the repository as a zero UUID — that would match
+// whatever row happened to have a null-ish id.
+func TestDeploymentAckHandlerIgnoresUnparseableDeploymentIDs(t *testing.T) {
+	handler, pubRepo := ackHandlerWithPublications(t)
+
+	handler.HandleMessage("gw-1", ackMessage(t, models.DeploymentAckPayload{
+		DeploymentID: "not-a-uuid",
+		ResourceType: "agentproxy",
+		Action:       "deploy",
+		Status:       "failed",
+		ErrorCode:    "BOOM",
+	}))
+
+	assert.Empty(t, pubRepo.MarkCardRejectedCalls())
 }

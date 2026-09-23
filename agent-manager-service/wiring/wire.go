@@ -457,8 +457,11 @@ func ProvideA2AAgentCardFetcher() services.A2AAgentCardFetcher {
 }
 
 // ProvideDeploymentAckHandler creates a new deployment ack handler
-func ProvideDeploymentAckHandler(deploymentRepo repositories.DeploymentRepository) *services.DeploymentAckHandler {
-	return services.NewDeploymentAckHandler(deploymentRepo)
+func ProvideDeploymentAckHandler(
+	deploymentRepo repositories.DeploymentRepository,
+	pubRepo repositories.A2APublicationRepository,
+) *services.DeploymentAckHandler {
+	return services.NewDeploymentAckHandler(deploymentRepo, pubRepo)
 }
 
 func ProvideGatewayRepository(db *gorm.DB) repositories.GatewayRepository {
