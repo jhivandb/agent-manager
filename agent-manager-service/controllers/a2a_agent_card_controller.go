@@ -76,6 +76,7 @@ func (c *a2aAgentCardController) GetAgentCard(w http.ResponseWriter, r *http.Req
 		Status:    string(view.Status),
 		LastError: view.LastError,
 	}
+	resp.RoutedAt.Set(view.RoutedAt)
 	resp.FetchedAt.Set(view.FetchedAt)
 	utils.WriteSuccessResponse(w, http.StatusOK, resp)
 }

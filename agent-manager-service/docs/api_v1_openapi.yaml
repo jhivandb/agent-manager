@@ -11501,8 +11501,8 @@ components:
       type: object
       description: The stored A2A agent card and the publication state that explains its presence or absence.
       required:
-        - card
         - status
+        - routedAt
         - fetchedAt
         - lastError
       properties:
@@ -11510,11 +11510,19 @@ components:
           type: object
           additionalProperties: true
           nullable: true
-          description: The agent card document the gateway serves, or null before the first successful fetch.
+          description: The document the gateway serves; absent or null until the first successful fetch.
         status:
           type: string
           enum: [pending, routed, published, failed, rejected]
           description: Publication lifecycle state for this agent-environment pair.
+        routedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: |
+            When the Agent resource was last routed live. Null when the pair has
+            never routed, which is what distinguishes "never routed" from
+            "routed, but the card never arrived" while status is failed.
         fetchedAt:
           type: string
           format: date-time

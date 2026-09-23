@@ -20,10 +20,12 @@ var _ MappedNullable = &A2AAgentCardResponse{}
 
 // A2AAgentCardResponse The stored A2A agent card and the publication state that explains its presence or absence.
 type A2AAgentCardResponse struct {
-	// The agent card document the gateway serves, or null before the first successful fetch.
-	Card map[string]interface{} `json:"card"`
+	// The document the gateway serves; absent or null until the first successful fetch.
+	Card map[string]interface{} `json:"card,omitempty"`
 	// Publication lifecycle state for this agent-environment pair.
 	Status string `json:"status"`
+	// When the Agent resource was last routed live. Null when the pair has never routed, which is what distinguishes \"never routed\" from \"routed, but the card never arrived\" while status is failed.
+	RoutedAt NullableTime `json:"routedAt"`
 	// When the stored card was last fetched successfully. Null until the first fetch.
 	FetchedAt NullableTime `json:"fetchedAt"`
 	// The last failure, or empty when clean.
@@ -34,10 +36,10 @@ type A2AAgentCardResponse struct {
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewA2AAgentCardResponse(card map[string]interface{}, status string, fetchedAt NullableTime, lastError string) *A2AAgentCardResponse {
+func NewA2AAgentCardResponse(status string, routedAt NullableTime, fetchedAt NullableTime, lastError string) *A2AAgentCardResponse {
 	this := A2AAgentCardResponse{}
-	this.Card = card
 	this.Status = status
+	this.RoutedAt = routedAt
 	this.FetchedAt = fetchedAt
 	this.LastError = lastError
 	return &this
@@ -51,18 +53,16 @@ func NewA2AAgentCardResponseWithDefaults() *A2AAgentCardResponse {
 	return &this
 }
 
-// GetCard returns the Card field value
-// If the value is explicit nil, the zero value for map[string]interface{} will be returned
+// GetCard returns the Card field value if set, zero value otherwise (both if not set or set to explicit null).
 func (o *A2AAgentCardResponse) GetCard() map[string]interface{} {
 	if o == nil {
 		var ret map[string]interface{}
 		return ret
 	}
-
 	return o.Card
 }
 
-// GetCardOk returns a tuple with the Card field value
+// GetCardOk returns a tuple with the Card field value if set, nil otherwise
 // and a boolean to check if the value has been set.
 // NOTE: If the value is an explicit nil, `nil, true` will be returned
 func (o *A2AAgentCardResponse) GetCardOk() (map[string]interface{}, bool) {
@@ -72,7 +72,16 @@ func (o *A2AAgentCardResponse) GetCardOk() (map[string]interface{}, bool) {
 	return o.Card, true
 }
 
-// SetCard sets field value
+// HasCard returns a boolean if a field has been set.
+func (o *A2AAgentCardResponse) HasCard() bool {
+	if o != nil && IsNil(o.Card) {
+		return true
+	}
+
+	return false
+}
+
+// SetCard gets a reference to the given map[string]interface{} and assigns it to the Card field.
 func (o *A2AAgentCardResponse) SetCard(v map[string]interface{}) {
 	o.Card = v
 }
@@ -99,6 +108,32 @@ func (o *A2AAgentCardResponse) GetStatusOk() (*string, bool) {
 // SetStatus sets field value
 func (o *A2AAgentCardResponse) SetStatus(v string) {
 	o.Status = v
+}
+
+// GetRoutedAt returns the RoutedAt field value
+// If the value is explicit nil, the zero value for time.Time will be returned
+func (o *A2AAgentCardResponse) GetRoutedAt() time.Time {
+	if o == nil || o.RoutedAt.Get() == nil {
+		var ret time.Time
+		return ret
+	}
+
+	return *o.RoutedAt.Get()
+}
+
+// GetRoutedAtOk returns a tuple with the RoutedAt field value
+// and a boolean to check if the value has been set.
+// NOTE: If the value is an explicit nil, `nil, true` will be returned
+func (o *A2AAgentCardResponse) GetRoutedAtOk() (*time.Time, bool) {
+	if o == nil {
+		return nil, false
+	}
+	return o.RoutedAt.Get(), o.RoutedAt.IsSet()
+}
+
+// SetRoutedAt sets field value
+func (o *A2AAgentCardResponse) SetRoutedAt(v time.Time) {
+	o.RoutedAt.Set(&v)
 }
 
 // GetFetchedAt returns the FetchedAt field value
@@ -165,6 +200,7 @@ func (o A2AAgentCardResponse) ToMap() (map[string]interface{}, error) {
 		toSerialize["card"] = o.Card
 	}
 	toSerialize["status"] = o.Status
+	toSerialize["routedAt"] = o.RoutedAt.Get()
 	toSerialize["fetchedAt"] = o.FetchedAt.Get()
 	toSerialize["lastError"] = o.LastError
 	return toSerialize, nil

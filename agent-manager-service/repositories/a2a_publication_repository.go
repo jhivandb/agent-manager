@@ -62,8 +62,9 @@ type A2APublicationRepository interface {
 	// publish matches no row. The rejected document is deliberately kept.
 	MarkCardRejected(ctx context.Context, deploymentID uuid.UUID, errorCode string) error
 
-	// RequeueCard returns a row to phase 2 without disturbing live routing or the
-	// stored card. This is what the refresh endpoint calls.
+	// RequeueCard re-queues the row for its next attempt: phase 1 (pending) when
+	// it was never routed, phase 2 (routed) otherwise; it never disturbs live
+	// routing or the stored card. This is what the refresh endpoint calls.
 	RequeueCard(ctx context.Context, ouID, projectName, agentName string, environmentUUID uuid.UUID) error
 
 	// GetForAgentEnv reads one pair's row. Nil, nil when there is none — the
@@ -230,7 +231,10 @@ func (r *a2aPublicationRepository) RequeueCard(
 		Where("ou_id = ? AND project_name = ? AND agent_name = ? AND environment_uuid = ?",
 			ouID, projectName, agentName, environmentUUID).
 		Updates(map[string]interface{}{
-			"status":        models.A2APublicationStatusRouted,
+			// A row that never routed has no live Agent resource to leave alone,
+			// so a refresh must re-run phase 1, not resume at phase 2.
+			"status": gorm.Expr("CASE WHEN routed_at IS NULL THEN ? ELSE ? END",
+				models.A2APublicationStatusPending, models.A2APublicationStatusRouted),
 			"attempt_count": 0,
 			"last_error":    "",
 			// A rejected card was never accepted, so phase 2 must republish even an unchanged one.

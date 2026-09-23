@@ -94,6 +94,7 @@ func (A2APublication) TableName() string { return "a2a_publications" }
 type A2AAgentCardView struct {
 	Card      map[string]interface{}
 	Status    A2APublicationStatus
+	RoutedAt  *time.Time
 	FetchedAt *time.Time
 	LastError string
 }

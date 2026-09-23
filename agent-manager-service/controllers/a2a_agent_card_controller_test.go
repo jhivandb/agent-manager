@@ -69,42 +69,55 @@ func cardRequest(method, envID string) *http.Request {
 // TestGetAgentCard_SixStates covers every (card, status) row the API contract
 // distinguishes, all as 200s.
 func TestGetAgentCard_SixStates(t *testing.T) {
+	routedAt := time.Date(2026, 9, 22, 10, 10, 0, 0, time.UTC)
 	fetchedAt := time.Date(2026, 9, 22, 10, 14, 3, 0, time.UTC)
 	rawCard := json.RawMessage(`{"name":"weather-agent"}`)
 
 	tests := []struct {
-		name       string
-		pub        *models.A2APublication
-		wantCard   bool // whether the response's card should be non-nil
-		wantStatus string
+		name        string
+		pub         *models.A2APublication
+		wantCard    bool // whether the response's card should be non-nil
+		wantStatus  string
+		wantRoutedA bool // whether the response's routedAt should be non-nil
 	}{
-		{"pending, no card", &models.A2APublication{Status: models.A2APublicationStatusPending}, false, "pending"},
-		{"routed, no card", &models.A2APublication{Status: models.A2APublicationStatusRouted}, false, "routed"},
+		{"pending, no card", &models.A2APublication{Status: models.A2APublicationStatusPending}, false, "pending", false},
 		{
+			"routed, no card",
+			&models.A2APublication{Status: models.A2APublicationStatusRouted, RoutedAt: &routedAt},
+			false, "routed", true,
+		},
+		{
+			// Never routed, so routedAt stays absent — the signal that
+			// distinguishes this from "routed, card never arrived" below.
 			"failed on first deploy, no card",
 			&models.A2APublication{Status: models.A2APublicationStatusFailed, LastError: "never arrived"},
-			false, "failed",
+			false, "failed", false,
 		},
 		{
 			"published, card set",
-			&models.A2APublication{Status: models.A2APublicationStatusPublished, AgentCard: rawCard, CardFetchedAt: &fetchedAt},
-			true, "published",
+			&models.A2APublication{
+				Status: models.A2APublicationStatusPublished, RoutedAt: &routedAt,
+				AgentCard: rawCard, CardFetchedAt: &fetchedAt,
+			},
+			true, "published", true,
 		},
 		{
 			"failed, stale card kept",
 			&models.A2APublication{
-				Status: models.A2APublicationStatusFailed, AgentCard: rawCard, CardFetchedAt: &fetchedAt,
+				Status: models.A2APublicationStatusFailed, RoutedAt: &routedAt,
+				AgentCard: rawCard, CardFetchedAt: &fetchedAt,
 				LastError: "not ready",
 			},
-			true, "failed",
+			true, "failed", true,
 		},
 		{
 			"rejected, card kept",
 			&models.A2APublication{
-				Status: models.A2APublicationStatusRejected, AgentCard: rawCard, CardFetchedAt: &fetchedAt,
+				Status: models.A2APublicationStatusRejected, RoutedAt: &routedAt,
+				AgentCard: rawCard, CardFetchedAt: &fetchedAt,
 				LastError: "INVALID_INTERFACE_URL",
 			},
-			true, "rejected",
+			true, "rejected", true,
 		},
 	}
 
@@ -134,6 +147,12 @@ func TestGetAgentCard_SixStates(t *testing.T) {
 			} else {
 				assert.Nil(t, resp.Card)
 			}
+			if tc.wantRoutedA {
+				require.NotNil(t, resp.RoutedAt.Get())
+				assert.True(t, tc.pub.RoutedAt.Equal(*resp.RoutedAt.Get()))
+			} else {
+				assert.Nil(t, resp.RoutedAt.Get())
+			}
 		})
 	}
 }
@@ -154,9 +173,10 @@ func TestGetAgentCard_NoRow_Returns404(t *testing.T) {
 
 // TestRefreshAgentCard_ExistingRow covers refresh from every status the brief
 // calls out (recovery from failed, retry from rejected, pickup from published),
-// each requeuing exactly once.
+// plus pending, each returning 202 and requeuing exactly once.
 func TestRefreshAgentCard_ExistingRow(t *testing.T) {
 	for _, status := range []models.A2APublicationStatus{
+		models.A2APublicationStatusPending,
 		models.A2APublicationStatusFailed,
 		models.A2APublicationStatusRejected,
 		models.A2APublicationStatusPublished,

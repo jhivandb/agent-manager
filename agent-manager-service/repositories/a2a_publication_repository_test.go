@@ -252,6 +252,28 @@ func TestA2APublicationRequeueCardReturnsTheRowToPhaseTwo(t *testing.T) {
 	assert.JSONEq(t, string(card), string(got.AgentCard), "the live card is untouched")
 }
 
+// A row that failed before it ever routed has no live Agent resource to leave
+// alone, so a refresh must re-run phase 1 (pending), not resume at phase 2.
+func TestA2APublicationRequeueCardOnANeverRoutedRowStaysInPhaseOne(t *testing.T) {
+	repo := NewA2APublicationRepository(db.GetDB())
+	ctx := context.Background()
+
+	pub := newTestPublication("requeue-never-routed-" + uuid.New().String()[:8])
+	cleanupPublication(t, repo, pub)
+	require.NoError(t, repo.Enqueue(ctx, pub))
+	require.NoError(t, repo.MarkFailed(ctx, pub.ID, "release binding has not published a service URL yet"))
+
+	require.NoError(t, repo.RequeueCard(ctx, pub.OUID, pub.ProjectName, pub.AgentName, pub.EnvironmentUUID))
+
+	got, err := repo.GetForAgentEnv(ctx, pub.OUID, pub.ProjectName, pub.AgentName, pub.EnvironmentUUID)
+	require.NoError(t, err)
+	assert.Equal(t, models.A2APublicationStatusPending, got.Status)
+	assert.Zero(t, got.AttemptCount)
+	assert.Empty(t, got.LastError)
+	assert.NotNil(t, got.NextAttemptAt)
+	assert.Nil(t, got.RoutedAt)
+}
+
 // rejectedPublication is a row whose outstanding card publish the gateway refused.
 func rejectedPublication(t *testing.T, repo A2APublicationRepository, name string) (*models.A2APublication, json.RawMessage) {
 	t.Helper()

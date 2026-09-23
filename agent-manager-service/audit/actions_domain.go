@@ -369,10 +369,8 @@ func init() {
 	// Requeues the next reconciler tick to republish; no credential or
 	// privilege changes hands, so the envelope record is enough on its own.
 	Register(ActionA2AAgentCardRefresh, ClassDeployment, SeverityNotice)
-	RegisterDetailSchema(ActionA2AAgentCardRefresh, map[string]FieldKind{
-		"agentName":   KindName,
-		"environment": KindName,
-	})
+	// No detail beyond the envelope: nothing here emits fields for this action.
+	RegisterDetailSchema(ActionA2AAgentCardRefresh, map[string]FieldKind{})
 
 	// Deletions are irreversible, so they rank above other config changes.
 	Register(ActionAgentDelete, ClassConfig, SeverityWarning)

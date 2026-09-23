@@ -108,6 +108,7 @@ func (s *A2AAgentCardService) RefreshAgentCard(ctx context.Context, ouID, projec
 func toAgentCardView(pub *models.A2APublication) (*models.A2AAgentCardView, error) {
 	view := &models.A2AAgentCardView{
 		Status:    pub.Status,
+		RoutedAt:  pub.RoutedAt,
 		FetchedAt: pub.CardFetchedAt,
 		LastError: pub.LastError,
 	}

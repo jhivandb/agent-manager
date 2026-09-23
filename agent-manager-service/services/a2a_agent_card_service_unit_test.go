@@ -68,6 +68,7 @@ func TestGetAgentCard_NoRow_ReturnsNilNil(t *testing.T) {
 // TestGetAgentCard_SixStates covers every (card, status) combination the API
 // contract distinguishes.
 func TestGetAgentCard_SixStates(t *testing.T) {
+	routedAt := time.Date(2026, 9, 22, 10, 10, 0, 0, time.UTC)
 	fetchedAt := time.Date(2026, 9, 22, 10, 14, 3, 0, time.UTC)
 	rawCard := json.RawMessage(`{"name":"weather-agent"}`)
 
@@ -85,11 +86,13 @@ func TestGetAgentCard_SixStates(t *testing.T) {
 		},
 		{
 			name:       "routed, no card",
-			pub:        &models.A2APublication{Status: models.A2APublicationStatusRouted},
+			pub:        &models.A2APublication{Status: models.A2APublicationStatusRouted, RoutedAt: &routedAt},
 			wantCard:   nil,
 			wantStatus: models.A2APublicationStatusRouted,
 		},
 		{
+			// Never routed: RoutedAt stays nil, which is what distinguishes this
+			// from "routed, card never arrived" below.
 			name:       "failed on first deploy, no card",
 			pub:        &models.A2APublication{Status: models.A2APublicationStatusFailed, LastError: "startup probe never passed"},
 			wantCard:   nil,
@@ -98,7 +101,8 @@ func TestGetAgentCard_SixStates(t *testing.T) {
 		{
 			name: "published, card set",
 			pub: &models.A2APublication{
-				Status: models.A2APublicationStatusPublished, AgentCard: rawCard, CardFetchedAt: &fetchedAt,
+				Status: models.A2APublicationStatusPublished, RoutedAt: &routedAt,
+				AgentCard: rawCard, CardFetchedAt: &fetchedAt,
 			},
 			wantCard:   map[string]interface{}{"name": "weather-agent"},
 			wantStatus: models.A2APublicationStatusPublished,
@@ -106,7 +110,8 @@ func TestGetAgentCard_SixStates(t *testing.T) {
 		{
 			name: "failed after a stale publish, card kept",
 			pub: &models.A2APublication{
-				Status: models.A2APublicationStatusFailed, AgentCard: rawCard, CardFetchedAt: &fetchedAt,
+				Status: models.A2APublicationStatusFailed, RoutedAt: &routedAt,
+				AgentCard: rawCard, CardFetchedAt: &fetchedAt,
 				LastError: "release binding has not published a service URL yet",
 			},
 			wantCard:   map[string]interface{}{"name": "weather-agent"},
@@ -115,7 +120,8 @@ func TestGetAgentCard_SixStates(t *testing.T) {
 		{
 			name: "rejected, card kept",
 			pub: &models.A2APublication{
-				Status: models.A2APublicationStatusRejected, AgentCard: rawCard, CardFetchedAt: &fetchedAt,
+				Status: models.A2APublicationStatusRejected, RoutedAt: &routedAt,
+				AgentCard: rawCard, CardFetchedAt: &fetchedAt,
 				LastError: "INVALID_INTERFACE_URL",
 			},
 			wantCard:   map[string]interface{}{"name": "weather-agent"},
@@ -139,6 +145,7 @@ func TestGetAgentCard_SixStates(t *testing.T) {
 			assert.Equal(t, tc.wantCard, view.Card)
 			assert.Equal(t, tc.wantStatus, view.Status)
 			assert.Equal(t, tc.pub.LastError, view.LastError)
+			assert.Equal(t, tc.pub.RoutedAt, view.RoutedAt)
 			assert.Equal(t, tc.pub.CardFetchedAt, view.FetchedAt)
 		})
 	}
@@ -196,9 +203,12 @@ func TestRefreshAgentCard_NoRow_ReturnsNotFound(t *testing.T) {
 }
 
 // TestRefreshAgentCard_ExistingRow covers refresh from every status the brief
-// calls out as a valid recovery/retry/pickup trigger.
+// calls out as a valid recovery/retry/pickup trigger, plus pending: the
+// service's job is deciding whether a row exists, not which phase RequeueCard
+// puts it in — that CASE lives in the repository and is covered there.
 func TestRefreshAgentCard_ExistingRow(t *testing.T) {
 	for _, status := range []models.A2APublicationStatus{
+		models.A2APublicationStatusPending,
 		models.A2APublicationStatusFailed,
 		models.A2APublicationStatusRejected,
 		models.A2APublicationStatusPublished,
