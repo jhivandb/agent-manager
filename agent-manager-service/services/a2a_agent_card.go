@@ -26,12 +26,13 @@ import (
 // non-https interface URL, but every dev vhost is plain http.
 const a2aCardURLScheme = "https"
 
-// Proto3 JSON names for the three AgentCard fields the platform owns
+// Proto3 JSON names for the AgentCard fields the platform rewrites or drops
 // (a2aproject/A2A v1.0.1, specification/a2a.proto:361).
 const (
 	cardFieldSupportedInterfaces  = "supportedInterfaces"
 	cardFieldSecuritySchemes      = "securitySchemes"
 	cardFieldSecurityRequirements = "securityRequirements"
+	cardFieldSignatures           = "signatures"
 )
 
 // The map keys naming each scheme; securityRequirements refers back to them, so
@@ -77,6 +78,9 @@ func buildGatewayAgentCard(fetched map[string]any, in GatewayAgentCardInput) (ma
 	} else {
 		card[cardFieldSecurityRequirements] = requirements
 	}
+
+	// The agent's JWS covered the fields just rewritten, so it could only fail verification.
+	delete(card, cardFieldSignatures)
 
 	return card, nil
 }

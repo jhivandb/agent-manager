@@ -46,6 +46,9 @@ func fetchedCard() map[string]any {
 		"capabilities":     map[string]any{"streaming": true},
 		"skills":           []any{map[string]any{"id": "plan_trip", "name": "Plan a trip"}},
 		"x-vendor-feature": map[string]any{"beta": true},
+		"signatures": []any{
+			map[string]any{"protected": "eyJhbGciOiJFUzI1NiJ9", "signature": "c2ln"},
+		},
 	}
 }
 
@@ -169,6 +172,14 @@ func TestBuildGatewayAgentCardPreservesEverythingElse(t *testing.T) {
 	assert.Equal(t, map[string]any{"streaming": true}, got["capabilities"])
 	assert.Equal(t, map[string]any{"beta": true}, got["x-vendor-feature"])
 	assert.Len(t, got["skills"], 1)
+}
+
+// A signature over the agent's own card cannot verify once interfaces and
+// security are rewritten, and the platform does not re-sign.
+func TestBuildGatewayAgentCardDropsSignatures(t *testing.T) {
+	got, err := buildGatewayAgentCard(fetchedCard(), cardInput())
+	require.NoError(t, err)
+	assert.NotContains(t, got, "signatures")
 }
 
 // The fetched document must not be mutated: the caller holds it, and phase 2
