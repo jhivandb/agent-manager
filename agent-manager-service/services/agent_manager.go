@@ -519,6 +519,17 @@ func (s *agentManagerService) buildCreateTraitRequests(ctx context.Context, ouID
 		})
 	}
 
+	// Attached at create, not just deploy: the build workflow cuts the first
+	// release itself, so a trait that waited for DeployAgent would leave the
+	// first deployment reachable directly on the pod.
+	if isA2AAgent {
+		port := config.GetConfig().DefaultChatAPI.DefaultHTTPPort
+		if req.InputInterface != nil && req.InputInterface.Port != nil && *req.InputInterface.Port > 0 {
+			port = *req.InputInterface.Port
+		}
+		traits = append(traits, a2aGatewayRouteTrait(port))
+	}
+
 	return traits, nil
 }
 
@@ -3297,6 +3308,12 @@ func (s *agentManagerService) DeployAgent(ctx context.Context, ouID string, proj
 		s.logger.Info("Updated api-configuration trait", "agentName", agentName, "artifactID", artifactID, "enableApiKeySecurity", enableApiKeySecurity)
 	}
 
+	if isA2AAgent {
+		upstreamPort, _ := s.effectiveUpstreamInterface(ctx, ouID, agent, req.ImageId)
+		componentDeployConfig.TraitsToAttach = append(componentDeployConfig.TraitsToAttach, a2aGatewayRouteTrait(upstreamPort))
+		requiresComponentConfig = true
+	}
+
 	// Apply deploy-time Component CR changes in a single PUT — trait changes needed for this deploy.
 	s.logger.Debug("Updating component deployment config", "agentName", agentName,
 		"traitsToAttach", len(componentDeployConfig.TraitsToAttach), "traitsToDetach", len(componentDeployConfig.TraitsToDetach))
@@ -6032,6 +6049,16 @@ func buildNameOf(build *models.BuildResponse) string {
 		return ""
 	}
 	return build.Name
+}
+
+// a2aGatewayRouteTrait sends an A2A agent's HTTPRoutes through the API gateway,
+// the only place its policies and Agent Card URL rewriting apply.
+func a2aGatewayRouteTrait(upstreamPort int32) client.TraitRequest {
+	return client.TraitRequest{
+		TraitKind: client.TraitKindTrait,
+		TraitType: client.TraitA2AGatewayRoute,
+		Opts:      []client.TraitOption{client.WithUpstreamPort(upstreamPort)},
+	}
 }
 
 // enqueueA2APublication records that an A2A agent's gateway resource is due to

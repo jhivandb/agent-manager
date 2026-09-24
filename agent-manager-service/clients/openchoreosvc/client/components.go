@@ -2569,6 +2569,9 @@ func (c *openChoreoClient) buildTrait(ctx context.Context, namespaceName, projec
 			return gen.ComponentTrait{}, err
 		}
 		trait.Parameters = &params
+	case TraitA2AGatewayRoute:
+		params := buildA2AGatewayRouteTraitParameters(req.Opts...)
+		trait.Parameters = &params
 	default:
 		return gen.ComponentTrait{}, fmt.Errorf("unsupported trait type: %s", req.TraitType)
 	}
@@ -2588,6 +2591,19 @@ func (c *openChoreoClient) buildAPIConfigurationTraitParameters(componentName st
 		opt(params)
 	}
 	return params, nil
+}
+
+// buildA2AGatewayRouteTraitParameters takes only the upstream port: the trait
+// routes to the gateway's Agent resource, whose context is fixed by the
+// component name, so nothing else is per-agent.
+func buildA2AGatewayRouteTraitParameters(opts ...TraitOption) map[string]interface{} {
+	params := map[string]interface{}{
+		"upstreamPort": config.GetConfig().DefaultChatAPI.DefaultHTTPPort,
+	}
+	for _, opt := range opts {
+		opt(params)
+	}
+	return params
 }
 
 func (c *openChoreoClient) buildOTELTraitParameters(ctx context.Context, namespaceName, projectName, componentName string, opts ...TraitOption) (map[string]interface{}, error) {
