@@ -63,7 +63,7 @@ type lifecycleEventHub struct {
 	published []eventhub.Event
 }
 
-func (h *lifecycleEventHub) PublishEvent(gatewayID string, evt eventhub.Event) error {
+func (h *lifecycleEventHub) PublishEvent(_ context.Context, gatewayID string, evt eventhub.Event) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.published = append(h.published, evt)

@@ -17,6 +17,7 @@
 package services
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 	"time"
@@ -35,7 +36,7 @@ type recordingEventHub struct {
 	published []eventhub.Event
 }
 
-func (h *recordingEventHub) PublishEvent(gatewayID string, evt eventhub.Event) error {
+func (h *recordingEventHub) PublishEvent(_ context.Context, gatewayID string, evt eventhub.Event) error {
 	h.published = append(h.published, evt)
 	return nil
 }
