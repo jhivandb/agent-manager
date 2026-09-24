@@ -14743,7 +14743,7 @@ components:
         corsConfig:
           $ref: "#/components/schemas/CORSConfig"
         agentCardCorsConfig:
-          description: Public Agent Card CORS for this environment (A2A agents only). Omit to keep the current value.
+          description: Public Agent Card CORS for the target environment (A2A agents only). Omit to inherit the source environment's value.
           $ref: "#/components/schemas/AgentCardCORSConfig"
         enableOAuthSecurity:
           type: boolean

@@ -6126,7 +6126,7 @@ func a2aGatewayRouteTrait(upstreamPort int32) client.TraitRequest {
 // Best effort: the agent is deployed and running by this point, and failing the
 // deploy over a queue write would report a false failure for work that
 // succeeded. A missed row surfaces as an agent that never appears on its
-// gateway, which the next redeploy re-queues.
+// gateway, which the next deploy, promotion or deploy-settings save re-queues.
 func (s *agentManagerService) enqueueA2APublication(
 	ctx context.Context,
 	ouID, projectName, agentName, environmentName string,
@@ -6144,7 +6144,7 @@ func (s *agentManagerService) enqueueA2APublication(
 		ArtifactUUID:    artifactUUID,
 	}
 	if err := s.a2aPublicationRepo.Enqueue(ctx, pub); err != nil {
-		s.logger.Error("Failed to queue A2A agent gateway publication; the agent is deployed but will not reach its gateway until the next redeploy",
+		s.logger.Error("Failed to queue A2A agent gateway publication; the agent is deployed but will not reach its gateway until it is next deployed, promoted, or its deploy settings are saved",
 			"agentName", agentName, "environment", environmentName, "error", err)
 	}
 }

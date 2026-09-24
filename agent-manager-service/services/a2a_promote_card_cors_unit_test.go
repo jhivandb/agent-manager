@@ -20,10 +20,14 @@ import (
 	"context"
 	"testing"
 
+	"github.com/google/uuid"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/wso2/agent-manager/agent-manager-service/clients/clientmocks"
+	"github.com/wso2/agent-manager/agent-manager-service/clients/openchoreosvc/client"
 	"github.com/wso2/agent-manager/agent-manager-service/models"
+	"github.com/wso2/agent-manager/agent-manager-service/repositories/repomocks"
 	"github.com/wso2/agent-manager/agent-manager-service/spec"
 	"github.com/wso2/agent-manager/agent-manager-service/utils"
 )
@@ -65,4 +69,83 @@ func TestPromoteAgent_RejectsCardCORSForNonAPIAgent(t *testing.T) {
 		},
 	})
 	require.ErrorIs(t, err, utils.ErrInvalidInput)
+}
+
+// A promote that leaves agentCardCorsConfig out carries the source
+// environment's card override to the target, and — because the reconciler
+// builds the gateway resource from the stored target row — queues the target
+// for publication only after that row is written.
+func TestPromoteAgent_A2AInheritsSourceCardCORSAndRepublishes(t *testing.T) {
+	s, promoted := promoteAgentTestFixture(t, []client.EnvVar{{Key: client.EnvVarAgentIDClientID, Value: "staging-client-id"}}, nil)
+
+	stagingUUID := uuid.New()
+	artifactUUID := uuid.New()
+	ocMock, ok := s.ocClient.(*clientmocks.OpenChoreoClientMock)
+	require.True(t, ok)
+	ocMock.GetComponentFunc = func(_ context.Context, _, _, name string) (*models.AgentResponse, error) {
+		return &models.AgentResponse{
+			UUID:         "agent-uuid",
+			Name:         name,
+			Provisioning: models.Provisioning{Type: string(utils.InternalAgent)},
+			Type:         models.AgentType{Type: string(utils.AgentTypeAPI), SubType: string(utils.AgentSubTypeA2A)},
+		}, nil
+	}
+	ocMock.GetEnvironmentFunc = func(_ context.Context, _, envName string) (*models.EnvironmentResponse, error) {
+		return &models.EnvironmentResponse{Name: envName, UUID: stagingUUID.String()}, nil
+	}
+
+	sourceOverride := &models.AgentConfig{
+		CORSEnabled:              true,
+		CORSAllowOrigins:         []string{"https://client.example"},
+		CardCORSEnabled:          spec.PtrBool(true),
+		CardCORSAllowOrigins:     []string{"https://cards.example"},
+		CardCORSAllowHeaders:     []string{"Content-Type"},
+		CardCORSAllowCredentials: spec.PtrBool(false),
+	}
+	var upserted *models.AgentConfig
+	var events []string
+	s.agentConfigRepo = &repomocks.AgentConfigRepositoryMock{
+		GetFunc: func(_ context.Context, _, _, _, envName string) (*models.AgentConfig, error) {
+			require.Equal(t, "dev", envName, "promote resolves settings from the source environment")
+			return sourceOverride, nil
+		},
+		UpsertFunc: func(_ context.Context, cfg *models.AgentConfig) error {
+			upserted = cfg
+			events = append(events, "upsert")
+			return nil
+		},
+	}
+	s.artifactRepo = &repomocks.ArtifactRepositoryMock{
+		GetByHandleFunc: func(_, _ string) (*models.Artifact, error) {
+			return &models.Artifact{UUID: artifactUUID, Kind: models.KindAgent}, nil
+		},
+	}
+	pubRepo := &repomocks.A2APublicationRepositoryMock{
+		EnqueueFunc: func(_ context.Context, _ *models.A2APublication) error {
+			events = append(events, "enqueue")
+			return nil
+		},
+	}
+	s.a2aPublicationRepo = pubRepo
+
+	err := s.PromoteAgent(tierGrantedCtx(t), "acme", "proj1", "my-agent", &spec.PromoteAgentRequest{
+		SourceEnvironment: "dev",
+		TargetEnvironment: "staging",
+	})
+	require.NoError(t, err)
+	require.True(t, *promoted)
+
+	require.NotNil(t, upserted, "the target environment's config is persisted")
+	assert.Equal(t, "staging", upserted.EnvironmentName)
+	assert.Equal(t, sourceOverride.CardCORSEnabled, upserted.CardCORSEnabled)
+	assert.Equal(t, []string{"https://cards.example"}, upserted.CardCORSAllowOrigins)
+	assert.Equal(t, []string{"Content-Type"}, upserted.CardCORSAllowHeaders)
+	assert.Equal(t, sourceOverride.CardCORSAllowCredentials, upserted.CardCORSAllowCredentials)
+
+	enqueued := pubRepo.EnqueueCalls()
+	require.Len(t, enqueued, 1, "the target is queued for gateway publication")
+	assert.Equal(t, "staging", enqueued[0].Pub.EnvironmentName)
+	assert.Equal(t, stagingUUID, enqueued[0].Pub.EnvironmentUUID)
+	assert.Equal(t, artifactUUID, enqueued[0].Pub.ArtifactUUID)
+	assert.Equal(t, []string{"upsert", "enqueue"}, events, "queued only after the config it is built from is saved")
 }
