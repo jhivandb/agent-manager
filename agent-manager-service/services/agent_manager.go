@@ -4197,6 +4197,18 @@ func (s *agentManagerService) PromoteAgent(ctx context.Context, ouID string, pro
 		return fmt.Errorf("promote operation is not supported for agent type: '%s'", agent.Provisioning.Type)
 	}
 
+	// agentCardCorsConfig only applies to API-type (and, within that, A2A) agents. A
+	// non-API agent (e.g. a chat agent) never reaches the isAPIAgent block below, where
+	// the rest of card CORS resolution/validation happens — so it needs its own guard
+	// here, before any side effect, or a request that should be rejected would instead
+	// silently succeed with the card CORS config ignored.
+	isAPIAgent := agent.Type.Type == string(utils.AgentTypeAPI)
+	if !isAPIAgent {
+		if err := validateCardCORS(false, req.AgentCardCorsConfig, nil); err != nil {
+			return err
+		}
+	}
+
 	// Validate promotion path exists: get deployment pipeline and verify source → target is valid
 	pipeline, err := s.ocClient.GetProjectDeploymentPipeline(ctx, ouID, projectName)
 	if err != nil {
@@ -4460,7 +4472,6 @@ func (s *agentManagerService) PromoteAgent(ctx context.Context, ouID string, pro
 	// Build trait environment configs for per-environment trait overrides
 	var traitEnvConfigs map[string]interface{}
 	var promoteCTConfigs map[string]interface{}
-	isAPIAgent := agent.Type.Type == string(utils.AgentTypeAPI)
 	if isAPIAgent {
 		// Resolve config values: request > source env DB > defaults
 		var existingConfig *models.AgentConfig

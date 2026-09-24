@@ -61,6 +61,9 @@ func resolveCardCORSOverride(existing *models.AgentConfig, req *spec.AgentCardCO
 	}
 }
 
+// validateCardCORS checks the request shape first (agentCardCorsConfig is
+// A2A-only, and enabled is required unless inheriting), then the resolved
+// override (an enabled card needs origins, and cannot pair credentials with "*").
 func validateCardCORS(isA2A bool, req *spec.AgentCardCORSConfig, override *models.CardCORS) error {
 	if req != nil && !isA2A {
 		return fmt.Errorf("%w: agentCardCorsConfig applies only to A2A agents", utils.ErrInvalidInput)
