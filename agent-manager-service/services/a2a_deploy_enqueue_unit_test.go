@@ -64,3 +64,42 @@ func TestEnqueueA2APublicationSurvivesRepoFailure(t *testing.T) {
 		svc.enqueueA2APublication(context.Background(), "org-1", "checkout", "trip-planner", "dev", uuid.New(), uuid.New())
 	})
 }
+
+func TestRepublishA2AAgentQueuesA2AAgents(t *testing.T) {
+	var enqueued []models.A2APublication
+	repo := &repomocks.A2APublicationRepositoryMock{
+		EnqueueFunc: func(ctx context.Context, pub *models.A2APublication) error {
+			enqueued = append(enqueued, *pub)
+			return nil
+		},
+	}
+	svc := &agentManagerService{a2aPublicationRepo: repo, logger: testLogger()}
+	agent := &models.AgentResponse{Type: models.AgentType{Type: "agent-api", SubType: "a2a-agent"}}
+	envUUID, artifactUUID := uuid.New(), uuid.New()
+
+	require.NoError(t, svc.republishA2AAgent(context.Background(), agent, "org-1", "checkout", "trip-planner", "staging", envUUID.String(), artifactUUID))
+
+	require.Len(t, enqueued, 1)
+	assert.Equal(t, "staging", enqueued[0].EnvironmentName)
+	assert.Equal(t, envUUID, enqueued[0].EnvironmentUUID)
+	assert.Equal(t, artifactUUID, enqueued[0].ArtifactUUID)
+}
+
+// A REST agent's policies ride on its release binding, which the caller has
+// already updated; queueing it would publish an Agent resource for a non-agent.
+func TestRepublishA2AAgentIgnoresOtherAgents(t *testing.T) {
+	repo := &repomocks.A2APublicationRepositoryMock{}
+	svc := &agentManagerService{a2aPublicationRepo: repo, logger: testLogger()}
+	agent := &models.AgentResponse{Type: models.AgentType{Type: "agent-api", SubType: "chat-api"}}
+
+	require.NoError(t, svc.republishA2AAgent(context.Background(), agent, "org-1", "checkout", "greeter", "dev", uuid.New().String(), uuid.New()))
+	assert.Empty(t, repo.EnqueueCalls())
+}
+
+func TestRepublishA2AAgentRejectsUnparseableEnvironmentUUID(t *testing.T) {
+	svc := &agentManagerService{a2aPublicationRepo: &repomocks.A2APublicationRepositoryMock{}, logger: testLogger()}
+	agent := &models.AgentResponse{Type: models.AgentType{Type: "agent-api", SubType: "a2a-agent"}}
+	err := svc.republishA2AAgent(context.Background(), agent, "org-1", "checkout", "trip-planner", "dev", "not-a-uuid", uuid.New())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not-a-uuid")
+}

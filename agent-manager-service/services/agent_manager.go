@@ -3393,6 +3393,7 @@ func (s *agentManagerService) DeployAgent(ctx context.Context, ouID string, proj
 		return "", err
 	}
 
+	var a2aArtifactUUID uuid.UUID
 	if isA2AAgent {
 		// The artifact row is created for every API agent kind, A2A included: it
 		// is what the agent's API keys are already bound to and what the gateway
@@ -3401,11 +3402,7 @@ func (s *agentManagerService) DeployAgent(ctx context.Context, ouID string, proj
 		if artifactErr != nil {
 			return "", fmt.Errorf("cannot deploy A2A agent without environment API artifact record: %w", artifactErr)
 		}
-		envUUID, parseErr := uuid.Parse(targetEnv.UUID)
-		if parseErr != nil {
-			return "", fmt.Errorf("environment %q has an unparseable UUID %q: %w", lowestEnv, targetEnv.UUID, parseErr)
-		}
-		s.enqueueA2APublication(ctx, ouID, projectName, agentName, lowestEnv, envUUID, apiArtifact.UUID)
+		a2aArtifactUUID = apiArtifact.UUID
 	}
 
 	// Persist instrumentation config to database. Passing the pinned
@@ -3443,6 +3440,12 @@ func (s *agentManagerService) DeployAgent(ctx context.Context, ouID string, proj
 		return "", fmt.Errorf("agent deployed to %q but failed to persist its config (retry to reconcile): %w", lowestEnv, configErr)
 	}
 	s.logger.Debug("Persisted instrumentation config to database", "agentName", agentName, "environment", lowestEnv, "enableAutoInstrumentation", enableAutoInstrumentation, "instrumentationVersion", existingInstrumentationVersion)
+
+	if isA2AAgent {
+		if err := s.republishA2AAgent(ctx, agent, ouID, projectName, agentName, lowestEnv, targetEnv.UUID, a2aArtifactUUID); err != nil {
+			return "", err
+		}
+	}
 
 	s.logger.Info("Agent deployed successfully to "+lowestEnv, "agentName", agentName, "ouID", org.Name, "projectName", projectName, "environment", lowestEnv)
 	return lowestEnv, nil
@@ -4472,6 +4475,7 @@ func (s *agentManagerService) PromoteAgent(ctx context.Context, ouID string, pro
 	// Build trait environment configs for per-environment trait overrides
 	var traitEnvConfigs map[string]interface{}
 	var promoteCTConfigs map[string]interface{}
+	var promotedArtifactUUID uuid.UUID
 	if isAPIAgent {
 		// Resolve config values: request > source env DB > defaults
 		var existingConfig *models.AgentConfig
@@ -4523,6 +4527,7 @@ func (s *agentManagerService) PromoteAgent(ctx context.Context, ouID string, pro
 		if artifactErr != nil {
 			return fmt.Errorf("failed to ensure target env API artifact: %w", artifactErr)
 		}
+		promotedArtifactUUID = artifact.UUID
 		targetArtifactID := artifact.UUID.String()
 		promotePythonBuildpack := agent.Build != nil && agent.Build.Buildpack != nil && agent.Build.Buildpack.Language == string(utils.LanguagePython)
 		promoteBallerinaBuildpack := agent.Build != nil && agent.Build.Buildpack != nil && agent.Build.Buildpack.Language == string(utils.LanguageBallerina)
@@ -4623,6 +4628,12 @@ func (s *agentManagerService) PromoteAgent(ctx context.Context, ouID string, pro
 		return fmt.Errorf("failed to promote agent: %w", err)
 	}
 	promoteAttempt.Complete(ctx, nil)
+
+	if isAPIAgent {
+		if err := s.republishA2AAgent(ctx, agent, ouID, projectName, agentName, req.TargetEnvironment, targetEnv.UUID, promotedArtifactUUID); err != nil {
+			return err
+		}
+	}
 
 	s.logger.Info("Agent promoted successfully", "agentName", agentName, "sourceEnvironment", req.SourceEnvironment, "targetEnvironment", req.TargetEnvironment)
 	return nil
@@ -5062,6 +5073,10 @@ func (s *agentManagerService) UpdateAgentDeploySettings(ctx context.Context, ouI
 	if upsertErr := s.agentConfigRepo.Upsert(ctx, agentConfig); upsertErr != nil {
 		s.logger.Error("Failed to persist agent deploy settings", "agentName", agentName, "environment", req.EnvironmentName, "error", upsertErr)
 		return fmt.Errorf("failed to persist agent deploy settings: %w", upsertErr)
+	}
+
+	if err := s.republishA2AAgent(ctx, agent, ouID, projectName, agentName, req.EnvironmentName, targetEnv.UUID, artifact.UUID); err != nil {
+		return err
 	}
 
 	s.logger.Info("Agent deploy settings updated successfully", "agentName", agentName, "environment", req.EnvironmentName)
@@ -6132,4 +6147,26 @@ func (s *agentManagerService) enqueueA2APublication(
 		s.logger.Error("Failed to queue A2A agent gateway publication; the agent is deployed but will not reach its gateway until the next redeploy",
 			"agentName", agentName, "environment", environmentName, "error", err)
 	}
+}
+
+// republishA2AAgent re-queues an A2A agent's gateway resource after the config
+// it is built from changed. Call it only after that config is persisted: the
+// reconciler builds from the stored row, so queueing first can publish the old
+// settings. Other agent kinds are left alone — their policies ride on the
+// release binding's trait.
+func (s *agentManagerService) republishA2AAgent(
+	ctx context.Context,
+	agent *models.AgentResponse,
+	ouID, projectName, agentName, environmentName, environmentUUID string,
+	artifactUUID uuid.UUID,
+) error {
+	if !utils.IsA2AAgentSubType(agent.Type.SubType) {
+		return nil
+	}
+	envUUID, err := uuid.Parse(environmentUUID)
+	if err != nil {
+		return fmt.Errorf("environment %q has an unparseable UUID %q: %w", environmentName, environmentUUID, err)
+	}
+	s.enqueueA2APublication(ctx, ouID, projectName, agentName, environmentName, envUUID, artifactUUID)
+	return nil
 }

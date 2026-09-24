@@ -291,7 +291,9 @@ func TestA2AAgentLifecycle(t *testing.T) {
 		require.Len(t, published.Spec.A2A.OperationConfigs.Transports, 2)
 		assert.Equal(t, "JSONRPC", published.Spec.A2A.OperationConfigs.Transports[0].ProtocolBinding)
 		assert.Equal(t, "HTTP+JSON", published.Spec.A2A.OperationConfigs.Transports[1].ProtocolBinding)
-		assert.NotContains(t, string(current.Content), "agentCard")
+		require.NotNil(t, published.Spec.A2A.AgentCard, "the card inherits the default agent CORS")
+		assert.Len(t, published.Spec.A2A.AgentCard.Public.Policies, 1)
+		assert.NotContains(t, string(current.Content), "rewriteUrls")
 		assert.NotContains(t, string(current.Content), "resilience")
 
 		// The artifact the gateway is told about is the KindAgent row, which is
@@ -330,6 +332,53 @@ func TestA2AAgentLifecycle(t *testing.T) {
 			Count(&deploymentCount).Error)
 		assert.EqualValues(t, 2, deploymentCount,
 			"a redeploy writes a fresh row and re-broadcasts CREATE, as MCP does")
+	})
+
+	t.Run("deploy settings republish card CORS and A2A-Version", func(t *testing.T) {
+		before := duePublication(t)
+		require.NotNil(t, before)
+
+		body := new(bytes.Buffer)
+		require.NoError(t, json.NewEncoder(body).Encode(map[string]interface{}{
+			"environmentName": before.EnvironmentName,
+			"corsConfig": map[string]interface{}{
+				"enabled":      true,
+				"allowOrigin":  []string{"https://client.example"},
+				"allowHeaders": []string{"Content-Type"},
+			},
+			"agentCardCorsConfig": map[string]interface{}{
+				"enabled":      true,
+				"allowOrigin":  []string{"*"},
+				"allowHeaders": []string{"Content-Type"},
+			},
+		}))
+		url := fmt.Sprintf("/api/v1/orgs/%s/projects/%s/agents/%s/deploy-settings",
+			a2aLifecycleOrgName, a2aLifecycleProjName, a2aLifecycleAgentName)
+		req := httptest.NewRequest(http.MethodPut, url, body)
+		req.Header.Set("Content-Type", "application/json")
+		rr := httptest.NewRecorder()
+		app.ServeHTTP(rr, req)
+		require.Equal(t, http.StatusNoContent, rr.Code, "body: %s", rr.Body.String())
+
+		requeued := duePublication(t)
+		require.NotNil(t, requeued)
+		assert.Equal(t, models.A2APublicationStatusPending, requeued.Status, "a settings change must re-publish")
+
+		reconciler.RunOnce(context.Background())
+
+		current, err := deploymentRepo.GetCurrentByGateway(requeued.ArtifactUUID.String(), gatewayID.String(), ouID)
+		require.NoError(t, err)
+		require.NotNil(t, current)
+		var published services.A2AAgentDeploymentYAML
+		require.NoError(t, yaml.Unmarshal(current.Content, &published))
+
+		opCORS := published.Spec.A2A.OperationConfigs.Policies[0]["params"].(map[string]interface{})
+		assert.Equal(t, []interface{}{"https://client.example"}, opCORS["allowedOrigins"])
+		assert.Contains(t, opCORS["allowedHeaders"], "A2A-Version", "stored and published even though the request omitted it")
+
+		require.NotNil(t, published.Spec.A2A.AgentCard)
+		cardCORS := published.Spec.A2A.AgentCard.Public.Policies[0]["params"].(map[string]interface{})
+		assert.Equal(t, []interface{}{"*"}, cardCORS["allowedOrigins"])
 	})
 
 	t.Run("delete clears the publication queue", func(t *testing.T) {
