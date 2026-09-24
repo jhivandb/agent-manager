@@ -182,3 +182,35 @@ func TestReconcilerPublishesOnceServiceURLIsAvailable(t *testing.T) {
 	require.Len(t, h.pubRepo.MarkPublishedCalls(), 1)
 	assert.Empty(t, h.pubRepo.MarkAttemptFailedCalls())
 }
+
+// The reconciler is the only place an A2A agent's gateway resource is built, so
+// it is where A2A-Version is guaranteed and the card's CORS is attached.
+func TestReconcilerPublishesA2AVersionAndInheritedCardCORS(t *testing.T) {
+	h := newA2AReconcilerHarness("http://trip-planner.dp-default:9099")
+	h.svc.agentConfigRepo = &repomocks.AgentConfigRepositoryMock{
+		GetFunc: func(ctx context.Context, ouID, projectName, agentName, environmentName string) (*models.AgentConfig, error) {
+			return &models.AgentConfig{
+				CORSEnabled:      true,
+				CORSAllowOrigins: []string{"https://client.example"},
+				CORSAllowMethods: []string{"GET", "POST", "OPTIONS"},
+				CORSAllowHeaders: []string{"Content-Type"},
+			}, nil
+		},
+	}
+
+	h.svc.publishOne(context.Background(), pendingPublication())
+
+	created := h.deploymentRepo.CreateWithLimitEnforcementCalls()
+	require.Len(t, created, 1)
+	var published A2AAgentDeploymentYAML
+	require.NoError(t, yaml.Unmarshal(created[0].Deployment.Content, &published))
+
+	opCORS := published.Spec.A2A.OperationConfigs.Policies[0]
+	assert.Equal(t, "cors", opCORS["name"])
+	assert.Contains(t, opCORS["params"].(map[string]interface{})["allowedHeaders"], "A2A-Version")
+
+	require.NotNil(t, published.Spec.A2A.AgentCard, "an inherited card follows enabled agent CORS")
+	cardCORS := published.Spec.A2A.AgentCard.Public.Policies[0]["params"].(map[string]interface{})
+	assert.Equal(t, []interface{}{"https://client.example"}, cardCORS["allowedOrigins"])
+	assert.Equal(t, []interface{}{"GET", "OPTIONS"}, cardCORS["allowedMethods"])
+}

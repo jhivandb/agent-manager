@@ -35,3 +35,17 @@ spec:
                     in: header
                     key: X-API-Key
                   version: v1
+        agentCard:
+            public:
+                policies:
+                    - name: cors
+                      params:
+                        allowCredentials: false
+                        allowedHeaders:
+                            - Content-Type
+                        allowedMethods:
+                            - GET
+                            - OPTIONS
+                        allowedOrigins:
+                            - https://client.example
+                      version: v1

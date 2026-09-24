@@ -220,14 +220,14 @@ func (s *a2aPublicationReconcilerService) attemptPublish(ctx context.Context, pu
 		return err
 	}
 
-	// The policy chain is exactly what a chat/custom agent gets: the persisted
-	// per-environment config, run through the same buildPolicies. No A2A-specific
-	// policy exists in M1 — the gateway's own Agent rules supply the rest.
+	// The policy chain is the persisted per-environment config run through the
+	// same buildPolicies a chat/custom agent gets, plus the one header every A2A
+	// client must send. The public card route runs its own list.
 	cfg, err := s.agentConfigRepo.Get(ctx, pub.OUID, pub.ProjectName, pub.AgentName, pub.EnvironmentName)
 	if err != nil {
 		return fmt.Errorf("failed to load agent config: %w", err)
 	}
-	policies := buildPolicies(resolveAPIConfig(cfg, nil, nil, nil, nil, false))
+	policies := buildPolicies(withA2AVersionHeader(resolveAPIConfig(cfg, nil, nil, nil, nil, false)))
 
 	yamlStr, err := generateA2AAgentDeploymentYAML(A2AAgentDeploymentInput{
 		ArtifactName: a2aAgentEnvArtifactName(pub.ProjectName, pub.AgentName, pub.EnvironmentUUID.String()),
@@ -235,6 +235,7 @@ func (s *a2aPublicationReconcilerService) attemptPublish(ctx context.Context, pu
 		AgentName:    pub.AgentName,
 		UpstreamURL:  upstreamURL,
 		Policies:     policies,
+		CardPolicies: buildCardPolicies(cfg.EffectiveCardCORS()),
 	})
 	if err != nil {
 		return err

@@ -53,12 +53,14 @@ const (
 // A2AAgentDeploymentYAML is the kind: Agent resource agent-manager publishes to
 // the gateway. It is a structural sibling of MCPProxyDeploymentYAML.
 //
-// Three fields are deliberately absent and must stay absent in M1:
+// Three fields are deliberately absent, or nearly so:
 //
-//   - agentCard. The gateway's default for a proxied card is passthrough WITH
-//     URL rewriting, which is exactly what M1 wants — an un-rewritten card
-//     advertises the agent's own address and sends every client past the
-//     gateway. Writing the block out would only add a way to get it wrong.
+//   - agentCard, beyond public.policies. The gateway's default for a proxied
+//     card is passthrough WITH URL rewriting, which is exactly what we want — an
+//     un-rewritten card advertises the agent's own address and sends every
+//     client past the gateway. Only the card route's policy list is written,
+//     because that route sits outside operationConfigs.policies and gets no
+//     CORS otherwise.
 //   - resilience. The gateway disables the Agent route's request timeout by
 //     default precisely because A2A streaming operations are long-lived.
 //     Writing agent-manager's resilienceTimeoutSeconds here would override that
@@ -88,10 +90,24 @@ type A2AUpstream struct {
 	URL string `yaml:"url" json:"url"`
 }
 
-// A2AConfig carries the protocol version and the per-operation configuration.
+// A2AConfig carries the protocol version, the per-operation configuration and,
+// when the card needs its own CORS, the public card's policy list.
 type A2AConfig struct {
 	ProtocolVersion  string              `yaml:"protocolVersion" json:"protocolVersion"`
 	OperationConfigs A2AOperationConfigs `yaml:"operationConfigs" json:"operationConfigs"`
+	AgentCard        *A2AAgentCard       `yaml:"agentCard,omitempty" json:"agentCard,omitempty"`
+}
+
+// A2AAgentCard is written only to carry public card policies; see the type
+// comment on A2AAgentDeploymentYAML for why nothing else is.
+type A2AAgentCard struct {
+	Public A2APublicAgentCard `yaml:"public" json:"public"`
+}
+
+// A2APublicAgentCard holds the policies the gateway runs on the public card
+// route, the only chain that can answer its CORS preflight.
+type A2APublicAgentCard struct {
+	Policies []map[string]interface{} `yaml:"policies" json:"policies"`
 }
 
 // A2AOperationConfigs holds the transport bindings and the agent-wide policy
@@ -123,6 +139,9 @@ type A2AAgentDeploymentInput struct {
 	// Policies is the output of buildPolicies — already in the gateway's
 	// {name, version, params} shape, so no translation layer is needed.
 	Policies []map[string]interface{}
+	// CardPolicies is the output of buildCardPolicies. Empty means no agentCard
+	// block is written.
+	CardPolicies []map[string]interface{}
 }
 
 // a2aAgentEnvArtifactName builds the per-environment Kubernetes resource name
@@ -170,6 +189,20 @@ func buildA2AAgentDeploymentYAML(in A2AAgentDeploymentInput) (*A2AAgentDeploymen
 		policies = []map[string]interface{}{}
 	}
 
+	a2a := A2AConfig{
+		ProtocolVersion: a2aProtocolVersion,
+		OperationConfigs: A2AOperationConfigs{
+			Transports: []A2ATransport{
+				{ProtocolBinding: a2aTransportJSONRPC, PathPrefix: a2aPathPrefixJSONRPC},
+				{ProtocolBinding: a2aTransportHTTPJSON, PathPrefix: a2aPathPrefixHTTPRPC},
+			},
+			Policies: policies,
+		},
+	}
+	if len(in.CardPolicies) > 0 {
+		a2a.AgentCard = &A2AAgentCard{Public: A2APublicAgentCard{Policies: in.CardPolicies}}
+	}
+
 	return &A2AAgentDeploymentYAML{
 		ApiVersion: apiVersionA2AAgent,
 		Kind:       kindA2AAgent,
@@ -182,16 +215,7 @@ func buildA2AAgentDeploymentYAML(in A2AAgentDeploymentInput) (*A2AAgentDeploymen
 			// keep consistent URL shapes.
 			Context:  "/" + strings.TrimPrefix(strings.TrimSpace(in.AgentName), "/"),
 			Upstream: A2AUpstream{URL: upstreamURL},
-			A2A: A2AConfig{
-				ProtocolVersion: a2aProtocolVersion,
-				OperationConfigs: A2AOperationConfigs{
-					Transports: []A2ATransport{
-						{ProtocolBinding: a2aTransportJSONRPC, PathPrefix: a2aPathPrefixJSONRPC},
-						{ProtocolBinding: a2aTransportHTTPJSON, PathPrefix: a2aPathPrefixHTTPRPC},
-					},
-					Policies: policies,
-				},
-			},
+			A2A:      a2a,
 		},
 	}, nil
 }

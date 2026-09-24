@@ -24,6 +24,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
+
+	"github.com/wso2/agent-manager/agent-manager-service/clients/openchoreosvc/client"
+	"github.com/wso2/agent-manager/agent-manager-service/models"
 )
 
 func a2aInput() A2AAgentDeploymentInput {
@@ -33,8 +36,8 @@ func a2aInput() A2AAgentDeploymentInput {
 		AgentName:    "trip-planner",
 		UpstreamURL:  "http://trip-planner.dp-default:9099",
 		Policies: []map[string]interface{}{
-			{"name": "cors", "version": "v1", "params": map[string]interface{}{"allowOrigins": []string{"*"}}},
-			{"name": "api-key-auth", "version": "v1"},
+			client.CORSPolicy([]string{"*"}, []string{"GET", "POST", "OPTIONS"}, []string{"Content-Type", "A2A-Version"}, false),
+			client.APIKeyAuthPolicy(),
 		},
 	}
 }
@@ -68,15 +71,54 @@ func TestBuildA2AAgentDeploymentYAMLTransports(t *testing.T) {
 	assert.Equal(t, "1.0", got.Spec.A2A.ProtocolVersion)
 }
 
-// The gateway's default for a passthrough card is to rewrite its URLs, and the
-// Agent kind disables its route timeout so streaming operations survive. Both
-// are what M1 wants, so neither block is written — emitting them is the only
-// way to get them wrong.
-func TestGenerateA2AAgentDeploymentYAMLOmitsCardAndResilience(t *testing.T) {
+// Without card policies there is nothing to say about the card: the gateway's
+// passthrough-with-rewrite default is what every A2A agent wants.
+func TestGenerateA2AAgentDeploymentYAMLOmitsCardWithoutPoliciesAndResilience(t *testing.T) {
 	got, err := generateA2AAgentDeploymentYAML(a2aInput())
 	require.NoError(t, err)
 	assert.NotContains(t, got, "agentCard")
 	assert.NotContains(t, got, "resilience")
+}
+
+// The card block carries only its policy list. Mode, path and rewriteUrls stay
+// unset so the gateway's passthrough-with-rewrite default still applies.
+func TestGenerateA2AAgentDeploymentYAMLWritesOnlyCardPolicies(t *testing.T) {
+	in := a2aInput()
+	in.CardPolicies = buildCardPolicies(models.CardCORS{Enabled: true, AllowOrigins: []string{"https://client.example"}, AllowHeaders: []string{"Content-Type"}})
+	got, err := generateA2AAgentDeploymentYAML(in)
+	require.NoError(t, err)
+
+	goldenPath := filepath.Join("testdata", "a2a_agent_card_cors_golden.yaml")
+	if os.Getenv("UPDATE_GOLDEN") != "" {
+		require.NoError(t, os.WriteFile(goldenPath, []byte(got), 0o600))
+	}
+	want, err := os.ReadFile(goldenPath)
+	require.NoError(t, err)
+	assert.Equal(t, string(want), got)
+
+	for _, forbidden := range []string{"mode:", "rewriteUrls", "signing", "protected", "resilience"} {
+		assert.NotContains(t, got, forbidden)
+	}
+}
+
+func TestBuildCardPolicies(t *testing.T) {
+	assert.Nil(t, buildCardPolicies(models.CardCORS{Enabled: false, AllowOrigins: []string{"*"}}), "disabled")
+	assert.Nil(t, buildCardPolicies(models.CardCORS{Enabled: true}), "enabled without origins")
+
+	got := buildCardPolicies(models.CardCORS{Enabled: true, AllowOrigins: []string{"*"}, AllowHeaders: []string{"Content-Type"}})
+	require.Len(t, got, 1)
+	assert.Equal(t, "cors", got[0]["name"])
+	params := got[0]["params"].(map[string]interface{})
+	assert.Equal(t, []string{"GET", "OPTIONS"}, params["allowedMethods"])
+}
+
+// Card CORS is independent of operation CORS: the card can be public while the
+// operation routes allow no cross-origin callers at all.
+func TestBuildCardPoliciesIndependentOfAgentCORS(t *testing.T) {
+	cfg := &models.AgentConfig{CORSEnabled: false}
+	cfg.SetCardCORSOverride(&models.CardCORS{Enabled: true, AllowOrigins: []string{"*"}, AllowHeaders: []string{"Content-Type"}})
+	assert.Len(t, buildCardPolicies(cfg.EffectiveCardCORS()), 1)
+	assert.Empty(t, buildPolicies(resolveAPIConfig(cfg, nil, nil, nil, nil, false)))
 }
 
 func TestBuildA2AAgentDeploymentYAMLContextIsAgentName(t *testing.T) {
