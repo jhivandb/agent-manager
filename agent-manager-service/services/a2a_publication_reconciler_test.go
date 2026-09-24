@@ -49,6 +49,7 @@ func pendingPublication() models.A2APublication {
 		EnvironmentUUID: uuid.New(),
 		ArtifactUUID:    uuid.New(),
 		Status:          models.A2APublicationStatusPending,
+		UpdatedAt:       time.Date(2026, 9, 24, 10, 0, 0, 123456000, time.UTC),
 	}
 }
 
@@ -69,9 +70,11 @@ type a2aReconcilerHarness struct {
 func newA2AReconcilerHarness(serviceURL string) *a2aReconcilerHarness {
 	hub := &recordingEventHub{}
 	pubRepo := &repomocks.A2APublicationRepositoryMock{
-		MarkPublishedFunc:     func(ctx context.Context, id uuid.UUID) error { return nil },
-		MarkAttemptFailedFunc: func(ctx context.Context, id uuid.UUID, lastErr string, nextAttemptAt time.Time) error { return nil },
-		MarkFailedFunc:        func(ctx context.Context, id uuid.UUID, lastErr string) error { return nil },
+		MarkPublishedFunc: func(ctx context.Context, read models.A2APublication) error { return nil },
+		MarkAttemptFailedFunc: func(ctx context.Context, read models.A2APublication, lastErr string, nextAttemptAt time.Time) error {
+			return nil
+		},
+		MarkFailedFunc: func(ctx context.Context, read models.A2APublication, lastErr string) error { return nil },
 	}
 	deploymentRepo := &repomocks.DeploymentRepositoryMock{
 		CreateWithLimitEnforcementFunc: func(deployment *models.Deployment, maxDeployments int) error { return nil },
@@ -179,7 +182,10 @@ func TestReconcilerPublishesOnceServiceURLIsAvailable(t *testing.T) {
 	assert.Equal(t, created[0].Deployment.DeploymentID.String(), envelope.Payload.DeploymentID,
 		"the event points at the row the gateway will fetch")
 
-	require.Len(t, h.pubRepo.MarkPublishedCalls(), 1)
+	marked := h.pubRepo.MarkPublishedCalls()
+	require.Len(t, marked, 1)
+	assert.Equal(t, pub, marked[0].Read,
+		"the row is marked as it was read, so a re-enqueue meanwhile is not swallowed")
 	assert.Empty(t, h.pubRepo.MarkAttemptFailedCalls())
 }
 

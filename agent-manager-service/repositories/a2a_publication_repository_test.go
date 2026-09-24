@@ -59,7 +59,7 @@ func TestA2APublicationEnqueueResetsTheExistingRow(t *testing.T) {
 	pub := newTestPublication("trip-planner-" + uuid.New().String()[:8])
 	cleanupPublication(t, repo, pub)
 	require.NoError(t, repo.Enqueue(ctx, pub))
-	require.NoError(t, repo.MarkFailed(ctx, pub.ID, "gave up"))
+	require.NoError(t, repo.MarkFailed(ctx, *pub, "gave up"))
 
 	requeued := newTestPublication(pub.AgentName)
 	requeued.OUID = pub.OUID
@@ -90,7 +90,7 @@ func TestA2APublicationFindDueRespectsBackoff(t *testing.T) {
 	pub := newTestPublication("backoff-" + uuid.New().String()[:8])
 	cleanupPublication(t, repo, pub)
 	require.NoError(t, repo.Enqueue(ctx, pub))
-	require.NoError(t, repo.MarkAttemptFailed(ctx, pub.ID, "binding not ready", time.Now().Add(time.Hour)))
+	require.NoError(t, repo.MarkAttemptFailed(ctx, *pub, "binding not ready", time.Now().Add(time.Hour)))
 
 	due, err := repo.FindDue(ctx, time.Now(), 100)
 	require.NoError(t, err)
@@ -118,11 +118,94 @@ func TestA2APublicationMarkPublishedRemovesItFromTheQueue(t *testing.T) {
 	pub := newTestPublication("published-" + uuid.New().String()[:8])
 	cleanupPublication(t, repo, pub)
 	require.NoError(t, repo.Enqueue(ctx, pub))
-	require.NoError(t, repo.MarkPublished(ctx, pub.ID))
+	require.NoError(t, repo.MarkPublished(ctx, *pub))
 
 	due, err := repo.FindDue(ctx, time.Now(), 100)
 	require.NoError(t, err)
 	for _, row := range due {
 		assert.NotEqual(t, pub.AgentName, row.AgentName, "a published row is no longer due")
 	}
+}
+
+// dueRowFor returns the due row for agentName, as the reconciler would have read it.
+func dueRowFor(t *testing.T, repo A2APublicationRepository, agentName string) models.A2APublication {
+	t.Helper()
+	due, err := repo.FindDue(context.Background(), time.Now(), 100)
+	require.NoError(t, err)
+	for _, row := range due {
+		if row.AgentName == agentName {
+			return row
+		}
+	}
+	require.FailNow(t, "no due row", "agent %s", agentName)
+	return models.A2APublication{}
+}
+
+func statusOf(t *testing.T, pub *models.A2APublication) models.A2APublication {
+	t.Helper()
+	var row models.A2APublication
+	require.NoError(t, db.GetDB().Where("id = ?", pub.ID).First(&row).Error)
+	return row
+}
+
+// A settings save that re-enqueues while the reconciler is publishing the
+// config it read earlier must not be swallowed: the reconciler published the
+// old config, so the row has to stay pending for the next tick to pick up the
+// new one.
+func TestA2APublicationMarkPublishedDoesNotSwallowANewerEnqueue(t *testing.T) {
+	repo := NewA2APublicationRepository(db.GetDB())
+	ctx := context.Background()
+
+	pub := newTestPublication("race-published-" + uuid.New().String()[:8])
+	cleanupPublication(t, repo, pub)
+	require.NoError(t, repo.Enqueue(ctx, pub))
+	read := dueRowFor(t, repo, pub.AgentName)
+
+	requeue := *pub
+	require.NoError(t, repo.Enqueue(ctx, &requeue))
+	require.ErrorIs(t, repo.MarkPublished(ctx, read), ErrA2APublicationSuperseded)
+
+	assert.Equal(t, models.A2APublicationStatusPending, statusOf(t, pub).Status,
+		"the newer enqueue is still owed a publish")
+}
+
+// A retry recorded against a row that was re-enqueued meanwhile would push a
+// fresh publication's first attempt 30s out and charge it an attempt it never
+// made.
+func TestA2APublicationMarkAttemptFailedDoesNotTouchANewerEnqueue(t *testing.T) {
+	repo := NewA2APublicationRepository(db.GetDB())
+	ctx := context.Background()
+
+	pub := newTestPublication("race-retry-" + uuid.New().String()[:8])
+	cleanupPublication(t, repo, pub)
+	require.NoError(t, repo.Enqueue(ctx, pub))
+	read := dueRowFor(t, repo, pub.AgentName)
+
+	requeue := *pub
+	require.NoError(t, repo.Enqueue(ctx, &requeue))
+	require.ErrorIs(t, repo.MarkAttemptFailed(ctx, read, "binding not ready", time.Now().Add(time.Hour)), ErrA2APublicationSuperseded)
+
+	row := statusOf(t, pub)
+	assert.Equal(t, 0, row.AttemptCount, "the fresh attempt budget is untouched")
+	require.NotNil(t, row.NextAttemptAt)
+	assert.False(t, row.NextAttemptAt.After(time.Now()), "and it is still due now")
+}
+
+// Giving up on a row that was re-enqueued meanwhile would fail a publication
+// that has not had a single attempt.
+func TestA2APublicationMarkFailedDoesNotFailANewerEnqueue(t *testing.T) {
+	repo := NewA2APublicationRepository(db.GetDB())
+	ctx := context.Background()
+
+	pub := newTestPublication("race-failed-" + uuid.New().String()[:8])
+	cleanupPublication(t, repo, pub)
+	require.NoError(t, repo.Enqueue(ctx, pub))
+	read := dueRowFor(t, repo, pub.AgentName)
+
+	requeue := *pub
+	require.NoError(t, repo.Enqueue(ctx, &requeue))
+	require.ErrorIs(t, repo.MarkFailed(ctx, read, "gave up"), ErrA2APublicationSuperseded)
+
+	assert.Equal(t, models.A2APublicationStatusPending, statusOf(t, pub).Status,
+		"the newer enqueue is still owed a publish")
 }

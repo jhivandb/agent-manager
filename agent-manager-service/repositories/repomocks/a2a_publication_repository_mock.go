@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/wso2/agent-manager/agent-manager-service/models"
 )
 
@@ -27,13 +26,13 @@ import (
 //			FindDueFunc: func(ctx context.Context, now time.Time, limit int) ([]models.A2APublication, error) {
 //				panic("mock out the FindDue method")
 //			},
-//			MarkAttemptFailedFunc: func(ctx context.Context, id uuid.UUID, lastErr string, nextAttemptAt time.Time) error {
+//			MarkAttemptFailedFunc: func(ctx context.Context, read models.A2APublication, lastErr string, nextAttemptAt time.Time) error {
 //				panic("mock out the MarkAttemptFailed method")
 //			},
-//			MarkFailedFunc: func(ctx context.Context, id uuid.UUID, lastErr string) error {
+//			MarkFailedFunc: func(ctx context.Context, read models.A2APublication, lastErr string) error {
 //				panic("mock out the MarkFailed method")
 //			},
-//			MarkPublishedFunc: func(ctx context.Context, id uuid.UUID) error {
+//			MarkPublishedFunc: func(ctx context.Context, read models.A2APublication) error {
 //				panic("mock out the MarkPublished method")
 //			},
 //		}
@@ -53,13 +52,13 @@ type A2APublicationRepositoryMock struct {
 	FindDueFunc func(ctx context.Context, now time.Time, limit int) ([]models.A2APublication, error)
 
 	// MarkAttemptFailedFunc mocks the MarkAttemptFailed method.
-	MarkAttemptFailedFunc func(ctx context.Context, id uuid.UUID, lastErr string, nextAttemptAt time.Time) error
+	MarkAttemptFailedFunc func(ctx context.Context, read models.A2APublication, lastErr string, nextAttemptAt time.Time) error
 
 	// MarkFailedFunc mocks the MarkFailed method.
-	MarkFailedFunc func(ctx context.Context, id uuid.UUID, lastErr string) error
+	MarkFailedFunc func(ctx context.Context, read models.A2APublication, lastErr string) error
 
 	// MarkPublishedFunc mocks the MarkPublished method.
-	MarkPublishedFunc func(ctx context.Context, id uuid.UUID) error
+	MarkPublishedFunc func(ctx context.Context, read models.A2APublication) error
 
 	// calls tracks calls to the methods.
 	calls struct {
@@ -94,8 +93,8 @@ type A2APublicationRepositoryMock struct {
 		MarkAttemptFailed []struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
-			// ID is the id argument value.
-			ID uuid.UUID
+			// Read is the read argument value.
+			Read models.A2APublication
 			// LastErr is the lastErr argument value.
 			LastErr string
 			// NextAttemptAt is the nextAttemptAt argument value.
@@ -105,8 +104,8 @@ type A2APublicationRepositoryMock struct {
 		MarkFailed []struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
-			// ID is the id argument value.
-			ID uuid.UUID
+			// Read is the read argument value.
+			Read models.A2APublication
 			// LastErr is the lastErr argument value.
 			LastErr string
 		}
@@ -114,8 +113,8 @@ type A2APublicationRepositoryMock struct {
 		MarkPublished []struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
-			// ID is the id argument value.
-			ID uuid.UUID
+			// Read is the read argument value.
+			Read models.A2APublication
 		}
 	}
 	lockDeleteForAgent    sync.RWMutex
@@ -247,25 +246,25 @@ func (mock *A2APublicationRepositoryMock) FindDueCalls() []struct {
 }
 
 // MarkAttemptFailed calls MarkAttemptFailedFunc.
-func (mock *A2APublicationRepositoryMock) MarkAttemptFailed(ctx context.Context, id uuid.UUID, lastErr string, nextAttemptAt time.Time) error {
+func (mock *A2APublicationRepositoryMock) MarkAttemptFailed(ctx context.Context, read models.A2APublication, lastErr string, nextAttemptAt time.Time) error {
 	if mock.MarkAttemptFailedFunc == nil {
 		panic("A2APublicationRepositoryMock.MarkAttemptFailedFunc: method is nil but A2APublicationRepository.MarkAttemptFailed was just called")
 	}
 	callInfo := struct {
 		Ctx           context.Context
-		ID            uuid.UUID
+		Read          models.A2APublication
 		LastErr       string
 		NextAttemptAt time.Time
 	}{
 		Ctx:           ctx,
-		ID:            id,
+		Read:          read,
 		LastErr:       lastErr,
 		NextAttemptAt: nextAttemptAt,
 	}
 	mock.lockMarkAttemptFailed.Lock()
 	mock.calls.MarkAttemptFailed = append(mock.calls.MarkAttemptFailed, callInfo)
 	mock.lockMarkAttemptFailed.Unlock()
-	return mock.MarkAttemptFailedFunc(ctx, id, lastErr, nextAttemptAt)
+	return mock.MarkAttemptFailedFunc(ctx, read, lastErr, nextAttemptAt)
 }
 
 // MarkAttemptFailedCalls gets all the calls that were made to MarkAttemptFailed.
@@ -274,13 +273,13 @@ func (mock *A2APublicationRepositoryMock) MarkAttemptFailed(ctx context.Context,
 //	len(mockedA2APublicationRepository.MarkAttemptFailedCalls())
 func (mock *A2APublicationRepositoryMock) MarkAttemptFailedCalls() []struct {
 	Ctx           context.Context
-	ID            uuid.UUID
+	Read          models.A2APublication
 	LastErr       string
 	NextAttemptAt time.Time
 } {
 	var calls []struct {
 		Ctx           context.Context
-		ID            uuid.UUID
+		Read          models.A2APublication
 		LastErr       string
 		NextAttemptAt time.Time
 	}
@@ -291,23 +290,23 @@ func (mock *A2APublicationRepositoryMock) MarkAttemptFailedCalls() []struct {
 }
 
 // MarkFailed calls MarkFailedFunc.
-func (mock *A2APublicationRepositoryMock) MarkFailed(ctx context.Context, id uuid.UUID, lastErr string) error {
+func (mock *A2APublicationRepositoryMock) MarkFailed(ctx context.Context, read models.A2APublication, lastErr string) error {
 	if mock.MarkFailedFunc == nil {
 		panic("A2APublicationRepositoryMock.MarkFailedFunc: method is nil but A2APublicationRepository.MarkFailed was just called")
 	}
 	callInfo := struct {
 		Ctx     context.Context
-		ID      uuid.UUID
+		Read    models.A2APublication
 		LastErr string
 	}{
 		Ctx:     ctx,
-		ID:      id,
+		Read:    read,
 		LastErr: lastErr,
 	}
 	mock.lockMarkFailed.Lock()
 	mock.calls.MarkFailed = append(mock.calls.MarkFailed, callInfo)
 	mock.lockMarkFailed.Unlock()
-	return mock.MarkFailedFunc(ctx, id, lastErr)
+	return mock.MarkFailedFunc(ctx, read, lastErr)
 }
 
 // MarkFailedCalls gets all the calls that were made to MarkFailed.
@@ -316,12 +315,12 @@ func (mock *A2APublicationRepositoryMock) MarkFailed(ctx context.Context, id uui
 //	len(mockedA2APublicationRepository.MarkFailedCalls())
 func (mock *A2APublicationRepositoryMock) MarkFailedCalls() []struct {
 	Ctx     context.Context
-	ID      uuid.UUID
+	Read    models.A2APublication
 	LastErr string
 } {
 	var calls []struct {
 		Ctx     context.Context
-		ID      uuid.UUID
+		Read    models.A2APublication
 		LastErr string
 	}
 	mock.lockMarkFailed.RLock()
@@ -331,21 +330,21 @@ func (mock *A2APublicationRepositoryMock) MarkFailedCalls() []struct {
 }
 
 // MarkPublished calls MarkPublishedFunc.
-func (mock *A2APublicationRepositoryMock) MarkPublished(ctx context.Context, id uuid.UUID) error {
+func (mock *A2APublicationRepositoryMock) MarkPublished(ctx context.Context, read models.A2APublication) error {
 	if mock.MarkPublishedFunc == nil {
 		panic("A2APublicationRepositoryMock.MarkPublishedFunc: method is nil but A2APublicationRepository.MarkPublished was just called")
 	}
 	callInfo := struct {
-		Ctx context.Context
-		ID  uuid.UUID
+		Ctx  context.Context
+		Read models.A2APublication
 	}{
-		Ctx: ctx,
-		ID:  id,
+		Ctx:  ctx,
+		Read: read,
 	}
 	mock.lockMarkPublished.Lock()
 	mock.calls.MarkPublished = append(mock.calls.MarkPublished, callInfo)
 	mock.lockMarkPublished.Unlock()
-	return mock.MarkPublishedFunc(ctx, id)
+	return mock.MarkPublishedFunc(ctx, read)
 }
 
 // MarkPublishedCalls gets all the calls that were made to MarkPublished.
@@ -353,12 +352,12 @@ func (mock *A2APublicationRepositoryMock) MarkPublished(ctx context.Context, id 
 //
 //	len(mockedA2APublicationRepository.MarkPublishedCalls())
 func (mock *A2APublicationRepositoryMock) MarkPublishedCalls() []struct {
-	Ctx context.Context
-	ID  uuid.UUID
+	Ctx  context.Context
+	Read models.A2APublication
 } {
 	var calls []struct {
-		Ctx context.Context
-		ID  uuid.UUID
+		Ctx  context.Context
+		Read models.A2APublication
 	}
 	mock.lockMarkPublished.RLock()
 	calls = mock.calls.MarkPublished

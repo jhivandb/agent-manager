@@ -181,10 +181,22 @@ func (s *a2aPublicationReconcilerService) publishOne(ctx context.Context, pub mo
 		s.recordAttemptFailure(ctx, pub, err)
 		return
 	}
-	if err := s.pubRepo.MarkPublished(ctx, pub.ID); err != nil {
+	err := s.pubRepo.MarkPublished(ctx, pub)
+	switch {
+	case errors.Is(err, repositories.ErrA2APublicationSuperseded):
+		s.logSuperseded(pub)
+	case err != nil:
 		s.logger.Error("Published A2A agent but failed to mark the queue row",
 			"agentName", pub.AgentName, "environment", pub.EnvironmentName, "error", err)
 	}
+}
+
+// logSuperseded notes an attempt whose row was re-enqueued while it ran. The
+// row stays pending, so the next tick publishes the newer config; nothing is
+// wrong.
+func (s *a2aPublicationReconcilerService) logSuperseded(pub models.A2APublication) {
+	s.logger.Info("A2A publication was re-enqueued during the attempt; leaving it pending for the next tick",
+		"agentName", pub.AgentName, "environment", pub.EnvironmentName)
 }
 
 // recordAttemptFailure retries within the budget and gives up past it.
@@ -193,7 +205,11 @@ func (s *a2aPublicationReconcilerService) recordAttemptFailure(ctx context.Conte
 		s.logger.Error("A2A agent never reached its gateway within the attempt budget",
 			"agentName", pub.AgentName, "environment", pub.EnvironmentName,
 			"attempts", pub.AttemptCount+1, "error", cause)
-		if err := s.pubRepo.MarkFailed(ctx, pub.ID, cause.Error()); err != nil {
+		err := s.pubRepo.MarkFailed(ctx, pub, cause.Error())
+		switch {
+		case errors.Is(err, repositories.ErrA2APublicationSuperseded):
+			s.logSuperseded(pub)
+		case err != nil:
 			s.logger.Error("Failed to mark A2A publication failed", "error", err)
 		}
 		return
@@ -201,7 +217,11 @@ func (s *a2aPublicationReconcilerService) recordAttemptFailure(ctx context.Conte
 	s.logger.Debug("A2A agent not publishable yet, will retry",
 		"agentName", pub.AgentName, "environment", pub.EnvironmentName,
 		"attempt", pub.AttemptCount+1, "reason", cause)
-	if err := s.pubRepo.MarkAttemptFailed(ctx, pub.ID, cause.Error(), time.Now().Add(a2aReconcilerRetryIn)); err != nil {
+	err := s.pubRepo.MarkAttemptFailed(ctx, pub, cause.Error(), time.Now().Add(a2aReconcilerRetryIn))
+	switch {
+	case errors.Is(err, repositories.ErrA2APublicationSuperseded):
+		s.logSuperseded(pub)
+	case err != nil:
 		s.logger.Error("Failed to schedule A2A publication retry", "error", err)
 	}
 }

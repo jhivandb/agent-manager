@@ -18,14 +18,19 @@ package repositories
 
 import (
 	"context"
+	"errors"
 	"time"
 
-	"github.com/google/uuid"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
 	"github.com/wso2/agent-manager/agent-manager-service/models"
 )
+
+// ErrA2APublicationSuperseded means the row changed after the caller read it —
+// a newer Enqueue reset it — so the caller's outcome belongs to a publication
+// that is no longer current and was not recorded.
+var ErrA2APublicationSuperseded = errors.New("a2a publication was re-enqueued since it was read")
 
 // A2APublicationRepository is the queue of outstanding A2A gateway publications.
 //
@@ -41,14 +46,19 @@ type A2APublicationRepository interface {
 	// first, capped at limit.
 	FindDue(ctx context.Context, now time.Time, limit int) ([]models.A2APublication, error)
 
-	MarkPublished(ctx context.Context, id uuid.UUID) error
+	// The Mark* methods record the outcome of an attempt on the row as FindDue
+	// returned it. Enqueue always moves updated_at, so a row whose updated_at no
+	// longer matches was re-enqueued mid-attempt; it is left pending for the next
+	// tick and ErrA2APublicationSuperseded is returned.
+
+	MarkPublished(ctx context.Context, read models.A2APublication) error
 
 	// MarkAttemptFailed records a retryable failure and schedules the next try.
-	MarkAttemptFailed(ctx context.Context, id uuid.UUID, lastErr string, nextAttemptAt time.Time) error
+	MarkAttemptFailed(ctx context.Context, read models.A2APublication, lastErr string, nextAttemptAt time.Time) error
 
 	// MarkFailed ends the retry cycle. The row is kept as the record of an agent
 	// that never reached its gateway.
-	MarkFailed(ctx context.Context, id uuid.UUID, lastErr string) error
+	MarkFailed(ctx context.Context, read models.A2APublication, lastErr string) error
 
 	// DeleteForAgent removes every environment's row for a deleted agent.
 	DeleteForAgent(ctx context.Context, ouID, projectName, agentName string) error
@@ -64,7 +74,9 @@ func NewA2APublicationRepository(db *gorm.DB) A2APublicationRepository {
 }
 
 func (r *a2aPublicationRepository) Enqueue(ctx context.Context, pub *models.A2APublication) error {
-	now := time.Now()
+	// Postgres keeps microseconds; matching that here keeps pub.UpdatedAt equal
+	// to the stored value, which the Mark* methods compare against.
+	now := time.Now().Truncate(time.Microsecond)
 	pub.Status = models.A2APublicationStatusPending
 	pub.AttemptCount = 0
 	pub.LastError = ""
@@ -99,38 +111,43 @@ func (r *a2aPublicationRepository) FindDue(ctx context.Context, now time.Time, l
 	return due, nil
 }
 
-func (r *a2aPublicationRepository) MarkPublished(ctx context.Context, id uuid.UUID) error {
-	return r.db.WithContext(ctx).Model(&models.A2APublication{}).
-		Where("id = ?", id).
-		Updates(map[string]interface{}{
-			"status":          models.A2APublicationStatusPublished,
-			"last_error":      "",
-			"next_attempt_at": nil,
-			"updated_at":      time.Now(),
-		}).Error
+func (r *a2aPublicationRepository) MarkPublished(ctx context.Context, read models.A2APublication) error {
+	return r.updateIfUnchanged(ctx, read, map[string]interface{}{
+		"status":          models.A2APublicationStatusPublished,
+		"last_error":      "",
+		"next_attempt_at": nil,
+	})
 }
 
-func (r *a2aPublicationRepository) MarkAttemptFailed(ctx context.Context, id uuid.UUID, lastErr string, nextAttemptAt time.Time) error {
-	return r.db.WithContext(ctx).Model(&models.A2APublication{}).
-		Where("id = ?", id).
-		Updates(map[string]interface{}{
-			"attempt_count":   gorm.Expr("attempt_count + 1"),
-			"last_error":      lastErr,
-			"next_attempt_at": nextAttemptAt,
-			"updated_at":      time.Now(),
-		}).Error
+func (r *a2aPublicationRepository) MarkAttemptFailed(ctx context.Context, read models.A2APublication, lastErr string, nextAttemptAt time.Time) error {
+	return r.updateIfUnchanged(ctx, read, map[string]interface{}{
+		"attempt_count":   gorm.Expr("attempt_count + 1"),
+		"last_error":      lastErr,
+		"next_attempt_at": nextAttemptAt,
+	})
 }
 
-func (r *a2aPublicationRepository) MarkFailed(ctx context.Context, id uuid.UUID, lastErr string) error {
-	return r.db.WithContext(ctx).Model(&models.A2APublication{}).
-		Where("id = ?", id).
-		Updates(map[string]interface{}{
-			"status":          models.A2APublicationStatusFailed,
-			"attempt_count":   gorm.Expr("attempt_count + 1"),
-			"last_error":      lastErr,
-			"next_attempt_at": nil,
-			"updated_at":      time.Now(),
-		}).Error
+func (r *a2aPublicationRepository) MarkFailed(ctx context.Context, read models.A2APublication, lastErr string) error {
+	return r.updateIfUnchanged(ctx, read, map[string]interface{}{
+		"status":          models.A2APublicationStatusFailed,
+		"attempt_count":   gorm.Expr("attempt_count + 1"),
+		"last_error":      lastErr,
+		"next_attempt_at": nil,
+	})
+}
+
+func (r *a2aPublicationRepository) updateIfUnchanged(ctx context.Context, read models.A2APublication, updates map[string]interface{}) error {
+	updates["updated_at"] = time.Now()
+	result := r.db.WithContext(ctx).Model(&models.A2APublication{}).
+		Where("id = ? AND updated_at = ?", read.ID, read.UpdatedAt).
+		Updates(updates)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return ErrA2APublicationSuperseded
+	}
+	return nil
 }
 
 func (r *a2aPublicationRepository) DeleteForAgent(ctx context.Context, ouID, projectName, agentName string) error {
