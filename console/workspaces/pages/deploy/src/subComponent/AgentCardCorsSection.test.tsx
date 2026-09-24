@@ -43,6 +43,16 @@ describe("agent card CORS draft", () => {
     });
   });
 
+  it("sends a typed \"*\" origin as a wildcard without credentials", () => {
+    const draft = {
+      ...cardDraftFromConfig(undefined), mode: "custom" as const, enabled: true, allowAll: false,
+      origins: ["https://a.example", "*"], allowCredentials: true,
+    };
+    expect(cardDraftToPayload(draft)).toEqual({
+      inherit: false, enabled: true, allowOrigin: ["*"], allowHeaders: ["Content-Type"], allowCredentials: false,
+    });
+  });
+
   it("is invalid when custom, enabled and no origins are listed", () => {
     const draft = { ...cardDraftFromConfig(undefined), mode: "custom" as const, enabled: true, allowAll: false, origins: [] };
     expect(isCardDraftInvalid(draft)).toBe(true);

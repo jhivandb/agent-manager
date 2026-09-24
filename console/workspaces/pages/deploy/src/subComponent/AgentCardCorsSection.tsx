@@ -58,14 +58,21 @@ export function cardDraftFromConfig(cfg?: AgentCardCorsConfig): AgentCardCorsDra
   };
 }
 
+// A "*" typed into the origins list means the same as "Allow all origins", and a
+// wildcard origin cannot be combined with credentials.
+function hasWildcardOrigin(d: AgentCardCorsDraft): boolean {
+  return d.allowAll || d.origins.includes("*");
+}
+
 export function cardDraftToPayload(d: AgentCardCorsDraft): AgentCardCorsConfig {
   if (d.mode === "inherit") return { inherit: true };
+  const wildcard = hasWildcardOrigin(d);
   return {
     inherit: false,
     enabled: d.enabled,
-    allowOrigin: d.allowAll ? ["*"] : d.origins,
+    allowOrigin: wildcard ? ["*"] : d.origins,
     allowHeaders: d.headers,
-    allowCredentials: d.allowAll ? false : d.allowCredentials,
+    allowCredentials: wildcard ? false : d.allowCredentials,
   };
 }
 
@@ -160,7 +167,7 @@ export const AgentCardCorsSection = ({ draft, onChange, disabled }: AgentCardCor
                     control={
                       <Checkbox
                         checked={draft.allowCredentials}
-                        disabled={disabled || draft.allowAll}
+                        disabled={disabled || hasWildcardOrigin(draft)}
                         onChange={(_, allowCredentials) => update({ allowCredentials })}
                       />
                     }
