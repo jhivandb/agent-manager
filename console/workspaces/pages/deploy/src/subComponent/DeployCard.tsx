@@ -417,7 +417,6 @@ export function DeployCard(props: DeployCardProps) {
   });
 
   const isApiAgent = agent?.agentType?.type === "agent-api";
-  const isA2AAgent = agent?.agentType?.subType === "a2a-agent";
   const agentLanguage = buildpackLanguage(agent);
   const isPythonBuildpack = agentLanguage === "python";
   const isBallerinaBuildpack = agentLanguage === "ballerina";
@@ -451,9 +450,6 @@ export function DeployCard(props: DeployCardProps) {
       : authMode === "apikey"
         ? "API key"
         : "None";
-  // Without auth, the endpoint is open to anyone who can reach the gateway, and the extended
-  // Agent Card (which A2A clients rely on to discover richer capabilities) always 401s.
-  const a2aOpenEndpoint = isA2AAgent && authMode === "none";
 
   const corsEnabled = envConfig?.corsConfig?.enabled ?? false;
   const corsOrigins = envConfig?.corsConfig?.allowOrigin ?? [];
@@ -702,18 +698,6 @@ export function DeployCard(props: DeployCardProps) {
                         />
                       </Tooltip>
                     </Box>
-                  )}
-
-                  {a2aOpenEndpoint && (
-                    <Tooltip title="This agent can be called by anyone who can reach the gateway, and the extended Agent Card (GetExtendedAgentCard) will always return 401.">
-                      <Chip
-                        size="small"
-                        label="Open to anyone"
-                        color="warning"
-                        variant="outlined"
-                        sx={{ height: 18, fontSize: "0.65rem", cursor: "default" }}
-                      />
-                    </Tooltip>
                   )}
 
                   {/* Endpoint Authentication overview */}
