@@ -6,11 +6,14 @@ the executor's job is to publish task events. The events are the same either
 way: the SDK renders them as a single ``Task`` for a blocking call, or as an
 SSE stream for a streaming one.
 
-Two skills are implemented, and which one runs is chosen by the caller through
-``message.metadata.skill`` (the card advertises both):
+Two skills are implemented (the card advertises both):
 
   * ``summarize-notes`` - streams a short summary as a text artifact.
   * ``extract-action-items`` - returns action items as a JSON data artifact.
+
+A caller picks one with ``message.metadata.skill``, or by starting the text
+with the skill's prefix - ``Summarize:`` or ``Extract action items:`` - which
+is the form the card's examples use. Neither means ``summarize-notes``.
 """
 
 from __future__ import annotations
@@ -48,8 +51,15 @@ ACTION_ITEMS_PROMPT = (
     "You extract action items from meeting notes. Reply with JSON only, in "
     'exactly this shape: {"action_items": [{"owner": "...", "task": "...", '
     '"due": "..."}]}. Use an empty string for anything the notes do not say. '
-    "Return an empty list when the notes contain no action items."
+    "The owner is the person or team who has to do the task, not someone "
+    "who is waiting on it. Return an empty list when the notes contain no "
+    "action items."
 )
+
+TEXT_PREFIXES = {
+    SKILL_SUMMARIZE: "summarize:",
+    SKILL_ACTION_ITEMS: "extract action items:",
+}
 
 _client: AsyncOpenAI | None = None
 
@@ -97,7 +107,7 @@ async def stream_summary(notes: str, on_chunk: Callable[[str], Awaitable[None]])
             await on_chunk(pending)
             pending = ""
     if pending:
-        await on_chunk(pending.strip())
+        await on_chunk(pending.rstrip())
     return summary.strip()
 
 
@@ -120,13 +130,35 @@ async def extract_action_items(notes: str) -> dict[str, Any]:
     return parsed
 
 
-def requested_skill(context: RequestContext) -> str:
-    """Which skill the caller asked for. Absent metadata means ``summarize``."""
+class UnknownSkillError(ValueError):
+    pass
+
+
+def metadata_skill(context: RequestContext) -> str | None:
     message = context.message
     if message is None or not message.HasField("metadata"):
-        return SKILL_SUMMARIZE
-    skill = MessageToDict(message.metadata).get("skill")
-    return skill if skill in (SKILL_SUMMARIZE, SKILL_ACTION_ITEMS) else SKILL_SUMMARIZE
+        return None
+    return MessageToDict(message.metadata).get("skill")
+
+
+def route(context: RequestContext, text: str) -> tuple[str, str]:
+    """Pick the skill and the notes it runs on.
+
+    An explicit ``metadata.skill`` wins, and naming a skill this agent does not
+    have is an error rather than a silent summary: the caller asked for
+    something specific and would otherwise get an answer to a different
+    question. A text prefix is stripped so the model sees only the notes.
+    """
+    skill = metadata_skill(context)
+    if skill is not None:
+        if skill not in TEXT_PREFIXES:
+            raise UnknownSkillError(skill)
+        return skill, text
+
+    for skill, prefix in TEXT_PREFIXES.items():
+        if text.lower().startswith(prefix):
+            return skill, text[len(prefix):].strip()
+    return SKILL_SUMMARIZE, text
 
 
 class NotesAgentExecutor(AgentExecutor):
@@ -138,7 +170,20 @@ class NotesAgentExecutor(AgentExecutor):
         await event_queue.enqueue_event(new_task_from_user_message(context.message))
         updater = TaskUpdater(event_queue, context.task_id, context.context_id)
 
-        notes = context.get_user_input().strip()
+        try:
+            skill, notes = route(context, context.get_user_input().strip())
+        except UnknownSkillError as exc:
+            await updater.reject(
+                updater.new_agent_message(
+                    [
+                        new_text_part(
+                            f"Unknown skill {str(exc)!r}. This agent has: "
+                            f"{', '.join(TEXT_PREFIXES)}."
+                        )
+                    ]
+                )
+            )
+            return
         if not notes:
             await updater.reject(
                 updater.new_agent_message(
@@ -149,7 +194,7 @@ class NotesAgentExecutor(AgentExecutor):
 
         await updater.start_work()
         try:
-            if requested_skill(context) == SKILL_ACTION_ITEMS:
+            if skill == SKILL_ACTION_ITEMS:
                 await self._extract_action_items(updater, notes)
             else:
                 await self._summarize(updater, notes)

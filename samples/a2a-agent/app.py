@@ -51,8 +51,12 @@ class DefaultProtocolVersion:
 
     A2A 1.0 clients send the header, and a request without it is read as 0.3 -
     which this agent does not serve. Clients that talk to the agent directly
-    may omit it, and a proxy in front of the agent may drop it, so the version
-    this agent serves is applied here rather than left to the caller.
+    may omit it, so the version this agent serves is applied here rather than
+    left to the caller.
+
+    This only helps direct calls, such as a local run. Behind AMP's gateway a
+    request without the header is rejected with a 400 before it reaches the
+    agent, so deployed clients must send it themselves.
     """
 
     def __init__(self, app: Callable) -> None:
@@ -114,7 +118,11 @@ def build_agent_card() -> AgentCard:
             AgentSkill(
                 id=SKILL_SUMMARIZE,
                 name="Summarize notes",
-                description="Condenses meeting notes into a short summary.",
+                description=(
+                    "Condenses meeting notes into a short summary. Select it "
+                    'with message metadata {"skill": "summarize-notes"} or a '
+                    '"Summarize:" text prefix; it is also the default.'
+                ),
                 tags=["summarize", "notes"],
                 examples=[SUMMARY_EXAMPLE],
             ),
@@ -123,7 +131,9 @@ def build_agent_card() -> AgentCard:
                 name="Extract action items",
                 description=(
                     "Pulls the action items out of meeting notes, with owner and "
-                    "due date where the notes give them, as JSON."
+                    "due date where the notes give them, as JSON. Select it with "
+                    'message metadata {"skill": "extract-action-items"} or an '
+                    '"Extract action items:" text prefix.'
                 ),
                 tags=["extract", "action-items", "json"],
                 examples=[ACTION_ITEMS_EXAMPLE],

@@ -183,7 +183,10 @@ curl -X POST "https://<gateway-url>/<agent-name>/rpc" \
 ```
 
 The reply is a `Task` in a terminal state carrying the `summary.txt` artifact.
-Ask for the other skill by naming it in the message metadata:
+Ask for the other skill by naming it in the message metadata, or by starting the
+text with `Extract action items:` (`Summarize:` works the same way for the
+default skill). A `metadata.skill` the agent does not have is rejected rather
+than answered with a summary:
 
 ```json
 {
