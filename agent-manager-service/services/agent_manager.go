@@ -3225,6 +3225,15 @@ func (s *agentManagerService) DeployAgent(ctx context.Context, ouID string, proj
 		}
 	}
 
+	isA2AAgent := utils.IsA2AAgentSubType(agent.Type.SubType)
+	if isA2AAgent {
+		apiCfg = withA2AVersionHeader(apiCfg)
+	}
+	cardCORSOverride := resolveCardCORSOverride(existingConfig, req.AgentCardCorsConfig)
+	if err := validateCardCORS(isA2AAgent, req.AgentCardCorsConfig, cardCORSOverride); err != nil {
+		return "", err
+	}
+
 	var existingInstrumentationVersion *string
 	if existingConfig != nil {
 		existingInstrumentationVersion = existingConfig.InstrumentationVersion
@@ -3249,7 +3258,6 @@ func (s *agentManagerService) DeployAgent(ctx context.Context, ouID string, proj
 	componentDeployConfig := client.ComponentDeploymentConfigRequest{}
 	requiresComponentConfig := false
 	isAPIAgent := agent.Type.Type == string(utils.AgentTypeAPI)
-	isA2AAgent := utils.IsA2AAgentSubType(agent.Type.SubType)
 
 	// Build trait environment configs for the release binding.
 	// Deploy sets the artifactId on the Component CR trait parameters (via AttachTraits),
@@ -3429,6 +3437,7 @@ func (s *agentManagerService) DeployAgent(ctx context.Context, ouID string, proj
 		OAuthForwardToken:         apiCfg.OAuthForwardToken,
 		ResilienceTimeoutSeconds:  deployResilienceTimeoutSeconds,
 	}
+	agentConfig.SetCardCORSOverride(cardCORSOverride)
 	if configErr := s.agentConfigRepo.Upsert(ctx, agentConfig); configErr != nil {
 		s.logger.Error("Failed to persist agent config after deploy", "agentName", agentName, "environment", lowestEnv, "error", configErr)
 		return "", fmt.Errorf("agent deployed to %q but failed to persist its config (retry to reconcile): %w", lowestEnv, configErr)
@@ -4473,6 +4482,14 @@ func (s *agentManagerService) PromoteAgent(ctx context.Context, ouID string, pro
 		// where set; any unset field falls back to the source env's values.
 		tracingCfg := resolveTracingConfig(existingConfig, req.EnableAutoInstrumentation, false)
 		apiCfg := resolveAPIConfig(existingConfig, req.EnableApiKeySecurity, req.CorsConfig, req.EnableOAuthSecurity, req.OauthConfig, false)
+		isA2AAgent := utils.IsA2AAgentSubType(agent.Type.SubType)
+		if isA2AAgent {
+			apiCfg = withA2AVersionHeader(apiCfg)
+		}
+		cardCORSOverride := resolveCardCORSOverride(existingConfig, req.AgentCardCorsConfig)
+		if err := validateCardCORS(isA2AAgent, req.AgentCardCorsConfig, cardCORSOverride); err != nil {
+			return err
+		}
 		resilienceTimeoutSeconds, err := resolveResilienceTimeoutSeconds(existingConfig, req.ResilienceTimeoutSeconds, false)
 		if err != nil {
 			return err
@@ -4515,7 +4532,7 @@ func (s *agentManagerService) PromoteAgent(ctx context.Context, ouID string, pro
 		if resolveErr != nil {
 			return resolveErr
 		}
-		traitEnvConfigs = buildTraitEnvConfigs(agentName, policies, targetArtifactID, resilienceTimeoutSeconds, promotePythonBuildpack, promoteBallerinaBuildpack, tracingCfg.EnableAutoInstrumentation, promoteInstrumentationImage, !utils.IsA2AAgentSubType(agent.Type.SubType))
+		traitEnvConfigs = buildTraitEnvConfigs(agentName, policies, targetArtifactID, resilienceTimeoutSeconds, promotePythonBuildpack, promoteBallerinaBuildpack, tracingCfg.EnableAutoInstrumentation, promoteInstrumentationImage, !isA2AAgent)
 		promoteCTConfigs = buildComponentTypeEnvConfigs(targetEnv)
 
 		apiKey, apiKeyErr := s.generateAgentAPIKey(ctx, ouID, projectName, agentName, req.TargetEnvironment)
@@ -4553,6 +4570,7 @@ func (s *agentManagerService) PromoteAgent(ctx context.Context, ouID string, pro
 			OAuthForwardToken:         apiCfg.OAuthForwardToken,
 			ResilienceTimeoutSeconds:  promoteResilienceTimeoutSeconds,
 		}
+		agentConfig.SetCardCORSOverride(cardCORSOverride)
 		if upsertErr := s.agentConfigRepo.Upsert(ctx, agentConfig); upsertErr != nil {
 			s.logger.Error("Failed to persist agent config for target environment", "agentName", agentName, "environment", req.TargetEnvironment, "error", upsertErr)
 			return fmt.Errorf("failed to persist agent config for target environment %q: %w", req.TargetEnvironment, upsertErr)
@@ -4945,6 +4963,14 @@ func (s *agentManagerService) UpdateAgentDeploySettings(ctx context.Context, ouI
 	}
 	tracingCfg := resolveTracingConfig(existingConfig, req.EnableAutoInstrumentation, false)
 	apiCfg := resolveAPIConfig(existingConfig, req.EnableApiKeySecurity, req.CorsConfig, req.EnableOAuthSecurity, req.OauthConfig, false)
+	isA2AAgent := utils.IsA2AAgentSubType(agent.Type.SubType)
+	if isA2AAgent {
+		apiCfg = withA2AVersionHeader(apiCfg)
+	}
+	cardCORSOverride := resolveCardCORSOverride(existingConfig, req.AgentCardCorsConfig)
+	if err := validateCardCORS(isA2AAgent, req.AgentCardCorsConfig, cardCORSOverride); err != nil {
+		return err
+	}
 	resilienceTimeoutSeconds, err := resolveResilienceTimeoutSeconds(existingConfig, req.ResilienceTimeoutSeconds, false)
 	if err != nil {
 		return err
@@ -4986,7 +5012,7 @@ func (s *agentManagerService) UpdateAgentDeploySettings(ctx context.Context, ouI
 	if resolveErr != nil {
 		return resolveErr
 	}
-	traitEnvConfigs := buildTraitEnvConfigs(agentName, policies, artifact.UUID.String(), resilienceTimeoutSeconds, isPythonBuildpack, isBallerinaBuildpack, tracingCfg.EnableAutoInstrumentation, instrumentationImage, !utils.IsA2AAgentSubType(agent.Type.SubType))
+	traitEnvConfigs := buildTraitEnvConfigs(agentName, policies, artifact.UUID.String(), resilienceTimeoutSeconds, isPythonBuildpack, isBallerinaBuildpack, tracingCfg.EnableAutoInstrumentation, instrumentationImage, !isA2AAgent)
 
 	// Apply to the release binding (atomic: trait configs + component-type configs + restartedAt in a single update).
 	settingsCTConfigs := buildComponentTypeEnvConfigs(targetEnv)
@@ -5021,6 +5047,7 @@ func (s *agentManagerService) UpdateAgentDeploySettings(ctx context.Context, ouI
 		OAuthForwardToken:         apiCfg.OAuthForwardToken,
 		ResilienceTimeoutSeconds:  settingsResilienceTimeoutSeconds,
 	}
+	agentConfig.SetCardCORSOverride(cardCORSOverride)
 	if upsertErr := s.agentConfigRepo.Upsert(ctx, agentConfig); upsertErr != nil {
 		s.logger.Error("Failed to persist agent deploy settings", "agentName", agentName, "environment", req.EnvironmentName, "error", upsertErr)
 		return fmt.Errorf("failed to persist agent deploy settings: %w", upsertErr)
