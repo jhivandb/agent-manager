@@ -31,7 +31,6 @@ func a2aInput() A2AAgentDeploymentInput {
 		ArtifactName: "checkout-trip-planner-0192f4c19a7d7c3e",
 		DisplayName:  "Trip Planner",
 		AgentName:    "trip-planner",
-		Vhost:        "agents.example.com",
 		UpstreamURL:  "http://trip-planner.dp-default:9099",
 		Policies: []map[string]interface{}{
 			{"name": "cors", "version": "v1", "params": map[string]interface{}{"allowOrigins": []string{"*"}}},
@@ -97,20 +96,6 @@ func TestBuildA2AAgentDeploymentYAMLRefusesEmptyUpstream(t *testing.T) {
 	_, err := buildA2AAgentDeploymentYAML(in)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "upstream")
-}
-
-// vhost is optional: an environment whose gateway declares none must not emit
-// an empty string, which the gateway would read as a host of "".
-func TestBuildA2AAgentDeploymentYAMLOmitsEmptyVhost(t *testing.T) {
-	in := a2aInput()
-	in.Vhost = ""
-	got, err := buildA2AAgentDeploymentYAML(in)
-	require.NoError(t, err)
-	assert.Nil(t, got.Spec.Vhost)
-
-	out, err := generateA2AAgentDeploymentYAML(in)
-	require.NoError(t, err)
-	assert.NotContains(t, out, "vhost")
 }
 
 // The DB handle uses slashes, which are illegal in a Kubernetes name. The

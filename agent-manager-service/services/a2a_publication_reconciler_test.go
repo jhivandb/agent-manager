@@ -163,8 +163,6 @@ func TestReconcilerPublishesOnceServiceURLIsAvailable(t *testing.T) {
 	require.NoError(t, yaml.Unmarshal(created[0].Deployment.Content, &published))
 	assert.Equal(t, kindA2AAgent, published.Kind)
 	assert.Equal(t, upstream, published.Spec.Upstream.URL)
-	require.NotNil(t, published.Spec.Vhost)
-	assert.Equal(t, "agents.example.com", *published.Spec.Vhost)
 
 	require.Len(t, h.hub.published, 1)
 	evt := h.hub.published[0]

@@ -65,7 +65,7 @@ func TestBroadcastA2AAgentDeletionReachesEveryCandidateGateway(t *testing.T) {
 		assert.Equal(t, eventhub.EventType("agent.deleted"), evt.EventType)
 		var envelope struct {
 			Payload struct {
-				AgentID string `json:"agentId"`
+				AgentID string `json:"proxyId"`
 			} `json:"payload"`
 		}
 		require.NoError(t, json.Unmarshal([]byte(evt.EventData), &envelope))

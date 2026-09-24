@@ -53,7 +53,7 @@ const (
 // A2AAgentDeploymentYAML is the kind: Agent resource agent-manager publishes to
 // the gateway. It is a structural sibling of MCPProxyDeploymentYAML.
 //
-// Two blocks are deliberately absent and must stay absent in M1:
+// Three fields are deliberately absent and must stay absent in M1:
 //
 //   - agentCard. The gateway's default for a proxied card is passthrough WITH
 //     URL rewriting, which is exactly what M1 wants — an un-rewritten card
@@ -63,6 +63,10 @@ const (
 //     default precisely because A2A streaming operations are long-lived.
 //     Writing agent-manager's resilienceTimeoutSeconds here would override that
 //     and sever every stream at the timeout.
+//   - vhost. Clients reach the gateway through the agent's own HTTPRoute (the
+//     a2a-gateway-route trait), which keeps the host they dialled —
+//     <env>-<org>.<ingress host>, per agent environment — so a vhost naming the
+//     gateway's own host would reject every request that route forwards.
 type A2AAgentDeploymentYAML struct {
 	ApiVersion string                 `yaml:"apiVersion" json:"apiVersion"`
 	Kind       string                 `yaml:"kind" json:"kind"`
@@ -75,7 +79,6 @@ type A2AAgentDeploymentSpec struct {
 	DisplayName string      `yaml:"displayName" json:"displayName"`
 	Version     string      `yaml:"version" json:"version"`
 	Context     string      `yaml:"context" json:"context"`
-	Vhost       *string     `yaml:"vhost,omitempty" json:"vhost,omitempty"`
 	Upstream    A2AUpstream `yaml:"upstream" json:"upstream"`
 	A2A         A2AConfig   `yaml:"a2a" json:"a2a"`
 }
@@ -115,8 +118,6 @@ type A2AAgentDeploymentInput struct {
 	DisplayName  string
 	// AgentName is the component name, which becomes the URL context.
 	AgentName string
-	// Vhost is the environment's gateway vhost. Empty means "omit".
-	Vhost string
 	// UpstreamURL comes from the release binding's status. Empty is an error.
 	UpstreamURL string
 	// Policies is the output of buildPolicies — already in the gateway's
@@ -162,11 +163,6 @@ func buildA2AAgentDeploymentYAML(in A2AAgentDeploymentInput) (*A2AAgentDeploymen
 		return nil, fmt.Errorf("refusing to publish agent %q: upstream url is not available yet", in.ArtifactName)
 	}
 
-	var vhost *string
-	if trimmed := strings.TrimSpace(in.Vhost); trimmed != "" {
-		vhost = &trimmed
-	}
-
 	// Non-nil so "no authentication and no CORS" marshals to an empty array
 	// rather than null, matching what buildPolicies guarantees for the trait.
 	policies := in.Policies
@@ -185,7 +181,6 @@ func buildA2AAgentDeploymentYAML(in A2AAgentDeploymentInput) (*A2AAgentDeploymen
 			// (buildAPIConfigurationTraitParameters), so A2A and REST agents
 			// keep consistent URL shapes.
 			Context:  "/" + strings.TrimPrefix(strings.TrimSpace(in.AgentName), "/"),
-			Vhost:    vhost,
 			Upstream: A2AUpstream{URL: upstreamURL},
 			A2A: A2AConfig{
 				ProtocolVersion: a2aProtocolVersion,

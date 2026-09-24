@@ -233,7 +233,6 @@ func (s *a2aPublicationReconcilerService) attemptPublish(ctx context.Context, pu
 		ArtifactName: a2aAgentEnvArtifactName(pub.ProjectName, pub.AgentName, pub.EnvironmentUUID.String()),
 		DisplayName:  pub.AgentName,
 		AgentName:    pub.AgentName,
-		Vhost:        gateway.Vhost,
 		UpstreamURL:  upstreamURL,
 		Policies:     policies,
 	})

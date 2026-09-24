@@ -78,7 +78,7 @@ func TestBroadcastAgentDeploymentEvent(t *testing.T) {
 	var envelope struct {
 		Type    string `json:"type"`
 		Payload struct {
-			AgentID      string    `json:"agentId"`
+			AgentID      string    `json:"proxyId"`
 			DeploymentID string    `json:"deploymentId"`
 			PerformedAt  time.Time `json:"performedAt"`
 		} `json:"payload"`
@@ -107,7 +107,7 @@ func TestBroadcastAgentDeletionEvent(t *testing.T) {
 	var envelope struct {
 		Type    string `json:"type"`
 		Payload struct {
-			AgentID string `json:"agentId"`
+			AgentID string `json:"proxyId"`
 		} `json:"payload"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(evt.EventData), &envelope))
