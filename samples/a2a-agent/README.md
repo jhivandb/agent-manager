@@ -78,20 +78,22 @@ What that means in code:
 | **Language Version** | `3.11` |
 | **Start Command** | `python main.py` |
 | **Port** | `9099` |
-| **Enable auto instrumentation** | **Off** — see the note below |
+| **Enable auto instrumentation** | **On** |
 
-Auto instrumentation has to be off for this agent. AMP's instrumentation init
-container injects its own Python packages onto `PYTHONPATH` and ships
-`protobuf` 7.x, while the A2A SDK requires `protobuf<7` and reads
-`FieldDescriptor.label`, which protobuf 7 removed. With instrumentation on,
-every A2A message fails with JSON-RPC `-32603` and this in the agent's logs:
+Auto instrumentation works with this agent, but only because `requirements.txt`
+pins `a2a-sdk` 1.1.5 or newer. AMP's instrumentation init container injects its
+own Python packages onto `PYTHONPATH`, including `protobuf` 7.x, and SDK
+releases 1.1.2 through 1.1.4 both required `protobuf<7` and read
+`FieldDescriptor.label`, which protobuf 7 removed. An agent on one of those
+fails every A2A message with JSON-RPC `-32603` and this in its logs:
 
 ```text
 a2a/utils/proto_utils.py:217: AttributeError: 'google._upb._message.FieldDescriptor' object has no attribute 'label'
 ```
 
-Turning it off leaves the agent on the protobuf its own build installed. The
-cost is that the OpenAI calls no longer emit traces.
+If you pin an older SDK, turn instrumentation off instead: the agent then runs
+on the protobuf its own build installed, at the cost of the OpenAI calls no
+longer emitting traces.
 
 ### Step 3: Select the agent interface
 
@@ -136,8 +138,7 @@ amctl agent create a2a-notes-agent \
   --language python \
   --language-version 3.11 \
   --run-command "python main.py" \
-  --env-secret OPENAI_API_KEY=<your-openai-key> \
-  --no-auto-instrumentation
+  --env-secret OPENAI_API_KEY=<your-openai-key>
 
 amctl agent build create a2a-notes-agent     # takes a few minutes
 amctl agent deploy a2a-notes-agent           # deploys the newest build
@@ -306,9 +307,11 @@ asyncio.run(main())
   talk to the agent directly may omit it, and a proxy in front of the agent may
   drop it, so `app.py` stamps the version the agent serves when a request
   arrives without one.
-- **`a2a-sdk` is pinned to `1.1.2`.** The sample is written against that
+- **`a2a-sdk` is pinned to `1.1.5`.** The sample is written against that
   generation of the SDK's routing helpers (`create_jsonrpc_routes`,
-  `create_rest_routes`, `create_agent_card_routes`).
+  `create_rest_routes`, `create_agent_card_routes`), and 1.1.5 is the first
+  release that accepts `protobuf` 7.x — the reason auto instrumentation can
+  stay on (see Step 2).
 - **Tasks live in memory.** `InMemoryTaskStore` means a restart forgets task
   history. Swap in the SDK's database task store if you need tasks to survive;
   the sample is about the protocol, not about durable task storage.
@@ -317,10 +320,11 @@ asyncio.run(main())
   pretending to store a webhook. The agent publishes **no extended card**
   either: `extendedAgentCard` is false, and the gateway only serves an extended
   card to a caller whose policy chain authenticated the request.
-- **Observability is off for this agent.** Because auto instrumentation has to be
-  disabled (see Step 2), the OpenAI calls do not emit traces. Point
-  `amp-instrumentation` at the exporter yourself if you want them — see the
-  `manual-instrumentation-agent` sample for that path.
+- **Observability comes from auto instrumentation.** With it on (see Step 2),
+  the OpenAI calls emit traces through AMP's instrumentation. An agent pinned
+  to `a2a-sdk` below 1.1.5 has to give that up; point `amp-instrumentation` at
+  the exporter yourself in that case — see the `manual-instrumentation-agent`
+  sample for that path.
 - **The card the gateway serves is the agent's own body.** As of this writing the
   gateway's passthrough rewrite does not touch A2A 1.0 `supportedInterfaces`
   URLs, so a card fetched through the gateway still advertises the agent's own
