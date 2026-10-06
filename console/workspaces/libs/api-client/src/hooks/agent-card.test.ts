@@ -17,7 +17,8 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
-import { agentCardRefetchInterval } from "./agent-card";
+import { QueryClient } from "@tanstack/react-query";
+import { agentCardRefetchInterval, removeAgentCardFromCache } from "./agent-card";
 import { POLL_INTERVAL } from "../utils";
 
 // The real package drags in oxygen-ui, which cannot load under node.
@@ -33,5 +34,17 @@ describe("agentCardRefetchInterval", () => {
     expect(agentCardRefetchInterval({ status: "fetched", source: "platform", sourceUrl: "", lastError: "" })).toBe(false);
     expect(agentCardRefetchInterval({ status: "failed", source: "platform", sourceUrl: "", lastError: "x" })).toBe(false);
     expect(agentCardRefetchInterval(undefined)).toBe(false);
+  });
+});
+
+describe("removeAgentCardFromCache", () => {
+  it("drops the cached card for that agent and environment only", () => {
+    const qc = new QueryClient();
+    const params = { orgName: "o", projName: "p", agentName: "a", envId: "dev" };
+    qc.setQueryData(["agent-card", "o", "p", "a", "dev"], { status: "fetched" });
+    qc.setQueryData(["agent-card", "o", "p", "a", "prod"], { status: "fetched" });
+    removeAgentCardFromCache(qc, params);
+    expect(qc.getQueryData(["agent-card", "o", "p", "a", "dev"])).toBeUndefined();
+    expect(qc.getQueryData(["agent-card", "o", "p", "a", "prod"])).toBeDefined();
   });
 });

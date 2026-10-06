@@ -129,4 +129,23 @@ describe("EnvAgentCardSection", () => {
       },
     );
   });
+
+  it("survives a malformed card and keeps the source form", () => {
+    mockAgent("a2a-agent");
+    mockCard({
+      data: {
+        source: "external", status: "fetched", sourceUrl: "https://agent.example/.well-known/agent-card.json", lastError: "",
+        card: {
+          name: "Odd", description: {}, version: 3,
+          supportedInterfaces: [null, { url: "https://x/rpc", protocolBinding: {} }, "str"],
+          skills: [null, { name: { x: 1 }, tags: "a" }, { name: "dup" }, { name: "dup", tags: ["t", 5] }],
+        },
+      } as never,
+    });
+    renderSection(true);
+    expect(screen.getByText("Odd")).toBeInTheDocument();
+    expect(screen.getByText("https://x/rpc")).toBeInTheDocument();
+    expect(screen.getAllByText("dup")).toHaveLength(2);
+    expect(screen.getByPlaceholderText(/agent-card\.json/)).toBeInTheDocument();
+  });
 });

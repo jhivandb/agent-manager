@@ -16,7 +16,7 @@
  * under the License.
  */
 
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useAuthHooks } from "@agent-management-platform/auth";
 import type {
   AgentCardPathParams,
@@ -34,6 +34,11 @@ import { POLL_INTERVAL } from "../utils";
 
 const agentCardKey = (p: AgentCardPathParams) =>
   ["agent-card", p.orgName, p.projName, p.agentName, p.envId] as const;
+
+/** Drops the cached card so a removed source does not keep showing its old card. */
+export function removeAgentCardFromCache(queryClient: QueryClient, params: AgentCardPathParams) {
+  queryClient.removeQueries({ queryKey: agentCardKey(params) });
+}
 
 /** Re-poll while a fetch is pending; stop on fetched or failed. */
 export function agentCardRefetchInterval(data: AgentCardResponse | undefined): number | false {
@@ -85,6 +90,6 @@ export function useDeleteAgentCardSource() {
     action: { verb: "remove", target: "agent card source" },
     mutationFn: (params) => deleteAgentCardSource(params, getToken),
     onSuccess: (_d, params) =>
-      queryClient.invalidateQueries({ queryKey: agentCardKey(params) }),
+      removeAgentCardFromCache(queryClient, params),
   });
 }

@@ -38,6 +38,13 @@ const STATUS_CHIP: Record<AgentCardStatus, { label: string; color: "warning" | "
   failed: { label: "Failed", color: "error" },
 };
 
+type Json = Record<string, unknown>;
+
+const isObject = (v: unknown): v is Json => typeof v === "object" && v !== null && !Array.isArray(v);
+const asString = (v: unknown): string | undefined => (typeof v === "string" && v !== "" ? v : undefined);
+const objectsIn = (v: unknown): Json[] => (Array.isArray(v) ? v.filter(isObject) : []);
+const stringsIn = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
+
 const isNotFound = (error: unknown) => (error as { status?: number } | null)?.status === 404;
 
 /** Stored A2A agent card for the selected environment. */
@@ -54,6 +61,8 @@ export function EnvAgentCardSection({
   if (!isA2A) {
     return null;
   }
+  // Card content is third-party: read it as untyped JSON.
+  const cardJson: Json = isObject(card?.card) ? card.card : {};
   const noSource = isError && isNotFound(error);
 
   return (
@@ -104,23 +113,23 @@ export function EnvAgentCardSection({
           )}
           {card.card && (
             <>
-              <Typography variant="subtitle2">{card.card.name}</Typography>
-              {card.card.version && <Typography variant="caption">Version {card.card.version}</Typography>}
-              {card.card.description && <Typography variant="body2" sx={{ mb: 1 }}>{card.card.description}</Typography>}
+              <Typography variant="subtitle2">{asString(cardJson.name)}</Typography>
+              {asString(cardJson.version) && <Typography variant="caption">Version {asString(cardJson.version)}</Typography>}
+              {asString(cardJson.description) && <Typography variant="body2" sx={{ mb: 1 }}>{asString(cardJson.description)}</Typography>}
               <Typography variant="overline">Interfaces</Typography>
-              {card.card.supportedInterfaces.map((iface) => (
-                <Box key={`${iface.protocolBinding ?? ""}-${iface.url}`} display="flex" gap={1} alignItems="center">
-                  {iface.protocolBinding && <Chip size="small" label={iface.protocolBinding} />}
-                  <Typography variant="body2">{iface.url}</Typography>
+              {objectsIn(cardJson.supportedInterfaces).map((iface, i) => (
+                <Box key={`${i}-${asString(iface.url) ?? ""}`} display="flex" gap={1} alignItems="center">
+                  {asString(iface.protocolBinding) && <Chip size="small" label={asString(iface.protocolBinding)} />}
+                  <Typography variant="body2">{asString(iface.url)}</Typography>
                 </Box>
               ))}
               <Typography variant="overline">Skills</Typography>
-              {card.card.skills.map((skill) => (
-                <Box key={skill.id ?? skill.name} sx={{ mb: 0.5 }}>
-                  <Typography variant="body2" fontWeight={600}>{skill.name}</Typography>
-                  {skill.description && <Typography variant="caption">{skill.description}</Typography>}
+              {objectsIn(cardJson.skills).map((skill, i) => (
+                <Box key={`${i}-${asString(skill.id) ?? asString(skill.name) ?? ""}`} sx={{ mb: 0.5 }}>
+                  <Typography variant="body2" fontWeight={600}>{asString(skill.name)}</Typography>
+                  {asString(skill.description) && <Typography variant="caption">{asString(skill.description)}</Typography>}
                   <Box display="flex" gap={0.5} flexWrap="wrap">
-                    {(skill.tags ?? []).map((tag) => <Chip key={tag} size="small" variant="outlined" label={tag} />)}
+                    {stringsIn(skill.tags).map((tag, j) => <Chip key={`${j}-${tag}`} size="small" variant="outlined" label={tag} />)}
                   </Box>
                 </Box>
               ))}
