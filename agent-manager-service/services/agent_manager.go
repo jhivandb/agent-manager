@@ -96,6 +96,7 @@ type agentManagerService struct {
 	agentIdentityInjection    AgentIdentityInjectionService
 	identityClient            thundersvc.IdentityClient
 	a2aPublicationRepo        repositories.A2APublicationRepository
+	a2aCardRepo               repositories.A2AAgentCardRepository
 	deploymentRepo            repositories.DeploymentRepository
 	gatewayEventsService      *GatewayEventsService
 	logger                    *slog.Logger
@@ -118,6 +119,7 @@ func NewAgentManagerService(
 	agentIdentityInjection AgentIdentityInjectionService,
 	identityClient thundersvc.IdentityClient,
 	a2aPublicationRepo repositories.A2APublicationRepository,
+	a2aCardRepo repositories.A2AAgentCardRepository,
 	deploymentRepo repositories.DeploymentRepository,
 	gatewayEventsService *GatewayEventsService,
 	logger *slog.Logger,
@@ -136,6 +138,7 @@ func NewAgentManagerService(
 		agentIdentityInjection:    agentIdentityInjection,
 		identityClient:            identityClient,
 		a2aPublicationRepo:        a2aPublicationRepo,
+		a2aCardRepo:               a2aCardRepo,
 		deploymentRepo:            deploymentRepo,
 		gatewayEventsService:      gatewayEventsService,
 		artifactRepo:              artifactRepo,
@@ -2840,6 +2843,12 @@ func (s *agentManagerService) deleteAgentAPIArtifact(ctx context.Context, ouID, 
 		if pubErr := s.a2aPublicationRepo.DeleteForAgent(ctx, ouID, projectName, agentName); pubErr != nil {
 			s.logger.Warn("Failed to clear A2A publication queue rows for deleted agent",
 				"agentName", agentName, "error", pubErr)
+		}
+	}
+	if s.a2aCardRepo != nil {
+		if cardErr := s.a2aCardRepo.DeleteForAgent(ctx, ouID, projectName, agentName); cardErr != nil {
+			s.logger.Warn("Failed to clear A2A agent card rows for deleted agent",
+				"agentName", agentName, "error", cardErr)
 		}
 	}
 
