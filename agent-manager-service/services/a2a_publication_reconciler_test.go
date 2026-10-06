@@ -61,6 +61,7 @@ type a2aReconcilerHarness struct {
 	gatewayRepo    *repomocks.GatewayRepositoryMock
 	hub            *recordingEventHub
 	pubRepo        *repomocks.A2APublicationRepositoryMock
+	cardRepo       *repomocks.A2AAgentCardRepositoryMock
 	deploymentRepo *repomocks.DeploymentRepositoryMock
 	ocClient       *clientmocks.OpenChoreoClientMock
 }
@@ -79,6 +80,9 @@ func newA2AReconcilerHarness(serviceURL string) *a2aReconcilerHarness {
 			return nil
 		},
 		MarkFailedFunc: func(ctx context.Context, read models.A2APublication, lastErr string) error { return nil },
+	}
+	cardRepo := &repomocks.A2AAgentCardRepositoryMock{
+		EnqueueFunc: func(context.Context, *models.A2AAgentCard) error { return nil },
 	}
 	deploymentRepo := &repomocks.DeploymentRepositoryMock{
 		CreateWithLimitEnforcementFunc: func(deployment *models.Deployment, maxDeployments int) error { return nil },
@@ -108,10 +112,12 @@ func newA2AReconcilerHarness(serviceURL string) *a2aReconcilerHarness {
 		hub:            hub,
 		gatewayRepo:    gatewayRepo,
 		pubRepo:        pubRepo,
+		cardRepo:       cardRepo,
 		deploymentRepo: deploymentRepo,
 		ocClient:       ocClient,
 		svc: &a2aPublicationReconcilerService{
 			pubRepo:         pubRepo,
+			cardRepo:        cardRepo,
 			deploymentRepo:  deploymentRepo,
 			gatewayRepo:     gatewayRepo,
 			agentConfigRepo: agentConfigRepo,
@@ -357,4 +363,52 @@ func TestDriftCheckPagesThroughPublishedRowsAcrossTicks(t *testing.T) {
 	assert.Equal(t, uuid.Nil, cursors[0])
 	assert.Equal(t, page[len(page)-1].ID, cursors[1], "the next tick resumes after the last row checked")
 	assert.Equal(t, uuid.Nil, cursors[2], "a short page wraps the scan back to the start")
+}
+
+// The gateway serves the card only once it has the Agent, so publishing is the card's trigger.
+func TestReconcilerQueuesAPlatformCardFetchOncePublished(t *testing.T) {
+	h := newA2AReconcilerHarness("http://trip-planner.dp-default:9099")
+	pub := pendingPublication()
+
+	h.svc.publishOne(context.Background(), pub)
+
+	queued := h.cardRepo.EnqueueCalls()
+	require.Len(t, queued, 1)
+	got := queued[0].Card
+	assert.Equal(t, pub.OUID, got.OUID)
+	assert.Equal(t, pub.ProjectName, got.ProjectName)
+	assert.Equal(t, pub.AgentName, got.AgentName)
+	assert.Equal(t, pub.EnvironmentName, got.EnvironmentName)
+	assert.Equal(t, models.A2AAgentCardSourcePlatform, got.Source)
+}
+
+// Best effort: the agent is published; a missed card row is recovered by the next deploy or a refresh.
+func TestReconcilerPublishesEvenWhenTheCardQueueFails(t *testing.T) {
+	h := newA2AReconcilerHarness("http://trip-planner.dp-default:9099")
+	h.cardRepo.EnqueueFunc = func(context.Context, *models.A2AAgentCard) error { return assert.AnError }
+
+	h.svc.publishOne(context.Background(), pendingPublication())
+
+	assert.Len(t, h.pubRepo.MarkPublishedCalls(), 1)
+	assert.Empty(t, h.pubRepo.MarkAttemptFailedCalls())
+}
+
+// A publish whose row was superseded is redone next tick; that publish queues the card.
+func TestReconcilerQueuesNoCardForASupersededPublish(t *testing.T) {
+	h := newA2AReconcilerHarness("http://trip-planner.dp-default:9099")
+	h.pubRepo.MarkPublishedFunc = func(context.Context, models.A2APublication, string) error {
+		return repositories.ErrA2APublicationSuperseded
+	}
+
+	h.svc.publishOne(context.Background(), pendingPublication())
+
+	assert.Empty(t, h.cardRepo.EnqueueCalls())
+}
+
+func TestReconcilerQueuesNoCardWhenThePublishFails(t *testing.T) {
+	h := newA2AReconcilerHarness("")
+
+	h.svc.publishOne(context.Background(), pendingPublication())
+
+	assert.Empty(t, h.cardRepo.EnqueueCalls())
 }

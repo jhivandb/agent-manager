@@ -64,6 +64,7 @@ type A2APublicationReconcilerService interface {
 
 type a2aPublicationReconcilerService struct {
 	pubRepo         repositories.A2APublicationRepository
+	cardRepo        repositories.A2AAgentCardRepository
 	deploymentRepo  repositories.DeploymentRepository
 	gatewayRepo     repositories.GatewayRepository
 	agentConfigRepo repositories.AgentConfigRepository
@@ -79,6 +80,7 @@ type a2aPublicationReconcilerService struct {
 // NewA2APublicationReconcilerService creates an A2APublicationReconcilerService.
 func NewA2APublicationReconcilerService(
 	pubRepo repositories.A2APublicationRepository,
+	cardRepo repositories.A2AAgentCardRepository,
 	deploymentRepo repositories.DeploymentRepository,
 	gatewayRepo repositories.GatewayRepository,
 	agentConfigRepo repositories.AgentConfigRepository,
@@ -88,6 +90,7 @@ func NewA2APublicationReconcilerService(
 ) A2APublicationReconcilerService {
 	return &a2aPublicationReconcilerService{
 		pubRepo:         pubRepo,
+		cardRepo:        cardRepo,
 		deploymentRepo:  deploymentRepo,
 		gatewayRepo:     gatewayRepo,
 		agentConfigRepo: agentConfigRepo,
@@ -198,6 +201,23 @@ func (s *a2aPublicationReconcilerService) publishOne(ctx context.Context, pub mo
 		s.logSuperseded(pub)
 	case err != nil:
 		s.logger.Error("Published A2A agent but failed to mark the queue row",
+			"agentName", pub.AgentName, "environment", pub.EnvironmentName, "error", err)
+	default:
+		s.enqueueCardFetch(ctx, pub)
+	}
+}
+
+// enqueueCardFetch queues a fetch of the card the gateway now serves; best effort.
+func (s *a2aPublicationReconcilerService) enqueueCardFetch(ctx context.Context, pub models.A2APublication) {
+	card := &models.A2AAgentCard{
+		OUID:            pub.OUID,
+		ProjectName:     pub.ProjectName,
+		AgentName:       pub.AgentName,
+		EnvironmentName: pub.EnvironmentName,
+		Source:          models.A2AAgentCardSourcePlatform,
+	}
+	if err := s.cardRepo.Enqueue(ctx, card); err != nil {
+		s.logger.Warn("Published A2A agent but failed to queue its card fetch",
 			"agentName", pub.AgentName, "environment", pub.EnvironmentName, "error", err)
 	}
 }
