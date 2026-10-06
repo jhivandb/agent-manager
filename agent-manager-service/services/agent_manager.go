@@ -3882,9 +3882,16 @@ func buildTraitEnvConfigs(agentName string, policies []map[string]interface{}, a
 func (s *agentManagerService) requireEnvTier(
 	ctx context.Context, ouID, envName string,
 ) (*models.EnvironmentResponse, error) {
-	env, err := s.ocClient.GetEnvironment(ctx, ouID, envName)
+	return requireEnvironmentTier(ctx, s.ocClient, s.logger, ouID, envName)
+}
+
+// requireEnvironmentTier is requireEnvTier without the service receiver, shared by other services.
+func requireEnvironmentTier(
+	ctx context.Context, oc client.OpenChoreoClient, logger *slog.Logger, ouID, envName string,
+) (*models.EnvironmentResponse, error) {
+	env, err := oc.GetEnvironment(ctx, ouID, envName)
 	if err != nil {
-		s.logger.Error("Failed to resolve environment for the tier check",
+		logger.Error("Failed to resolve environment for the tier check",
 			"ouID", ouID, "environment", envName, "error", err)
 		return nil, translateEnvironmentError(err)
 	}
