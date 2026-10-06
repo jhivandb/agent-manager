@@ -55,9 +55,27 @@ func NewA2ACardFetcher() A2ACardFetcher {
 func newA2ACardFetcher(timeout time.Duration) *a2aCardFetcher {
 	return &a2aCardFetcher{
 		// Platform URLs resolve to loopback in local setups, which the SSRF guard rejects.
-		plain:   &http.Client{Timeout: timeout},
+		plain:   &http.Client{Timeout: timeout, Transport: plainTransport(), CheckRedirect: sameHostRedirectOnly},
 		guarded: ssrf.NewClient(timeout),
 	}
+}
+
+// plainTransport ignores proxy env so a tenant cannot steer the platform fetch.
+func plainTransport() http.RoundTripper {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.Proxy = nil
+	return t
+}
+
+// sameHostRedirectOnly stops redirects that leave the original scheme and host.
+func sameHostRedirectOnly(req *http.Request, via []*http.Request) error {
+	if len(via) >= 10 {
+		return errors.New("stopped after 10 redirects")
+	}
+	if req.URL.Scheme != via[0].URL.Scheme || req.URL.Host != via[0].URL.Host {
+		return http.ErrUseLastResponse
+	}
+	return nil
 }
 
 func (f *a2aCardFetcher) Fetch(ctx context.Context, url string, guarded bool) (json.RawMessage, error) {

@@ -136,3 +136,21 @@ func (f *fakeA2ACardFetcher) Fetch(ctx context.Context, url string, guarded bool
 	f.calls = append(f.calls, fakeFetchCall{URL: url, Guarded: guarded})
 	return f.FetchFunc(ctx, url, guarded)
 }
+
+func TestA2ACardFetcherPlatformDoesNotFollowRedirectsToOtherHosts(t *testing.T) {
+	var hit atomic.Bool
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hit.Store(true)
+		_, _ = w.Write([]byte(validTestCard))
+	}))
+	t.Cleanup(other.Close)
+	redirector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, other.URL, http.StatusFound)
+	}))
+	t.Cleanup(redirector.Close)
+
+	_, err := newA2ACardFetcher(time.Second).Fetch(context.Background(), redirector.URL+a2aAgentCardPath, false)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "HTTP 302")
+	assert.False(t, hit.Load())
+}

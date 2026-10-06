@@ -73,6 +73,7 @@ func (c *a2aAgentCardController) RefreshAgentCard(w http.ResponseWriter, r *http
 
 func (c *a2aAgentCardController) SetAgentCardSource(w http.ResponseWriter, r *http.Request) {
 	ouID, projName, agentName, envName := agentCardPath(r)
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req spec.SetAgentCardSourceRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		utils.WriteErrorResponse(w, http.StatusBadRequest, "Invalid request body")

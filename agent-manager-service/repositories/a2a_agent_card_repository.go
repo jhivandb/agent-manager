@@ -61,8 +61,8 @@ type A2AAgentCardRepository interface {
 	DeleteForAgentEnv(ctx context.Context, ouID, projectName, agentName, environmentName string) error
 }
 
-// a2aAgentCardClaimLease comfortably outlasts one 5s fetch.
-const a2aAgentCardClaimLease = time.Minute
+// a2aAgentCardClaimLease outlasts a full batch of sequential 5s fetches.
+const a2aAgentCardClaimLease = 5 * time.Minute
 
 type a2aAgentCardRepository struct {
 	db *gorm.DB

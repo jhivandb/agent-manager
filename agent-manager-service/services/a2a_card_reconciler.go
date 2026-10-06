@@ -40,7 +40,7 @@ const (
 	a2aCardBatch        = 50
 	a2aCardBaseBackoff  = 5 * time.Second
 	a2aCardMaxBackoff   = time.Minute
-	// a2aCardAttemptBudget is about 12 minutes of backoff.
+	// a2aCardAttemptBudget is about 10 minutes of backoff.
 	a2aCardAttemptBudget = 14
 )
 
