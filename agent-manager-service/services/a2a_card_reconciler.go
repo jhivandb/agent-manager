@@ -42,6 +42,10 @@ const (
 	a2aCardMaxBackoff   = time.Minute
 	// a2aCardAttemptBudget is about 10 minutes of backoff.
 	a2aCardAttemptBudget = 14
+	// a2aCardLastErrorMaxRunes keeps last_error readable in the console.
+	a2aCardLastErrorMaxRunes = 1024
+	// a2aCardUnrecordableError replaces a cause the store refused to record.
+	a2aCardUnrecordableError = "agent card fetch failed; the error could not be recorded"
 )
 
 // errA2ACardEndpointNotReady means the agent's environment has no public endpoint URL yet.
@@ -138,8 +142,7 @@ func (s *a2aCardReconcilerService) fetchOne(ctx context.Context, row models.A2AA
 	case errors.Is(err, repositories.ErrA2AAgentCardSuperseded):
 		s.logSuperseded(row)
 	case err != nil:
-		s.logger.Error("Fetched A2A agent card but failed to store it",
-			"agentName", row.AgentName, "environment", row.EnvironmentName, "error", err)
+		s.recordAttemptFailure(ctx, row, fmt.Errorf("failed to store agent card: %w", err))
 	}
 }
 
@@ -180,16 +183,12 @@ func (s *a2aCardReconcilerService) platformCardURL(ctx context.Context, row mode
 }
 
 func (s *a2aCardReconcilerService) recordAttemptFailure(ctx context.Context, row models.A2AAgentCard, cause error) {
-	var err error
-	if row.AttemptCount+1 >= a2aCardAttemptBudget {
-		s.logger.Warn("A2A agent card could not be fetched within the attempt budget",
-			"agentName", row.AgentName, "environment", row.EnvironmentName, "error", cause)
-		err = s.cardRepo.MarkFailed(ctx, row, cause.Error())
-	} else {
-		s.logger.Debug("A2A agent card not fetchable yet, will retry",
-			"agentName", row.AgentName, "environment", row.EnvironmentName,
-			"attempt", row.AttemptCount+1, "reason", cause)
-		err = s.cardRepo.MarkAttemptFailed(ctx, row, cause.Error(), time.Now().Add(a2aCardRetryIn(row.AttemptCount)))
+	lastErr := sanitizeA2ACardError(cause.Error())
+	err := s.markAttemptFailed(ctx, row, cause, lastErr)
+	if err != nil && !errors.Is(err, repositories.ErrA2AAgentCardSuperseded) {
+		s.logger.Error("Failed to record A2A agent card attempt; retrying with a fixed message",
+			"agentName", row.AgentName, "error", err)
+		err = s.markAttemptFailed(ctx, row, cause, a2aCardUnrecordableError)
 	}
 	switch {
 	case errors.Is(err, repositories.ErrA2AAgentCardSuperseded):
@@ -197,6 +196,28 @@ func (s *a2aCardReconcilerService) recordAttemptFailure(ctx context.Context, row
 	case err != nil:
 		s.logger.Error("Failed to record A2A agent card attempt", "agentName", row.AgentName, "error", err)
 	}
+}
+
+// markAttemptFailed charges one attempt, failing the row once the budget is spent.
+func (s *a2aCardReconcilerService) markAttemptFailed(ctx context.Context, row models.A2AAgentCard, cause error, lastErr string) error {
+	if row.AttemptCount+1 >= a2aCardAttemptBudget {
+		s.logger.Warn("A2A agent card could not be fetched within the attempt budget",
+			"agentName", row.AgentName, "environment", row.EnvironmentName, "error", cause)
+		return s.cardRepo.MarkFailed(ctx, row, lastErr)
+	}
+	s.logger.Debug("A2A agent card not fetchable yet, will retry",
+		"agentName", row.AgentName, "environment", row.EnvironmentName,
+		"attempt", row.AttemptCount+1, "reason", cause)
+	return s.cardRepo.MarkAttemptFailed(ctx, row, lastErr, time.Now().Add(a2aCardRetryIn(row.AttemptCount)))
+}
+
+// sanitizeA2ACardError makes msg storable in a Postgres TEXT column and bounded in length.
+func sanitizeA2ACardError(msg string) string {
+	msg = strings.ReplaceAll(strings.ToValidUTF8(msg, "\uFFFD"), "\x00", "")
+	if runes := []rune(msg); len(runes) > a2aCardLastErrorMaxRunes {
+		msg = string(runes[:a2aCardLastErrorMaxRunes-1]) + "…"
+	}
+	return msg
 }
 
 func (s *a2aCardReconcilerService) logSuperseded(row models.A2AAgentCard) {

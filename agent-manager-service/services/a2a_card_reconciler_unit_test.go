@@ -19,8 +19,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -221,4 +223,95 @@ func TestA2ACardHashIgnoresKeyOrderAndWhitespace(t *testing.T) {
 	assert.Equal(t, a, b)
 	assert.NotEqual(t, a, c)
 	assert.Len(t, a, 64)
+}
+
+// A card the store rejects (e.g. JSONB refusing \u0000) must charge an attempt, not loop pending.
+func TestCardReconcilerChargesAnAttemptWhenTheCardCannotBeStored(t *testing.T) {
+	h := newCardReconcilerHarness("http://gw.example/a")
+	h.repo.MarkFetchedFunc = func(context.Context, models.A2AAgentCard, json.RawMessage, string, string) error {
+		return errors.New("ERROR: unsupported Unicode escape sequence (SQLSTATE 22P05)")
+	}
+
+	h.svc.fetchOne(context.Background(), pendingCard(models.A2AAgentCardSourcePlatform))
+
+	retries := h.repo.MarkAttemptFailedCalls()
+	require.Len(t, retries, 1)
+	assert.Contains(t, retries[0].LastErr, "failed to store agent card")
+	assert.Contains(t, retries[0].LastErr, "22P05")
+}
+
+func TestCardReconcilerFailsTheRowWhenTheLastCardCannotBeStored(t *testing.T) {
+	h := newCardReconcilerHarness("http://gw.example/a")
+	h.repo.MarkFetchedFunc = func(context.Context, models.A2AAgentCard, json.RawMessage, string, string) error {
+		return errors.New("SQLSTATE 22003")
+	}
+	row := pendingCard(models.A2AAgentCardSourcePlatform)
+	row.AttemptCount = a2aCardAttemptBudget - 1
+
+	h.svc.fetchOne(context.Background(), row)
+
+	require.Len(t, h.repo.MarkFailedCalls(), 1)
+}
+
+func TestCardReconcilerStoresAValidUTF8LastError(t *testing.T) {
+	h := newCardReconcilerHarness("http://gw.example/a")
+	h.fetcher.FetchFunc = func(context.Context, string, bool) (json.RawMessage, error) {
+		return nil, errors.New("dial tcp: lookup \xff\x00host: no such host")
+	}
+
+	h.svc.fetchOne(context.Background(), pendingCard(models.A2AAgentCardSourcePlatform))
+
+	retries := h.repo.MarkAttemptFailedCalls()
+	require.Len(t, retries, 1)
+	assert.True(t, utf8.ValidString(retries[0].LastErr))
+	assert.NotContains(t, retries[0].LastErr, "\x00")
+	assert.Contains(t, retries[0].LastErr, "no such host")
+}
+
+func TestCardReconcilerCapsTheLastErrorLength(t *testing.T) {
+	h := newCardReconcilerHarness("http://gw.example/a")
+	h.fetcher.FetchFunc = func(context.Context, string, bool) (json.RawMessage, error) {
+		return nil, errors.New(strings.Repeat("é", 10*a2aCardLastErrorMaxRunes))
+	}
+
+	h.svc.fetchOne(context.Background(), pendingCard(models.A2AAgentCardSourcePlatform))
+
+	retries := h.repo.MarkAttemptFailedCalls()
+	require.Len(t, retries, 1)
+	assert.LessOrEqual(t, utf8.RuneCountInString(retries[0].LastErr), a2aCardLastErrorMaxRunes)
+	assert.True(t, utf8.ValidString(retries[0].LastErr))
+}
+
+// If recording the error itself fails, a fixed message must still charge the attempt.
+func TestCardReconcilerFallsBackWhenTheErrorCannotBeRecorded(t *testing.T) {
+	h := newCardReconcilerHarness("http://gw.example/a")
+	h.fetcher.FetchFunc = func(context.Context, string, bool) (json.RawMessage, error) {
+		return nil, errors.New("HTTP 503")
+	}
+	h.repo.MarkAttemptFailedFunc = func(_ context.Context, _ models.A2AAgentCard, lastErr string, _ time.Time) error {
+		if lastErr == a2aCardUnrecordableError {
+			return nil
+		}
+		return errors.New("SQLSTATE 22021")
+	}
+
+	h.svc.fetchOne(context.Background(), pendingCard(models.A2AAgentCardSourcePlatform))
+
+	retries := h.repo.MarkAttemptFailedCalls()
+	require.Len(t, retries, 2)
+	assert.Equal(t, a2aCardUnrecordableError, retries[1].LastErr)
+}
+
+func TestCardReconcilerDoesNotRetryTheRecordWhenSuperseded(t *testing.T) {
+	h := newCardReconcilerHarness("http://gw.example/a")
+	h.fetcher.FetchFunc = func(context.Context, string, bool) (json.RawMessage, error) {
+		return nil, errors.New("HTTP 503")
+	}
+	h.repo.MarkAttemptFailedFunc = func(context.Context, models.A2AAgentCard, string, time.Time) error {
+		return repositories.ErrA2AAgentCardSuperseded
+	}
+
+	h.svc.fetchOne(context.Background(), pendingCard(models.A2AAgentCardSourcePlatform))
+
+	assert.Len(t, h.repo.MarkAttemptFailedCalls(), 1)
 }
