@@ -35,6 +35,16 @@ describe("agentCardRefetchInterval", () => {
     expect(agentCardRefetchInterval({ status: "failed", source: "platform", sourceUrl: "", lastError: "x" })).toBe(false);
     expect(agentCardRefetchInterval(undefined)).toBe(false);
   });
+
+  it("stops polling a stale pending card once the row is gone", () => {
+    const stale = { status: "pending", source: "external", sourceUrl: "u", lastError: "" } as const;
+    expect(agentCardRefetchInterval(stale, Object.assign(new Error("nf"), { status: 404 }))).toBe(false);
+  });
+
+  it("keeps polling a pending card through a transient error", () => {
+    const pending = { status: "pending", source: "external", sourceUrl: "u", lastError: "" } as const;
+    expect(agentCardRefetchInterval(pending, Object.assign(new Error("boom"), { status: 503 }))).toBe(POLL_INTERVAL);
+  });
 });
 
 describe("removeAgentCardFromCache", () => {

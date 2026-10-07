@@ -19,6 +19,7 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -77,6 +78,9 @@ func TestA2ACardFetcherRejectsInvalidCards(t *testing.T) {
 		"skills not an array":        `{"name":"n","supportedInterfaces":[{"url":"u"}],"skills":"x"}`,
 		"not json":                   `<html>hi</html>`,
 		"trailing garbage after obj": `{"name":"n","supportedInterfaces":[{"url":"u"}],"skills":[]} x`,
+		"capitalised keys":           `{"Name":"n","SupportedInterfaces":[{"URL":"u"}],"Skills":[]}`,
+		"capitalised interface url":  `{"name":"n","supportedInterfaces":[{"URL":"u"}],"skills":[]}`,
+		"capitalised skills":         `{"name":"n","supportedInterfaces":[{"url":"u"}],"Skills":[]}`,
 	}
 	for name, body := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -167,4 +171,60 @@ func TestA2ACardFetcherPlatformDoesNotFollowRedirectsToOtherHosts(t *testing.T) 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "HTTP 302")
 	assert.False(t, hit.Load())
+}
+
+// The error becomes last_error, which any project reader can see.
+func TestA2ACardFetcherGuardedModeHidesWhyAHostIsRefused(t *testing.T) {
+	f := newA2ACardFetcher(time.Second, "")
+	_, internal := f.Fetch(context.Background(), "https://10.0.0.1/c", true)
+	_, unresolvable := f.Fetch(context.Background(), "https://nope.invalid/c", true)
+
+	require.Error(t, internal)
+	require.Error(t, unresolvable)
+	assert.Equal(t, internal.Error(), unresolvable.Error())
+	assert.NotContains(t, unresolvable.Error(), "lookup")
+}
+
+type recordingTransport struct{ hosts []string }
+
+func (rt *recordingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	rt.hosts = append(rt.hosts, req.URL.Host)
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader(validTestCard)),
+		Request:    req,
+	}, nil
+}
+
+// The pre-check alone is not enough: the guarded client also pins the dial and re-checks redirects.
+func TestA2ACardFetcherSendsEachModeThroughItsOwnClient(t *testing.T) {
+	plain, guarded := &recordingTransport{}, &recordingTransport{}
+	f := &a2aCardFetcher{plain: &http.Client{Transport: plain}, guarded: &http.Client{Transport: guarded}}
+
+	_, err := f.Fetch(context.Background(), "https://93.184.215.14/card", true)
+	require.NoError(t, err)
+	_, err = f.Fetch(context.Background(), "http://gw.example/card", false)
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"93.184.215.14"}, guarded.hosts, "tenant URLs use the guarded client")
+	assert.Equal(t, []string{"gw.example"}, plain.hosts, "platform URLs use the plain client")
+}
+
+func redirectAllowed(t *testing.T, from, to string) bool {
+	t.Helper()
+	origin, err := http.NewRequest(http.MethodGet, from, nil)
+	require.NoError(t, err)
+	next, err := http.NewRequest(http.MethodGet, to, nil)
+	require.NoError(t, err)
+	return sameHostRedirectOnly(next, []*http.Request{origin}) == nil
+}
+
+// Gateways commonly force HTTPS; that must not fail the platform fetch.
+func TestA2ACardFetcherPlatformRedirectPolicy(t *testing.T) {
+	assert.True(t, redirectAllowed(t, "http://gw.example/a", "http://gw.example/b"))
+	assert.True(t, redirectAllowed(t, "http://gw.example/a", "https://gw.example/a"), "same-host upgrade")
+	assert.True(t, redirectAllowed(t, "http://gw.example:80/a", "https://gw.example/a"), "default ports")
+	assert.False(t, redirectAllowed(t, "https://gw.example/a", "http://gw.example/a"), "downgrade")
+	assert.False(t, redirectAllowed(t, "http://gw.example/a", "https://other.example/a"))
+	assert.False(t, redirectAllowed(t, "http://gw.example:8080/a", "https://gw.example:9443/a"), "upgrade to another port")
 }

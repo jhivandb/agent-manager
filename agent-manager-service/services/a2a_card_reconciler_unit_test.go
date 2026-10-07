@@ -71,18 +71,13 @@ func newCardReconcilerHarness(endpointURL string) *cardReconcilerHarness {
 		},
 	}
 	oc := &clientmocks.OpenChoreoClientMock{
-		GetComponentEndpointsFunc: func(_ context.Context, _, _, _, _ string) (map[string]models.EndpointsResponse, error) {
-			return map[string]models.EndpointsResponse{
-				"trip-planner-endpoint": {Endpoint: models.Endpoint{Name: "trip-planner-endpoint", URL: endpointURL}},
-			}, nil
-		},
 		GetReleaseBindingRolloutFunc: func(context.Context, string, string, string) (client.ReleaseBindingRollout, error) {
-			return client.ReleaseBindingRollout{ReleaseName: "trip-planner-r1", Serving: true}, nil
+			return client.ReleaseBindingRollout{ReleaseName: "trip-planner-r1", ExternalURL: endpointURL, Serving: true}, nil
 		},
 	}
 	return &cardReconcilerHarness{
 		repo: repo, fetcher: fetcher, ocClient: oc,
-		svc: &a2aCardReconcilerService{cardRepo: repo, fetcher: fetcher, ocClient: oc, logger: testLogger()},
+		svc: NewA2ACardReconcilerService(repo, fetcher, oc, testLogger()).(*a2aCardReconcilerService),
 	}
 }
 
@@ -125,8 +120,7 @@ func TestCardReconcilerWaitsForTheRolloutToFinish(t *testing.T) {
 
 func TestCardReconcilerFetchesAnExternalCardGuarded(t *testing.T) {
 	h := newCardReconcilerHarness("")
-	h.ocClient.GetComponentEndpointsFunc = nil // external rows never ask OpenChoreo
-	h.ocClient.GetReleaseBindingRolloutFunc = nil
+	h.ocClient.GetReleaseBindingRolloutFunc = nil // external rows never ask OpenChoreo
 	row := pendingCard(models.A2AAgentCardSourceExternal)
 	row.SourceURL = "https://agent.example/.well-known/agent-card.json"
 
@@ -136,27 +130,6 @@ func TestCardReconcilerFetchesAnExternalCardGuarded(t *testing.T) {
 	assert.Equal(t, row.SourceURL, h.fetcher.calls[0].URL)
 	assert.True(t, h.fetcher.calls[0].Guarded)
 	require.Len(t, h.repo.MarkFetchedCalls(), 1)
-}
-
-func TestCardReconcilerPicksTheFirstNamedEndpointWithAURL(t *testing.T) {
-	h := newCardReconcilerHarness("")
-	h.ocClient.GetComponentEndpointsFunc = func(_ context.Context, _, _, _, _ string) (map[string]models.EndpointsResponse, error) {
-		return map[string]models.EndpointsResponse{
-			"c-endpoint": {Endpoint: models.Endpoint{URL: "http://c.example"}},
-			"a-endpoint": {Endpoint: models.Endpoint{URL: ""}},
-			"b-endpoint": {Endpoint: models.Endpoint{URL: "http://b.example"}},
-		}, nil
-	}
-
-	const iterations = 5
-	for i := 0; i < iterations; i++ {
-		h.svc.fetchOne(context.Background(), pendingCard(models.A2AAgentCardSourcePlatform))
-	}
-
-	require.Len(t, h.fetcher.calls, iterations)
-	for _, call := range h.fetcher.calls {
-		assert.Equal(t, "http://b.example/.well-known/agent-card.json", call.URL)
-	}
 }
 
 func TestCardReconcilerRetriesWhenNoEndpointIsReady(t *testing.T) {
@@ -336,4 +309,59 @@ func TestCardReconcilerDoesNotRetryTheRecordWhenSuperseded(t *testing.T) {
 	h.svc.fetchOne(context.Background(), pendingCard(models.A2AAgentCardSourcePlatform))
 
 	assert.Len(t, h.repo.MarkAttemptFailedCalls(), 1)
+}
+
+// rolloutBlocksUntilCancelled makes every OpenChoreo rollout read hang like an unresponsive server.
+func rolloutBlocksUntilCancelled(h *cardReconcilerHarness) {
+	h.ocClient.GetReleaseBindingRolloutFunc = func(ctx context.Context, _, _, _ string) (client.ReleaseBindingRollout, error) {
+		<-ctx.Done()
+		return client.ReleaseBindingRollout{}, ctx.Err()
+	}
+}
+
+// runWithin fails the test if fn outlives limit.
+func runWithin(t *testing.T, limit time.Duration, fn func()) {
+	t.Helper()
+	done := make(chan struct{})
+	go func() { fn(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(limit):
+		require.FailNow(t, "did not return in time", "limit %s", limit)
+	}
+}
+
+func TestCardReconcilerBoundsEachAttempt(t *testing.T) {
+	h := newCardReconcilerHarness("http://gw.example/a")
+	rolloutBlocksUntilCancelled(h)
+	h.svc.attemptTimeout = 20 * time.Millisecond
+
+	runWithin(t, 2*time.Second, func() {
+		h.svc.fetchOne(context.Background(), pendingCard(models.A2AAgentCardSourcePlatform))
+	})
+
+	require.Len(t, h.repo.MarkAttemptFailedCalls(), 1, "a timed-out attempt is still charged")
+}
+
+// Rows still running when the claim lease ends could be re-claimed and fetched twice.
+func TestCardReconcilerStopsTheBatchBeforeTheLeaseEnds(t *testing.T) {
+	h := newCardReconcilerHarness("http://gw.example/a")
+	rolloutBlocksUntilCancelled(h)
+	h.svc.batchBudget = 20 * time.Millisecond
+	h.repo.ClaimDueFunc = func(context.Context, time.Time, int) ([]models.A2AAgentCard, error) {
+		return []models.A2AAgentCard{
+			pendingCard(models.A2AAgentCardSourcePlatform),
+			pendingCard(models.A2AAgentCardSourcePlatform),
+			pendingCard(models.A2AAgentCardSourcePlatform),
+		}, nil
+	}
+
+	runWithin(t, 2*time.Second, func() { h.svc.RunOnce(context.Background()) })
+
+	assert.Len(t, h.ocClient.GetReleaseBindingRolloutCalls(), 1, "rows left at the deadline wait for their lease to lapse")
+	assert.Len(t, h.repo.MarkAttemptFailedCalls(), 1, "only the cut-off row is charged")
+}
+
+func TestCardReconcilerBatchFitsInsideTheClaimLease(t *testing.T) {
+	assert.Less(t, a2aCardBatchBudget, repositories.A2AAgentCardClaimLease)
 }

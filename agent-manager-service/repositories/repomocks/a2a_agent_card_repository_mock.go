@@ -45,6 +45,9 @@ import (
 //			MarkFetchedFunc: func(ctx context.Context, read models.A2AAgentCard, card json.RawMessage, cardHash string, fetchedURL string, releaseName string) error {
 //				panic("mock out the MarkFetched method")
 //			},
+//			RequeueFunc: func(ctx context.Context, ouID string, projectName string, agentName string, environmentName string) error {
+//				panic("mock out the Requeue method")
+//			},
 //		}
 //
 //		// use mockedA2AAgentCardRepository in code that requires repositories.A2AAgentCardRepository
@@ -78,6 +81,9 @@ type A2AAgentCardRepositoryMock struct {
 
 	// MarkFetchedFunc mocks the MarkFetched method.
 	MarkFetchedFunc func(ctx context.Context, read models.A2AAgentCard, card json.RawMessage, cardHash string, fetchedURL string, releaseName string) error
+
+	// RequeueFunc mocks the Requeue method.
+	RequeueFunc func(ctx context.Context, ouID string, projectName string, agentName string, environmentName string) error
 
 	// calls tracks calls to the methods.
 	calls struct {
@@ -180,6 +186,19 @@ type A2AAgentCardRepositoryMock struct {
 			// ReleaseName is the releaseName argument value.
 			ReleaseName string
 		}
+		// Requeue holds details about calls to the Requeue method.
+		Requeue []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// OuID is the ouID argument value.
+			OuID string
+			// ProjectName is the projectName argument value.
+			ProjectName string
+			// AgentName is the agentName argument value.
+			AgentName string
+			// EnvironmentName is the environmentName argument value.
+			EnvironmentName string
+		}
 	}
 	lockClaimDue          sync.RWMutex
 	lockDeleteForAgent    sync.RWMutex
@@ -190,6 +209,7 @@ type A2AAgentCardRepositoryMock struct {
 	lockMarkAttemptFailed sync.RWMutex
 	lockMarkFailed        sync.RWMutex
 	lockMarkFetched       sync.RWMutex
+	lockRequeue           sync.RWMutex
 }
 
 // ClaimDue calls ClaimDueFunc.
@@ -585,5 +605,53 @@ func (mock *A2AAgentCardRepositoryMock) MarkFetchedCalls() []struct {
 	mock.lockMarkFetched.RLock()
 	calls = mock.calls.MarkFetched
 	mock.lockMarkFetched.RUnlock()
+	return calls
+}
+
+// Requeue calls RequeueFunc.
+func (mock *A2AAgentCardRepositoryMock) Requeue(ctx context.Context, ouID string, projectName string, agentName string, environmentName string) error {
+	if mock.RequeueFunc == nil {
+		panic("A2AAgentCardRepositoryMock.RequeueFunc: method is nil but A2AAgentCardRepository.Requeue was just called")
+	}
+	callInfo := struct {
+		Ctx             context.Context
+		OuID            string
+		ProjectName     string
+		AgentName       string
+		EnvironmentName string
+	}{
+		Ctx:             ctx,
+		OuID:            ouID,
+		ProjectName:     projectName,
+		AgentName:       agentName,
+		EnvironmentName: environmentName,
+	}
+	mock.lockRequeue.Lock()
+	mock.calls.Requeue = append(mock.calls.Requeue, callInfo)
+	mock.lockRequeue.Unlock()
+	return mock.RequeueFunc(ctx, ouID, projectName, agentName, environmentName)
+}
+
+// RequeueCalls gets all the calls that were made to Requeue.
+// Check the length with:
+//
+//	len(mockedA2AAgentCardRepository.RequeueCalls())
+func (mock *A2AAgentCardRepositoryMock) RequeueCalls() []struct {
+	Ctx             context.Context
+	OuID            string
+	ProjectName     string
+	AgentName       string
+	EnvironmentName string
+} {
+	var calls []struct {
+		Ctx             context.Context
+		OuID            string
+		ProjectName     string
+		AgentName       string
+		EnvironmentName string
+	}
+	mock.lockRequeue.RLock()
+	calls = mock.calls.Requeue
+	mock.lockRequeue.RUnlock()
 	return calls
 }

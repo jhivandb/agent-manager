@@ -42,6 +42,9 @@ type A2AAgentCardRepository interface {
 	// A different source, or an external row naming a different source_url, replaces them and clears the card state.
 	Enqueue(ctx context.Context, card *models.A2AAgentCard) error
 
+	// Requeue resets an existing row to pending without creating one; it returns ErrA2AAgentCardNotFound when absent.
+	Requeue(ctx context.Context, ouID, projectName, agentName, environmentName string) error
+
 	// ClaimDue leases up to limit pending rows whose next_attempt_at has passed; NULL is never due.
 	ClaimDue(ctx context.Context, now time.Time, limit int) ([]models.A2AAgentCard, error)
 
@@ -61,8 +64,8 @@ type A2AAgentCardRepository interface {
 	DeleteForAgentEnv(ctx context.Context, ouID, projectName, agentName, environmentName string) error
 }
 
-// a2aAgentCardClaimLease outlasts a full batch of sequential 5s fetches.
-const a2aAgentCardClaimLease = 5 * time.Minute
+// A2AAgentCardClaimLease is how long a claimed row stays invisible to other claimers.
+const A2AAgentCardClaimLease = 5 * time.Minute
 
 type a2aAgentCardRepository struct {
 	db *gorm.DB
@@ -99,6 +102,27 @@ func (r *a2aAgentCardRepository) Enqueue(ctx context.Context, card *models.A2AAg
 	}).Create(card).Error
 }
 
+func (r *a2aAgentCardRepository) Requeue(ctx context.Context, ouID, projectName, agentName, environmentName string) error {
+	now := time.Now().Truncate(time.Microsecond)
+	result := r.db.WithContext(ctx).Model(&models.A2AAgentCard{}).
+		Where("ou_id = ? AND project_name = ? AND agent_name = ? AND environment_name = ?",
+			ouID, projectName, agentName, environmentName).
+		Updates(map[string]interface{}{
+			"status":          models.A2AAgentCardStatusPending,
+			"attempt_count":   0,
+			"last_error":      "",
+			"next_attempt_at": now,
+			"updated_at":      now,
+		})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return ErrA2AAgentCardNotFound
+	}
+	return nil
+}
+
 const (
 	a2aCardSourceChanged    = "a2a_agent_cards.source IS DISTINCT FROM excluded.source"
 	a2aCardSourceURLChanged = "a2a_agent_cards.source_url IS DISTINCT FROM excluded.source_url"
@@ -121,6 +145,10 @@ func newSourceURLAssignments(changed string) []clause.Assignment {
 	}
 }
 
+// a2aCardClaimColumns omits card: the reconciler compares card_hash and never reads the stored body.
+const a2aCardClaimColumns = `id, ou_id, project_name, agent_name, environment_name, source, source_url, card_hash,
+	fetched_at, release_name, status, attempt_count, last_error, next_attempt_at, created_at, updated_at`
+
 func (r *a2aAgentCardRepository) ClaimDue(ctx context.Context, now time.Time, limit int) ([]models.A2AAgentCard, error) {
 	var claimed []models.A2AAgentCard
 	err := r.db.WithContext(ctx).Raw(
@@ -133,8 +161,8 @@ func (r *a2aAgentCardRepository) ClaimDue(ctx context.Context, now time.Time, li
 			LIMIT ?
 			FOR UPDATE SKIP LOCKED
 		)
-		RETURNING *`,
-		now.Add(a2aAgentCardClaimLease), models.A2AAgentCardStatusPending, now, limit,
+		RETURNING `+a2aCardClaimColumns,
+		now.Add(A2AAgentCardClaimLease), models.A2AAgentCardStatusPending, now, limit,
 	).Scan(&claimed).Error
 	if err != nil {
 		return nil, err

@@ -49,6 +49,7 @@ func cardServiceFor(provisioning, subType string) (*a2aAgentCardService, *repomo
 	}
 	repo := &repomocks.A2AAgentCardRepositoryMock{
 		EnqueueFunc:           func(context.Context, *models.A2AAgentCard) error { return nil },
+		RequeueFunc:           func(context.Context, string, string, string, string) error { return nil },
 		DeleteForAgentEnvFunc: func(context.Context, string, string, string, string) error { return nil },
 	}
 	return &a2aAgentCardService{ocClient: oc, cardRepo: repo, logger: testLogger()}, repo, oc
@@ -61,6 +62,7 @@ func TestGetA2AAgentCardReturnsTheStoredRow(t *testing.T) {
 		return stored, nil
 	}
 	oc.GetEnvironmentFunc = nil // a stored row proves the environment
+	oc.GetComponentFunc = nil   // and the agent, so a 5s poll costs no OpenChoreo call
 
 	got, err := svc.GetA2AAgentCard(context.Background(), "org", "proj", "agent", "dev")
 	require.NoError(t, err)
@@ -89,7 +91,10 @@ func TestGetA2AAgentCardIsNotFoundForAnExternalAgentWithNoSource(t *testing.T) {
 }
 
 func TestGetA2AAgentCardIsNotFoundForANonA2AAgent(t *testing.T) {
-	svc, _, _ := cardServiceFor("internal", "chat-api")
+	svc, repo, _ := cardServiceFor("internal", "chat-api")
+	repo.GetFunc = func(context.Context, string, string, string, string) (*models.A2AAgentCard, error) {
+		return nil, repositories.ErrA2AAgentCardNotFound
+	}
 	_, err := svc.GetA2AAgentCard(context.Background(), "org", "proj", "agent", "dev")
 	assert.ErrorIs(t, err, utils.ErrAgentCardNotFound)
 }
@@ -105,7 +110,10 @@ func TestGetA2AAgentCardDoesNotMaskRealErrors(t *testing.T) {
 }
 
 func TestGetA2AAgentCardMapsAMissingAgent(t *testing.T) {
-	svc, _, oc := cardServiceFor("internal", "a2a-agent")
+	svc, repo, oc := cardServiceFor("internal", "a2a-agent")
+	repo.GetFunc = func(context.Context, string, string, string, string) (*models.A2AAgentCard, error) {
+		return nil, repositories.ErrA2AAgentCardNotFound
+	}
 	oc.GetComponentFunc = func(context.Context, string, string, string) (*models.AgentResponse, error) {
 		return nil, utils.ErrNotFound
 	}
@@ -122,26 +130,31 @@ func TestRefreshA2AAgentCardQueuesAPlatformFetch(t *testing.T) {
 	assert.Empty(t, queued[0].Card.SourceURL)
 }
 
-func TestRefreshA2AAgentCardKeepsTheExternalSource(t *testing.T) {
+func TestRefreshA2AAgentCardRequeuesTheExternalRowInPlace(t *testing.T) {
 	svc, repo, _ := cardServiceFor("external", "a2a-agent")
-	repo.GetFunc = func(context.Context, string, string, string, string) (*models.A2AAgentCard, error) {
-		return &models.A2AAgentCard{Source: models.A2AAgentCardSourceExternal, SourceURL: "https://a.example/x"}, nil
-	}
+	repo.EnqueueFunc = nil // an upsert could recreate a row removed meanwhile
 	require.NoError(t, svc.RefreshA2AAgentCard(tierGrantedCtx(t), "org", "proj", "agent", "dev"))
-	queued := repo.EnqueueCalls()
-	require.Len(t, queued, 1)
-	assert.Equal(t, models.A2AAgentCardSourceExternal, queued[0].Card.Source)
-	assert.Empty(t, queued[0].Card.SourceURL, "an empty URL leaves the stored one in place")
+	requeued := repo.RequeueCalls()
+	require.Len(t, requeued, 1)
+	assert.Equal(t, "dev", requeued[0].EnvironmentName)
 }
 
 func TestRefreshA2AAgentCardNeedsAnExternalSource(t *testing.T) {
 	svc, repo, _ := cardServiceFor("external", "a2a-agent")
-	repo.GetFunc = func(context.Context, string, string, string, string) (*models.A2AAgentCard, error) {
-		return nil, repositories.ErrA2AAgentCardNotFound
+	repo.RequeueFunc = func(context.Context, string, string, string, string) error {
+		return repositories.ErrA2AAgentCardNotFound
 	}
 	err := svc.RefreshA2AAgentCard(tierGrantedCtx(t), "org", "proj", "agent", "dev")
 	assert.ErrorIs(t, err, utils.ErrAgentCardNotFound)
 	assert.Empty(t, repo.EnqueueCalls())
+}
+
+func TestRefreshA2AAgentCardDoesNotMaskARequeueFailure(t *testing.T) {
+	svc, repo, _ := cardServiceFor("external", "a2a-agent")
+	repo.RequeueFunc = func(context.Context, string, string, string, string) error { return assert.AnError }
+	err := svc.RefreshA2AAgentCard(tierGrantedCtx(t), "org", "proj", "agent", "dev")
+	assert.ErrorIs(t, err, assert.AnError)
+	assert.NotErrorIs(t, err, utils.ErrAgentCardNotFound)
 }
 
 func TestRefreshA2AAgentCardRejectsANonA2AAgent(t *testing.T) {
@@ -266,4 +279,39 @@ func TestSetA2ACardSourceDoesNotMaskARecheckFailure(t *testing.T) {
 	assert.Error(t, err)
 	assert.NotErrorIs(t, err, utils.ErrAgentNotFound)
 	assert.Empty(t, repo.DeleteForAgentEnvCalls())
+}
+
+// Unresolvable and internal hosts must look alike, or the reply is an internal-DNS oracle.
+func TestSetA2ACardSourceHidesWhyAHostIsRefused(t *testing.T) {
+	svc, _, _ := cardServiceFor("external", "a2a-agent")
+	ctx := tierGrantedCtx(t)
+
+	internal := svc.SetA2ACardSource(ctx, "org", "proj", "agent", "dev", "https://10.0.0.1/c")
+	unresolvable := svc.SetA2ACardSource(ctx, "org", "proj", "agent", "dev", "https://nope.invalid/c")
+
+	require.ErrorIs(t, internal, utils.ErrInvalidURL)
+	require.ErrorIs(t, unresolvable, utils.ErrInvalidURL)
+	assert.Equal(t, internal.Error(), unresolvable.Error())
+	assert.NotContains(t, unresolvable.Error(), "lookup")
+}
+
+// Only callers allowed on the environment may probe URLs through it.
+func TestSetA2ACardSourceChecksTheTierBeforeTheURL(t *testing.T) {
+	svc, repo, oc := cardServiceFor("external", "a2a-agent")
+	oc.GetEnvironmentFunc = func(_ context.Context, _, name string) (*models.EnvironmentResponse, error) {
+		return &models.EnvironmentResponse{Name: name, IsProduction: true}, nil
+	}
+	err := svc.SetA2ACardSource(tierCtx(t, rbac.AgentEnvNonProduction), "org", "proj", "agent", "prod", "https://10.0.0.1/c")
+	assert.ErrorIs(t, err, utils.ErrForbidden)
+	assert.Empty(t, repo.EnqueueCalls())
+}
+
+// The OpenAPI maxLength and the console both count characters, not bytes.
+func TestSetA2ACardSourceCountsURLLengthInCharacters(t *testing.T) {
+	svc, repo, _ := cardServiceFor("external", "a2a-agent")
+	base := "https://93.184.215.14/"
+	url := base + strings.Repeat("é", 2048-len(base))
+
+	require.NoError(t, svc.SetA2ACardSource(tierGrantedCtx(t), "org", "proj", "agent", "dev", url))
+	assert.Len(t, repo.EnqueueCalls(), 1)
 }

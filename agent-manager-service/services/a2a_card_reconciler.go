@@ -24,8 +24,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"maps"
-	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -40,6 +38,10 @@ const (
 	a2aCardBatch        = 50
 	a2aCardBaseBackoff  = 5 * time.Second
 	a2aCardMaxBackoff   = time.Minute
+	// a2aCardAttemptTimeout bounds one row's OpenChoreo reads, DNS check and fetch.
+	a2aCardAttemptTimeout = 30 * time.Second
+	// a2aCardBatchBudget leaves the claim lease a minute to record the last outcome.
+	a2aCardBatchBudget = repositories.A2AAgentCardClaimLease - time.Minute
 	// a2aCardAttemptBudget is about 10 minutes of backoff.
 	a2aCardAttemptBudget = 14
 	// a2aCardLastErrorMaxRunes keeps last_error readable in the console.
@@ -69,6 +71,9 @@ type a2aCardReconcilerService struct {
 	logger   *slog.Logger
 	stopCh   chan struct{}
 	stopOnce sync.Once
+
+	attemptTimeout time.Duration
+	batchBudget    time.Duration
 }
 
 // NewA2ACardReconcilerService creates an A2ACardReconcilerService.
@@ -85,6 +90,9 @@ func NewA2ACardReconcilerService(
 		logger:   logger,
 		stopCh:   make(chan struct{}),
 		stopOnce: sync.Once{},
+
+		attemptTimeout: a2aCardAttemptTimeout,
+		batchBudget:    a2aCardBatchBudget,
 	}
 }
 
@@ -118,19 +126,30 @@ func (s *a2aCardReconcilerService) runLoop(ctx context.Context) {
 }
 
 func (s *a2aCardReconcilerService) RunOnce(ctx context.Context) {
-	due, err := s.cardRepo.ClaimDue(ctx, time.Now(), a2aCardBatch)
+	claimedAt := time.Now()
+	due, err := s.cardRepo.ClaimDue(ctx, claimedAt, a2aCardBatch)
 	if err != nil {
 		s.logger.Error("Failed to claim due A2A agent cards", "error", err)
 		return
 	}
-	for _, row := range due {
-		s.fetchOne(ctx, row)
+	batchCtx, cancel := context.WithDeadline(ctx, claimedAt.Add(s.batchBudget))
+	defer cancel()
+	for i, row := range due {
+		if batchCtx.Err() != nil {
+			s.logger.Info("A2A card batch ran out of lease; leaving the rest for a later claim", "remaining", len(due)-i)
+			return
+		}
+		s.fetchOne(batchCtx, row)
 	}
 }
 
 // fetchOne fetches one row's card and records the outcome.
 func (s *a2aCardReconcilerService) fetchOne(ctx context.Context, row models.A2AAgentCard) {
-	fetched, err := s.attemptFetch(ctx, row)
+	attemptCtx, cancel := context.WithTimeout(ctx, s.attemptTimeout)
+	defer cancel()
+	// The outcome must be recorded even when the attempt ran out of time.
+	ctx = context.WithoutCancel(ctx)
+	fetched, err := s.attemptFetch(attemptCtx, row)
 	if err != nil {
 		s.recordAttemptFailure(ctx, row, err)
 		return
@@ -177,30 +196,16 @@ func (s *a2aCardReconcilerService) fetchPlatformCard(ctx context.Context, row mo
 	if !rollout.Serving {
 		return a2aCardFetch{}, errA2ACardRolloutInProgress
 	}
-	url, err := s.platformCardURL(ctx, row)
-	if err != nil {
-		return a2aCardFetch{}, err
+	if rollout.ExternalURL == "" {
+		return a2aCardFetch{}, errA2ACardEndpointNotReady
 	}
+	url := strings.TrimRight(rollout.ExternalURL, "/") + a2aAgentCardPath
 	body, err := s.fetcher.Fetch(ctx, url, false)
 	if err != nil {
 		// The derived URL is otherwise invisible to the user.
 		return a2aCardFetch{url: url}, fmt.Errorf("%s: %w", url, err)
 	}
 	return a2aCardFetch{url: url, releaseName: rollout.ReleaseName, body: body}, nil
-}
-
-// platformCardURL is the agent's public endpoint (routed through the gateway) plus the card path.
-func (s *a2aCardReconcilerService) platformCardURL(ctx context.Context, row models.A2AAgentCard) (string, error) {
-	endpoints, err := s.ocClient.GetComponentEndpoints(ctx, row.OUID, row.ProjectName, row.AgentName, row.EnvironmentName)
-	if err != nil {
-		return "", fmt.Errorf("failed to read agent endpoints: %w", err)
-	}
-	for _, name := range slices.Sorted(maps.Keys(endpoints)) {
-		if u := endpoints[name].URL; u != "" {
-			return strings.TrimRight(u, "/") + a2aAgentCardPath, nil
-		}
-	}
-	return "", errA2ACardEndpointNotReady
 }
 
 func (s *a2aCardReconcilerService) recordAttemptFailure(ctx context.Context, row models.A2AAgentCard, cause error) {

@@ -80,12 +80,16 @@ func pinnedDial(addr string) func(ctx context.Context, network, _ string) (net.C
 	}
 }
 
-// sameHostRedirectOnly stops redirects that leave the original scheme and host.
+// sameHostRedirectOnly stops redirects that leave the original scheme and host, except a default-port HTTPS upgrade.
 func sameHostRedirectOnly(req *http.Request, via []*http.Request) error {
 	if len(via) >= 10 {
 		return errors.New("stopped after 10 redirects")
 	}
-	if req.URL.Scheme != via[0].URL.Scheme || req.URL.Host != via[0].URL.Host {
+	from, to := via[0].URL, req.URL
+	sameOrigin := to.Scheme == from.Scheme && to.Host == from.Host
+	upgrade := from.Scheme == "http" && to.Scheme == "https" && to.Hostname() == from.Hostname() &&
+		(from.Port() == "" || from.Port() == "80") && (to.Port() == "" || to.Port() == "443")
+	if !sameOrigin && !upgrade {
 		return http.ErrUseLastResponse
 	}
 	return nil
@@ -95,7 +99,7 @@ func (f *a2aCardFetcher) Fetch(ctx context.Context, url string, guarded bool) (j
 	client := f.plain
 	if guarded {
 		if err := ssrf.ValidateURL(ctx, url); err != nil {
-			return nil, fmt.Errorf("agent card URL is not allowed: %w", err)
+			return nil, refusedCardURL(err)
 		}
 		client = f.guarded
 	}
@@ -110,7 +114,7 @@ func (f *a2aCardFetcher) Fetch(ctx context.Context, url string, guarded bool) (j
 	if err != nil {
 		if guarded {
 			if errors.Is(err, utils.ErrInvalidURL) {
-				return nil, fmt.Errorf("agent card URL is not allowed: %w", err)
+				return nil, refusedCardURL(err)
 			}
 			// Raw dial errors are not surfaced for user-supplied hosts.
 			return nil, errors.New("could not reach the agent card URL")
@@ -135,36 +139,36 @@ func (f *a2aCardFetcher) Fetch(ctx context.Context, url string, guarded bool) (j
 	return json.RawMessage(body), nil
 }
 
-// a2aCardShape is the minimal A2A 1.0 card validation reads; everything else passes through.
-type a2aCardShape struct {
-	Name                string `json:"name"`
-	SupportedInterfaces []struct {
-		URL string `json:"url"`
-	} `json:"supportedInterfaces"`
-	Skills *[]json.RawMessage `json:"skills"`
+// refusedCardURL keeps SSRF refusals free of DNS detail, since last_error is user-visible.
+func refusedCardURL(err error) error {
+	if errors.Is(err, ssrf.ErrHostNotPublic) {
+		return errors.New("agent card URL is not allowed: " + a2aCardHostNotPublicMsg)
+	}
+	return fmt.Errorf("agent card URL is not allowed: %w", err)
 }
 
+// validateA2ACard checks the minimal A2A 1.0 shape with exact key names, as the console reads them.
 func validateA2ACard(body []byte) error {
-	var obj map[string]json.RawMessage
-	if err := json.Unmarshal(body, &obj); err != nil || obj == nil {
+	var card map[string]json.RawMessage
+	if err := json.Unmarshal(body, &card); err != nil || card == nil {
 		return errors.New("agent card is not a JSON object")
 	}
-	var card a2aCardShape
-	if err := json.Unmarshal(body, &card); err != nil {
-		return fmt.Errorf("agent card is malformed: %w", err)
-	}
-	if card.Name == "" {
+	var name string
+	if err := json.Unmarshal(card["name"], &name); err != nil || name == "" {
 		return errors.New(`agent card is missing "name"`)
 	}
-	if len(card.SupportedInterfaces) == 0 {
+	var interfaces []map[string]json.RawMessage
+	if err := json.Unmarshal(card["supportedInterfaces"], &interfaces); err != nil || len(interfaces) == 0 {
 		return errors.New(`agent card has no "supportedInterfaces"`)
 	}
-	for i, iface := range card.SupportedInterfaces {
-		if iface.URL == "" {
+	for i, iface := range interfaces {
+		var url string
+		if err := json.Unmarshal(iface["url"], &url); err != nil || url == "" {
 			return fmt.Errorf(`agent card "supportedInterfaces[%d]" has no "url"`, i)
 		}
 	}
-	if card.Skills == nil {
+	var skills []json.RawMessage
+	if err := json.Unmarshal(card["skills"], &skills); err != nil || skills == nil {
 		return errors.New(`agent card is missing the "skills" array`)
 	}
 	return nil

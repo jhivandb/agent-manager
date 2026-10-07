@@ -330,7 +330,7 @@ func TestA2AAgentCardClaimDueLeasesTheRow(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotContains(t, claimedNames(again), card.AgentName)
 
-	afterLease, err := repo.ClaimDue(ctx, time.Now().Add(a2aAgentCardClaimLease+time.Minute), 100)
+	afterLease, err := repo.ClaimDue(ctx, time.Now().Add(A2AAgentCardClaimLease+time.Minute), 100)
 	require.NoError(t, err)
 	assert.Contains(t, claimedNames(afterLease), card.AgentName)
 	require.NoError(t, repo.MarkFetched(ctx, claimed, json.RawMessage(sampleCard), "h", "u", ""),
@@ -446,4 +446,57 @@ func TestA2AAgentCardGetAndDelete(t *testing.T) {
 	require.NoError(t, repo.DeleteForAgent(ctx, dev.OUID, dev.ProjectName, dev.AgentName))
 	_, err = repo.Get(ctx, dev.OUID, dev.ProjectName, dev.AgentName, "Production")
 	assert.ErrorIs(t, err, ErrA2AAgentCardNotFound)
+}
+
+// A refresh racing a remove must not resurrect the row as an empty-URL external source.
+func TestA2AAgentCardRequeueNeverCreatesARow(t *testing.T) {
+	repo := NewA2AAgentCardRepository(db.GetDB())
+	ctx := context.Background()
+	card := newTestCard("requeue-gone-"+uuid.New().String()[:8], models.A2AAgentCardSourceExternal)
+	cleanupCard(t, repo, card)
+
+	err := repo.Requeue(ctx, card.OUID, card.ProjectName, card.AgentName, card.EnvironmentName)
+
+	assert.ErrorIs(t, err, ErrA2AAgentCardNotFound)
+	_, err = repo.Get(ctx, card.OUID, card.ProjectName, card.AgentName, card.EnvironmentName)
+	assert.ErrorIs(t, err, ErrA2AAgentCardNotFound)
+}
+
+func TestA2AAgentCardRequeueResetsAFailedRow(t *testing.T) {
+	repo := NewA2AAgentCardRepository(db.GetDB())
+	ctx := context.Background()
+	card := newTestCard("requeue-"+uuid.New().String()[:8], models.A2AAgentCardSourceExternal)
+	card.SourceURL = "https://a.example/card.json"
+	cleanupCard(t, repo, card)
+	require.NoError(t, repo.Enqueue(ctx, card))
+	require.NoError(t, repo.MarkFailed(ctx, dueCardFor(t, repo, card.AgentName), "HTTP 404"))
+
+	require.NoError(t, repo.Requeue(ctx, card.OUID, card.ProjectName, card.AgentName, card.EnvironmentName))
+
+	row := cardRowOf(t, card)
+	assert.Equal(t, models.A2AAgentCardStatusPending, row.Status)
+	assert.Zero(t, row.AttemptCount)
+	assert.Empty(t, row.LastError)
+	assert.NotNil(t, row.NextAttemptAt)
+	assert.Equal(t, "https://a.example/card.json", row.SourceURL)
+	assert.Equal(t, models.A2AAgentCardSourceExternal, row.Source)
+}
+
+// The reconciler compares hashes only, so a claim need not ship the card body.
+func TestA2AAgentCardClaimDueLeavesTheCardBodyBehind(t *testing.T) {
+	repo := NewA2AAgentCardRepository(db.GetDB())
+	ctx := context.Background()
+	card := newTestCard("claim-body-"+uuid.New().String()[:8], models.A2AAgentCardSourcePlatform)
+	cleanupCard(t, repo, card)
+	require.NoError(t, repo.Enqueue(ctx, card))
+	require.NoError(t, repo.MarkFetched(ctx, dueCardFor(t, repo, card.AgentName), json.RawMessage(sampleCard), "h1", "u", ""))
+	again := newTestCardLike(card)
+	require.NoError(t, repo.Enqueue(ctx, again))
+
+	claimed := dueCardFor(t, repo, card.AgentName)
+
+	assert.Empty(t, claimed.Card)
+	assert.Equal(t, "h1", claimed.CardHash)
+	assert.Equal(t, card.ID, claimed.ID)
+	assert.False(t, claimed.UpdatedAt.IsZero())
 }

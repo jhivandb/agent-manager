@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/wso2/agent-manager/agent-manager-service/audit"
 	"github.com/wso2/agent-manager/agent-manager-service/clients/openchoreosvc/client"
@@ -32,6 +33,9 @@ import (
 )
 
 const a2aCardSourceURLMaxLen = 2048
+
+// a2aCardHostNotPublicMsg replaces DNS detail that would reveal internal hosts and resolvers.
+const a2aCardHostNotPublicMsg = "url host must be publicly reachable"
 
 // A2AAgentCardService reads and manages stored A2A agent cards.
 type A2AAgentCardService interface {
@@ -59,22 +63,19 @@ func NewA2AAgentCardService(
 func (s *a2aAgentCardService) GetA2AAgentCard(
 	ctx context.Context, ouID, projectName, agentName, envName string,
 ) (*models.A2AAgentCard, error) {
-	agent, err := s.getAgent(ctx, ouID, projectName, agentName)
-	if err != nil {
-		return nil, err
-	}
-	if !utils.IsA2AAgentSubType(agent.Type.SubType) {
-		return nil, utils.ErrAgentCardNotFound
-	}
+	// Rows exist only for live A2A agents, so OpenChoreo is asked only on a miss.
 	row, err := s.cardRepo.Get(ctx, ouID, projectName, agentName, envName)
-	if errors.Is(err, repositories.ErrA2AAgentCardNotFound) {
-		// No row means no fetch is queued; a synthetic pending would never resolve.
-		return nil, utils.ErrAgentCardNotFound
+	if err == nil {
+		return row, nil
 	}
-	if err != nil {
+	if !errors.Is(err, repositories.ErrA2AAgentCardNotFound) {
 		return nil, fmt.Errorf("failed to read agent card: %w", err)
 	}
-	return row, nil
+	if _, err := s.getAgent(ctx, ouID, projectName, agentName); err != nil {
+		return nil, err
+	}
+	// No row means no fetch is queued; a synthetic pending would never resolve.
+	return nil, utils.ErrAgentCardNotFound
 }
 
 func (s *a2aAgentCardService) RefreshA2AAgentCard(
@@ -87,17 +88,17 @@ func (s *a2aAgentCardService) RefreshA2AAgentCard(
 	if _, err := requireEnvironmentTier(ctx, s.ocClient, s.logger, ouID, envName); err != nil {
 		return err
 	}
-	source := models.A2AAgentCardSourcePlatform
-	if isExternalProvisioned(agent) {
-		if _, err := s.cardRepo.Get(ctx, ouID, projectName, agentName, envName); err != nil {
-			if errors.Is(err, repositories.ErrA2AAgentCardNotFound) {
-				return utils.ErrAgentCardNotFound
-			}
-			return fmt.Errorf("failed to read agent card: %w", err)
-		}
-		source = models.A2AAgentCardSourceExternal
+	if !isExternalProvisioned(agent) {
+		return s.enqueue(ctx, agent, ouID, projectName, envName, models.A2AAgentCardSourcePlatform, "")
 	}
-	return s.enqueue(ctx, agent, ouID, projectName, envName, source, "")
+	// Update-only, so a concurrent remove can't be undone by an upsert.
+	if err := s.cardRepo.Requeue(ctx, ouID, projectName, agentName, envName); err != nil {
+		if errors.Is(err, repositories.ErrA2AAgentCardNotFound) {
+			return utils.ErrAgentCardNotFound
+		}
+		return fmt.Errorf("failed to queue agent card fetch: %w", err)
+	}
+	return s.dropIfAgentGone(ctx, agent, ouID, projectName, envName)
 }
 
 func (s *a2aAgentCardService) SetA2ACardSource(
@@ -107,11 +108,11 @@ func (s *a2aAgentCardService) SetA2ACardSource(
 	if err != nil {
 		return err
 	}
-	sourceURL = strings.TrimSpace(sourceURL)
-	if err := validateCardSourceURL(ctx, sourceURL); err != nil {
+	if _, err := requireEnvironmentTier(ctx, s.ocClient, s.logger, ouID, envName); err != nil {
 		return err
 	}
-	if _, err := requireEnvironmentTier(ctx, s.ocClient, s.logger, ouID, envName); err != nil {
+	sourceURL = strings.TrimSpace(sourceURL)
+	if err := validateCardSourceURL(ctx, sourceURL); err != nil {
 		return err
 	}
 	err = s.enqueue(ctx, agent, ouID, projectName, envName, models.A2AAgentCardSourceExternal, sourceURL)
@@ -235,10 +236,12 @@ func validateCardSourceURL(ctx context.Context, sourceURL string) error {
 	if sourceURL == "" {
 		return fmt.Errorf("%w: url is required", utils.ErrInvalidURL)
 	}
-	if len(sourceURL) > a2aCardSourceURLMaxLen {
+	if utf8.RuneCountInString(sourceURL) > a2aCardSourceURLMaxLen {
 		return fmt.Errorf("%w: url must be at most %d characters", utils.ErrInvalidURL, a2aCardSourceURLMaxLen)
 	}
-	if err := ssrf.ValidateURL(ctx, sourceURL); err != nil {
+	if err := ssrf.ValidateURL(ctx, sourceURL); errors.Is(err, ssrf.ErrHostNotPublic) {
+		return fmt.Errorf("%w: %s", utils.ErrInvalidURL, a2aCardHostNotPublicMsg)
+	} else if err != nil {
 		return fmt.Errorf("%w: %w", utils.ErrInvalidURL, err)
 	}
 	return nil

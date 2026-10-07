@@ -20,7 +20,8 @@ import { useEffect, useState } from "react";
 import { Box, Button, IconButton, TextField, Tooltip } from "@wso2/oxygen-ui";
 import { Check, X } from "@wso2/oxygen-ui-icons-react";
 import { useSetAgentCardSource } from "@agent-management-platform/api-client";
-import type { AgentCardPathParams } from "@agent-management-platform/types";
+import { INPUT_LIMITS, type AgentCardPathParams } from "@agent-management-platform/types";
+import { validateEndpointUrl } from "@agent-management-platform/shared-component";
 import { TextInput } from "@agent-management-platform/views";
 
 interface AgentCardSourceFormProps {
@@ -32,8 +33,7 @@ interface AgentCardSourceFormProps {
   onDone?: () => void;
 }
 
-const URL_MAX = 2048;
-const INVALID_HINT = "Enter a public http(s) URL of at most 2048 characters";
+const INVALID_HINT = "Enter a public http(s) URL";
 
 /** Card URL for an external A2A agent in one environment. */
 export function AgentCardSourceForm({
@@ -44,7 +44,7 @@ export function AgentCardSourceForm({
   const { mutate: save, isPending: isSaving } = useSetAgentCardSource();
 
   const trimmed = url.trim();
-  const invalid = trimmed !== "" && (!/^https?:\/\//i.test(trimmed) || trimmed.length > URL_MAX);
+  const invalid = trimmed !== "" && validateEndpointUrl(trimmed) !== null;
   const canSave = !!trimmed && !invalid && trimmed !== currentUrl && !isSaving;
   const submit = () => {
     if (canSave) save({ params, body: { url: trimmed } }, { onSuccess: onDone });
@@ -64,7 +64,11 @@ export function AgentCardSourceForm({
             if (e.key === "Escape") onDone?.();
           }}
           error={invalid}
-          inputProps={{ "aria-label": "Agent card URL", style: { fontFamily: "monospace" } }}
+          inputProps={{
+            "aria-label": "Agent card URL",
+            maxLength: INPUT_LIMITS.URL,
+            style: { fontFamily: "monospace" },
+          }}
         />
         <Tooltip title={invalid ? INVALID_HINT : "Save"}>
           <span>
@@ -91,6 +95,7 @@ export function AgentCardSourceForm({
         onChange={(e: React.ChangeEvent<HTMLInputElement>) => setUrl(e.target.value)}
         error={invalid}
         helperText={invalid ? INVALID_HINT : undefined}
+        maxLength={INPUT_LIMITS.URL}
         fullWidth
       />
       <Button variant="contained" size="small" disabled={!canSave} onClick={submit} sx={{ mt: 3 }}>

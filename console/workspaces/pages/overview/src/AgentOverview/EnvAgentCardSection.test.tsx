@@ -172,4 +172,68 @@ describe("EnvAgentCardSection", () => {
     expect(screen.getByRole("button", { name: "Remove" })).toBeInTheDocument();
     expect(screen.queryByPlaceholderText(/agent-card\.json/)).not.toBeInTheDocument();
   });
+
+  it("does not offer the URL form while the card is still loading", () => {
+    mockAgent("a2a-agent");
+    mockCard({ isLoading: true });
+    renderSection(true);
+    expect(screen.queryByPlaceholderText(/agent-card\.json/)).not.toBeInTheDocument();
+  });
+
+  it("does not offer the URL form when the card could not be loaded", () => {
+    mockAgent("a2a-agent");
+    mockCard({ isError: true, error: Object.assign(new Error("boom"), { status: 500 }) });
+    renderSection(true);
+    expect(screen.getByText(/unable to load the agent card/i)).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText(/agent-card\.json/)).not.toBeInTheDocument();
+  });
+
+  it("drops the stale card once its source is gone", () => {
+    mockAgent("a2a-agent");
+    mockCard({
+      isError: true,
+      error: Object.assign(new Error("nf"), { status: 404 }),
+      data: {
+        source: "external", status: "fetched", sourceUrl: "https://old.example/card.json", lastError: "",
+        card: { name: "Old Agent", supportedInterfaces: [], skills: [] },
+      },
+    });
+    renderSection(true);
+    expect(screen.queryByText("Old Agent")).not.toBeInTheDocument();
+    expect(screen.queryByText("https://old.example/card.json")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Remove" })).not.toBeInTheDocument();
+    expect(screen.getByText(/register this agent/i)).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/agent-card\.json/)).toBeInTheDocument();
+  });
+
+  it("does not double the v of a version that already has one", () => {
+    mockAgent("a2a-agent");
+    mockCard({
+      data: {
+        source: "platform", status: "fetched", sourceUrl: "", lastError: "",
+        card: { name: "Trip Planner", version: "v2.0", supportedInterfaces: [], skills: [] },
+      },
+    });
+    renderSection();
+    expect(screen.getByText("v2.0")).toBeInTheDocument();
+  });
+
+  it("keeps Save disabled for a URL with no host, and caps its length", () => {
+    mockAgent("a2a-agent");
+    mockCard({ isError: true, error: Object.assign(new Error("nf"), { status: 404 }) });
+    renderSection(true);
+    const input = screen.getByPlaceholderText(/agent-card\.json/);
+    fireEvent.change(input, { target: { value: "https://" } });
+    expect(screen.getByRole("button", { name: /save/i })).toBeDisabled();
+    expect(input).toHaveAttribute("maxLength", "2048");
+  });
+
+  it("caps the inline URL editor's length", () => {
+    mockAgent("a2a-agent");
+    mockCard({ data: { source: "external", status: "fetched", sourceUrl: "https://a.example/c", lastError: "" } });
+    renderSection(true);
+    fireEvent.click(screen.getByRole("button", { name: "Edit URL" }));
+    expect(screen.getByRole("textbox", { name: "Agent card URL" })).toHaveAttribute("maxLength", "2048");
+  });
 });
+

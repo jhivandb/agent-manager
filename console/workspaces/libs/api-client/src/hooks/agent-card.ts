@@ -40,8 +40,12 @@ export function removeAgentCardFromCache(queryClient: QueryClient, params: Agent
   queryClient.removeQueries({ queryKey: agentCardKey(params) });
 }
 
-/** Re-poll while a fetch is pending; stop on fetched or failed. */
-export function agentCardRefetchInterval(data: AgentCardResponse | undefined): number | false {
+/** Re-poll while pending; stop on fetched, failed, or a 404 (which keeps stale data cached). */
+export function agentCardRefetchInterval(
+  data: AgentCardResponse | undefined,
+  error?: unknown,
+): number | false {
+  if ((error as { status?: number } | null)?.status === 404) return false;
   return data?.status === "pending" ? POLL_INTERVAL : false;
 }
 
@@ -53,7 +57,7 @@ export function useGetAgentCard(params: AgentCardPathParams, options: { enabled?
     queryFn: () => getAgentCard(params, getToken),
     enabled: (options.enabled ?? true) &&
       !!(params.orgName && params.projName && params.agentName && params.envId),
-    refetchInterval: (q) => agentCardRefetchInterval(q.state.data),
+    refetchInterval: (q) => agentCardRefetchInterval(q.state.data, q.state.error),
     retry: false,
     silent: true,
   });
@@ -65,9 +69,11 @@ export function useRefreshAgentCard() {
   return useApiMutation<void, unknown, AgentCardPathParams>({
     action: { verb: "update", target: "agent card" },
     successMessage: "Agent card refresh queued",
-    mutationFn: (params) => refreshAgentCard(params, getToken),
-    onSuccess: (_d, params) =>
-      queryClient.invalidateQueries({ queryKey: agentCardKey(params) }),
+    // In mutationFn, since useApiMutation does not await onSuccess.
+    mutationFn: async (params) => {
+      await refreshAgentCard(params, getToken);
+      await queryClient.invalidateQueries({ queryKey: agentCardKey(params) });
+    },
   });
 }
 
@@ -77,9 +83,11 @@ export function useSetAgentCardSource() {
   type Vars = { params: AgentCardPathParams; body: SetAgentCardSourceRequest };
   return useApiMutation<void, unknown, Vars>({
     action: { verb: "update", target: "agent card source" },
-    mutationFn: ({ params, body }) => setAgentCardSource(params, body, getToken),
-    onSuccess: (_d, { params }) =>
-      queryClient.invalidateQueries({ queryKey: agentCardKey(params) }),
+    // Stays pending until the new URL is shown, so the editor can't close on the old one.
+    mutationFn: async ({ params, body }) => {
+      await setAgentCardSource(params, body, getToken);
+      await queryClient.invalidateQueries({ queryKey: agentCardKey(params) });
+    },
   });
 }
 

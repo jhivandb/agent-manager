@@ -437,6 +437,7 @@ func TestEnsureReleaseBindingRuntimeClass_SkipsWriteWhenAlreadyCorrect(t *testin
 
 func TestGetReleaseBindingRollout(t *testing.T) {
 	port := int32(8000)
+	aPath, bPath, scheme := "/a", "/b", "http"
 	binding := func(release string, conditions ...gen.Condition) gen.ReleaseBinding {
 		b := bindingWithConfigs(nil, nil)
 		b.Metadata.Name = "myagent-dev"
@@ -444,7 +445,10 @@ func TestGetReleaseBindingRollout(t *testing.T) {
 		b.Spec.ReleaseName = &release
 		b.Status = &gen.ReleaseBindingStatus{
 			Conditions: &conditions,
-			Endpoints:  &[]gen.EndpointURLStatus{{Name: "a", ServiceURL: &gen.EndpointURL{Host: "dev.svc", Port: &port}}},
+			Endpoints: &[]gen.EndpointURLStatus{
+				{Name: "b", ServiceURL: &gen.EndpointURL{Host: "b.svc", Port: &port}, ExternalURLs: &gen.EndpointGatewayURLs{Http: &gen.EndpointURL{Scheme: &scheme, Host: "gw.example", Path: &bPath}}},
+				{Name: "a", ServiceURL: &gen.EndpointURL{Host: "dev.svc", Port: &port}, ExternalURLs: &gen.EndpointGatewayURLs{Http: &gen.EndpointURL{Scheme: &scheme, Host: "gw.example", Path: &aPath}}},
+			},
 		}
 		return b
 	}
@@ -460,7 +464,9 @@ func TestGetReleaseBindingRollout(t *testing.T) {
 	t.Run("a ready binding serves its release", func(t *testing.T) {
 		got, err := serve(t, binding("myagent-r2", ready)).GetReleaseBindingRollout(context.Background(), "acme", "myagent", "dev")
 		require.NoError(t, err)
-		assert.Equal(t, ReleaseBindingRollout{ServiceURL: "http://dev.svc:8000", ReleaseName: "myagent-r2", Serving: true}, got)
+		assert.Equal(t, ReleaseBindingRollout{
+			ServiceURL: "http://b.svc:8000", ExternalURL: "http://gw.example/a", ReleaseName: "myagent-r2", Serving: true,
+		}, got, "the external URL is the first endpoint by name, as the card fetch needs")
 	})
 
 	t.Run("a rollout in progress is not serving its release yet", func(t *testing.T) {

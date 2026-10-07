@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -1840,7 +1841,9 @@ func (c *openChoreoClient) GetReleaseBindingServiceURL(ctx context.Context, ouID
 
 // ReleaseBindingRollout is the release an environment's binding points at, and whether it serves it yet.
 type ReleaseBindingRollout struct {
-	ServiceURL  string
+	ServiceURL string
+	// ExternalURL is the first endpoint's (by name) gateway URL, or "" before it is routed.
+	ExternalURL string
 	ReleaseName string
 	// Serving is false until the release's workload finishes rolling out, so old pods are gone.
 	Serving bool
@@ -1855,13 +1858,36 @@ func (c *openChoreoClient) GetReleaseBindingRollout(ctx context.Context, ouID, c
 		return ReleaseBindingRollout{}, nil
 	}
 	rollout := ReleaseBindingRollout{
-		ServiceURL: bindingServiceURL(binding),
-		Serving:    determineDeploymentStatus(binding, runtimeReplicaState{}) == DeploymentStatusActive,
+		ServiceURL:  bindingServiceURL(binding),
+		ExternalURL: bindingExternalURL(binding),
+		Serving:     determineDeploymentStatus(binding, runtimeReplicaState{}) == DeploymentStatusActive,
 	}
 	if binding.Spec != nil && binding.Spec.ReleaseName != nil {
 		rollout.ReleaseName = *binding.Spec.ReleaseName
 	}
 	return rollout, nil
+}
+
+// bindingExternalURL picks by endpoint name, matching GetComponentEndpoints' TLS rule.
+func bindingExternalURL(binding *gen.ReleaseBinding) string {
+	if binding.Status == nil || binding.Status.Endpoints == nil {
+		return ""
+	}
+	endpoints := slices.Clone(*binding.Status.Endpoints)
+	slices.SortFunc(endpoints, func(a, b gen.EndpointURLStatus) int { return strings.Compare(a.Name, b.Name) })
+	for _, ep := range endpoints {
+		if ep.ExternalURLs == nil {
+			continue
+		}
+		u := ep.ExternalURLs.Http
+		if config.GetConfig().TLSConfig.EnableTLS {
+			u = ep.ExternalURLs.Https
+		}
+		if u != nil {
+			return buildEndpointURLString(u)
+		}
+	}
+	return ""
 }
 
 // bindingServiceURL is the first endpoint's in-cluster URL, or "" before the binding reconciles.

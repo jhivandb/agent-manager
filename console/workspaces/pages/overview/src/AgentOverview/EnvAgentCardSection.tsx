@@ -54,7 +54,7 @@ export function EnvAgentCardSection({
   const params = { orgName: orgId, projName: projectId, agentName: agentId, envId };
   const { data: agent } = useGetAgent({ orgName: orgId, projName: projectId, agentName: agentId });
   const isA2A = agent?.agentType?.subType === "a2a-agent";
-  const { data: card, isLoading, isError, error } = useGetAgentCard(params, { enabled: isA2A });
+  const { data, isLoading, isError, error } = useGetAgentCard(params, { enabled: isA2A });
   const { mutate: refresh, isPending: isRefreshing } = useRefreshAgentCard();
   const { mutate: removeSource, isPending: isRemoving } = useDeleteAgentCardSource();
   const { addConfirmation } = useConfirmationDialog();
@@ -72,11 +72,16 @@ export function EnvAgentCardSection({
   if (!isA2A) {
     return null;
   }
+  const noSource = isError && isNotFound(error);
+  // A 404 leaves the previous card cached; it no longer exists.
+  const card = noSource ? undefined : data;
   // Card content is third-party: read it as untyped JSON.
   const cardJson: Json = isObject(card?.card) ? card.card : {};
-  const noSource = isError && isNotFound(error);
+  const cardName = asString(cardJson.name);
+  const cardDescription = asString(cardJson.description);
+  const version = asString(cardJson.version)?.replace(/^v/i, "");
   const sourceUrl = card?.sourceUrl;
-  const showUrlForm = external && !sourceUrl;
+  const showUrlForm = external && noSource;
 
   const confirmRemove = () => addConfirmation({
     analytics: { entity: "agent-card-source", action: "remove" },
@@ -169,54 +174,61 @@ export function EnvAgentCardSection({
             <Stack spacing={3} sx={{ mt: 2 }}>
               <Box>
                 <Box display="flex" alignItems="baseline" gap={1}>
-                  <Typography variant="h6">{asString(cardJson.name)}</Typography>
-                  {asString(cardJson.version) && (
-                    <Typography variant="caption" color="text.secondary">v{asString(cardJson.version)}</Typography>
+                  <Typography variant="h6">{cardName}</Typography>
+                  {version && (
+                    <Typography variant="caption" color="text.secondary">v{version}</Typography>
                   )}
                 </Box>
-                {asString(cardJson.description) && (
-                  <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>{asString(cardJson.description)}</Typography>
+                {cardDescription && (
+                  <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>{cardDescription}</Typography>
                 )}
               </Box>
               <Box>
                 <Typography variant="overline" color="text.secondary" display="block" sx={{ mb: 1 }}>Interfaces</Typography>
                 <Stack spacing={1}>
-                  {objectsIn(cardJson.supportedInterfaces).map((iface, i) => (
-                    <Box key={`${i}-${asString(iface.url) ?? ""}`} display="flex" gap={1.5} alignItems="center">
-                      {asString(iface.protocolBinding) && (
-                        <Chip size="small" label={asString(iface.protocolBinding)} sx={{ minWidth: 96 }} />
-                      )}
-                      <Typography variant="body2" sx={{ fontFamily: "monospace", wordBreak: "break-all" }}>{asString(iface.url)}</Typography>
-                      {asString(iface.url) && (
-                        <Tooltip title={copiedUrl === iface.url ? "Copied" : "Copy URL"}>
-                          <IconButton size="small" onClick={() => copyUrl(iface.url as string)} sx={{ p: 0.25, flexShrink: 0 }}>
-                            <Copy size={14} />
-                          </IconButton>
-                        </Tooltip>
-                      )}
-                    </Box>
-                  ))}
+                  {objectsIn(cardJson.supportedInterfaces).map((iface, i) => {
+                    const url = asString(iface.url);
+                    const binding = asString(iface.protocolBinding);
+                    return (
+                      <Box key={`${i}-${url ?? ""}`} display="flex" gap={1.5} alignItems="center">
+                        {binding && <Chip size="small" label={binding} sx={{ minWidth: 96 }} />}
+                        <Typography variant="body2" sx={{ fontFamily: "monospace", wordBreak: "break-all" }}>{url}</Typography>
+                        {url && (
+                          <Tooltip title={copiedUrl === url ? "Copied" : "Copy URL"}>
+                            <IconButton size="small" onClick={() => copyUrl(url)} sx={{ p: 0.25, flexShrink: 0 }}>
+                              <Copy size={14} />
+                            </IconButton>
+                          </Tooltip>
+                        )}
+                      </Box>
+                    );
+                  })}
                 </Stack>
               </Box>
               <Box>
                 <Typography variant="overline" color="text.secondary" display="block" sx={{ mb: 1 }}>Skills</Typography>
                 <Stack spacing={1.5}>
-                  {objectsIn(cardJson.skills).map((skill, i) => (
-                    <Box
-                      key={`${i}-${asString(skill.id) ?? asString(skill.name) ?? ""}`}
-                      sx={{ p: 2, border: 1, borderColor: "divider", borderRadius: 1 }}
-                    >
-                      <Typography variant="subtitle2">{asString(skill.name)}</Typography>
-                      {asString(skill.description) && (
-                        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>{asString(skill.description)}</Typography>
-                      )}
-                      {stringsIn(skill.tags).length > 0 && (
-                        <Box display="flex" gap={0.75} flexWrap="wrap" sx={{ mt: 1.5 }}>
-                          {stringsIn(skill.tags).map((tag, j) => <Chip key={`${j}-${tag}`} size="small" variant="outlined" label={tag} />)}
-                        </Box>
-                      )}
-                    </Box>
-                  ))}
+                  {objectsIn(cardJson.skills).map((skill, i) => {
+                    const name = asString(skill.name);
+                    const description = asString(skill.description);
+                    const tags = stringsIn(skill.tags);
+                    return (
+                      <Box
+                        key={`${i}-${asString(skill.id) ?? name ?? ""}`}
+                        sx={{ p: 2, border: 1, borderColor: "divider", borderRadius: 1 }}
+                      >
+                        <Typography variant="subtitle2">{name}</Typography>
+                        {description && (
+                          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>{description}</Typography>
+                        )}
+                        {tags.length > 0 && (
+                          <Box display="flex" gap={0.75} flexWrap="wrap" sx={{ mt: 1.5 }}>
+                            {tags.map((tag, j) => <Chip key={`${j}-${tag}`} size="small" variant="outlined" label={tag} />)}
+                          </Box>
+                        )}
+                      </Box>
+                    );
+                  })}
                 </Stack>
               </Box>
               <Box>
