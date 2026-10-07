@@ -90,7 +90,7 @@ func TestA2AAgentCardEnqueuePreservesTheLastGoodCard(t *testing.T) {
 
 	require.NoError(t, repo.Enqueue(ctx, card))
 	read := dueCardFor(t, repo, card.AgentName)
-	require.NoError(t, repo.MarkFetched(ctx, read, json.RawMessage(sampleCard), "hash-1", "https://gw.example/a/.well-known/agent-card.json"))
+	require.NoError(t, repo.MarkFetched(ctx, read, json.RawMessage(sampleCard), "hash-1", "https://gw.example/a/.well-known/agent-card.json", ""))
 	fetched := cardRowOf(t, card)
 	require.NotNil(t, fetched.FetchedAt)
 
@@ -140,7 +140,7 @@ func fetchedExternalCard(t *testing.T, repo A2AAgentCardRepository, sourceURL st
 	cleanupCard(t, repo, card)
 	require.NoError(t, repo.Enqueue(ctx, card))
 	read := dueCardFor(t, repo, card.AgentName)
-	require.NoError(t, repo.MarkFetched(ctx, read, json.RawMessage(sampleCard), "hash-a", sourceURL))
+	require.NoError(t, repo.MarkFetched(ctx, read, json.RawMessage(sampleCard), "hash-a", sourceURL, ""))
 	return card
 }
 
@@ -206,7 +206,7 @@ func TestA2AAgentCardEnqueueSwitchesPlatformToExternal(t *testing.T) {
 	cleanupCard(t, repo, card)
 	require.NoError(t, repo.Enqueue(ctx, card))
 	read := dueCardFor(t, repo, card.AgentName)
-	require.NoError(t, repo.MarkFetched(ctx, read, json.RawMessage(sampleCard), "hash-a", "http://gw.internal/.well-known/agent-card.json"))
+	require.NoError(t, repo.MarkFetched(ctx, read, json.RawMessage(sampleCard), "hash-a", "http://gw.internal/.well-known/agent-card.json", "plat-r1"))
 
 	reenqueueExternal(t, repo, card, "https://b.example/.well-known/agent-card.json")
 
@@ -215,6 +215,28 @@ func TestA2AAgentCardEnqueueSwitchesPlatformToExternal(t *testing.T) {
 	assert.Equal(t, "https://b.example/.well-known/agent-card.json", row.SourceURL)
 	assert.Empty(t, row.Card)
 	assert.Nil(t, row.FetchedAt)
+	assert.Empty(t, row.ReleaseName)
+}
+
+// The release a platform card came from is what the drift check compares against.
+func TestA2AAgentCardMarkFetchedRecordsTheRelease(t *testing.T) {
+	ctx := context.Background()
+	repo := NewA2AAgentCardRepository(db.GetDB())
+	card := newTestCard("rel-"+uuid.New().String()[:8], models.A2AAgentCardSourcePlatform)
+	cleanupCard(t, repo, card)
+	require.NoError(t, repo.Enqueue(ctx, card))
+
+	require.NoError(t, repo.MarkFetched(ctx, dueCardFor(t, repo, card.AgentName), json.RawMessage(sampleCard), "h", "u", "agent-r7"))
+	assert.Equal(t, "agent-r7", cardRowOf(t, card).ReleaseName)
+
+	require.NoError(t, repo.Enqueue(ctx, newTestCardLike(card)))
+	assert.Equal(t, "agent-r7", cardRowOf(t, card).ReleaseName, "a re-fetch keeps the last good card's release")
+}
+
+func newTestCardLike(card *models.A2AAgentCard) *models.A2AAgentCard {
+	again := newTestCard(card.AgentName, card.Source)
+	again.OUID = card.OUID
+	return again
 }
 
 // A row whose retry is scheduled for later is not handed out until then.
@@ -311,7 +333,7 @@ func TestA2AAgentCardClaimDueLeasesTheRow(t *testing.T) {
 	afterLease, err := repo.ClaimDue(ctx, time.Now().Add(a2aAgentCardClaimLease+time.Minute), 100)
 	require.NoError(t, err)
 	assert.Contains(t, claimedNames(afterLease), card.AgentName)
-	require.NoError(t, repo.MarkFetched(ctx, claimed, json.RawMessage(sampleCard), "h", "u"),
+	require.NoError(t, repo.MarkFetched(ctx, claimed, json.RawMessage(sampleCard), "h", "u", ""),
 		"claiming is not mistaken for a re-enqueue")
 }
 
@@ -322,13 +344,13 @@ func TestA2AAgentCardMarkFetchedSkipsTheWriteForAnUnchangedHash(t *testing.T) {
 	card := newTestCard("hash-"+uuid.New().String()[:8], models.A2AAgentCardSourcePlatform)
 	cleanupCard(t, repo, card)
 	require.NoError(t, repo.Enqueue(ctx, card))
-	require.NoError(t, repo.MarkFetched(ctx, dueCardFor(t, repo, card.AgentName), json.RawMessage(sampleCard), "same", "u"))
+	require.NoError(t, repo.MarkFetched(ctx, dueCardFor(t, repo, card.AgentName), json.RawMessage(sampleCard), "same", "u", ""))
 
 	again := newTestCard(card.AgentName, models.A2AAgentCardSourcePlatform)
 	again.OUID = card.OUID
 	require.NoError(t, repo.Enqueue(ctx, again))
 	read := dueCardFor(t, repo, card.AgentName)
-	require.NoError(t, repo.MarkFetched(ctx, read, json.RawMessage(`{"name":"other"}`), "same", "u"))
+	require.NoError(t, repo.MarkFetched(ctx, read, json.RawMessage(`{"name":"other"}`), "same", "u", ""))
 
 	row := cardRowOf(t, card)
 	assert.Equal(t, models.A2AAgentCardStatusFetched, row.Status)
@@ -349,7 +371,7 @@ func TestA2AAgentCardMarkFetchedDoesNotSwallowANewerEnqueue(t *testing.T) {
 	moved.SourceURL = "https://new.example/.well-known/agent-card.json"
 	require.NoError(t, repo.Enqueue(ctx, &moved))
 
-	require.ErrorIs(t, repo.MarkFetched(ctx, read, json.RawMessage(sampleCard), "h", read.SourceURL), ErrA2AAgentCardSuperseded)
+	require.ErrorIs(t, repo.MarkFetched(ctx, read, json.RawMessage(sampleCard), "h", read.SourceURL, ""), ErrA2AAgentCardSuperseded)
 	require.ErrorIs(t, repo.MarkAttemptFailed(ctx, read, "x", time.Now().Add(time.Hour)), ErrA2AAgentCardSuperseded)
 	require.ErrorIs(t, repo.MarkFailed(ctx, read, "x"), ErrA2AAgentCardSuperseded)
 

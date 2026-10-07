@@ -30,6 +30,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/wso2/agent-manager/agent-manager-service/clients/clientmocks"
+	"github.com/wso2/agent-manager/agent-manager-service/clients/openchoreosvc/client"
 	"github.com/wso2/agent-manager/agent-manager-service/models"
 	"github.com/wso2/agent-manager/agent-manager-service/repositories"
 	"github.com/wso2/agent-manager/agent-manager-service/repositories/repomocks"
@@ -84,6 +85,9 @@ func newA2AReconcilerHarness(serviceURL string) *a2aReconcilerHarness {
 	}
 	cardRepo := &repomocks.A2AAgentCardRepositoryMock{
 		EnqueueFunc: func(context.Context, *models.A2AAgentCard) error { return nil },
+		GetFunc: func(context.Context, string, string, string, string) (*models.A2AAgentCard, error) {
+			return nil, repositories.ErrA2AAgentCardNotFound
+		},
 	}
 	deploymentRepo := &repomocks.DeploymentRepositoryMock{
 		CreateWithLimitEnforcementFunc: func(deployment *models.Deployment, maxDeployments int) error { return nil },
@@ -94,6 +98,9 @@ func newA2AReconcilerHarness(serviceURL string) *a2aReconcilerHarness {
 		},
 		GetComponentFunc: func(_ context.Context, _, _, name string) (*models.AgentResponse, error) {
 			return &models.AgentResponse{Name: name}, nil
+		},
+		GetReleaseBindingRolloutFunc: func(context.Context, string, string, string) (client.ReleaseBindingRollout, error) {
+			return client.ReleaseBindingRollout{ServiceURL: serviceURL, ReleaseName: "trip-planner-r2", Serving: true}, nil
 		},
 	}
 	gatewayRepo := &repomocks.GatewayRepositoryMock{
@@ -303,6 +310,13 @@ func (h *a2aReconcilerHarness) withPublished(rows ...models.A2APublication) {
 	h.pubRepo.RequeueFunc = func(ctx context.Context, read models.A2APublication) error { return nil }
 }
 
+// withCard makes the drift check find a platform card row in the given state.
+func (h *a2aReconcilerHarness) withCard(status models.A2AAgentCardStatus, releaseName string) {
+	h.cardRepo.GetFunc = func(context.Context, string, string, string, string) (*models.A2AAgentCard, error) {
+		return &models.A2AAgentCard{Source: models.A2AAgentCardSourcePlatform, Status: status, ReleaseName: releaseName}, nil
+	}
+}
+
 // A new release with a changed port moves the Service; the gateway must follow.
 func TestDriftCheckRequeuesWhenTheUpstreamMoved(t *testing.T) {
 	h := newA2AReconcilerHarness("http://trip-planner.dp-default:8080")
@@ -334,8 +348,8 @@ func TestDriftCheckIgnoresAnUnknownCurrentUpstream(t *testing.T) {
 	h.svc.checkUpstreamDrift(context.Background())
 	assert.Empty(t, h.pubRepo.RequeueCalls())
 
-	h.ocClient.GetReleaseBindingServiceURLFunc = func(ctx context.Context, ouID, componentName, environment string) (string, error) {
-		return "", assert.AnError
+	h.ocClient.GetReleaseBindingRolloutFunc = func(context.Context, string, string, string) (client.ReleaseBindingRollout, error) {
+		return client.ReleaseBindingRollout{}, assert.AnError
 	}
 	h.svc.checkUpstreamDrift(context.Background())
 	assert.Empty(t, h.pubRepo.RequeueCalls())
@@ -444,4 +458,61 @@ func TestReconcilerKeepsTheCardRowWhenTheAgentLookupFails(t *testing.T) {
 	h.svc.publishOne(context.Background(), pendingPublication())
 
 	assert.Empty(t, h.cardRepo.DeleteForAgentEnvCalls())
+}
+
+// A rebuild or redeploy moves the binding to a new release without telling AMS; the card must follow.
+func TestDriftCheckRefetchesACardFromAnOlderRelease(t *testing.T) {
+	const upstream = "http://trip-planner.dp-default:9099"
+	for _, status := range []models.A2AAgentCardStatus{models.A2AAgentCardStatusFetched, models.A2AAgentCardStatusFailed} {
+		t.Run(string(status), func(t *testing.T) {
+			h := newA2AReconcilerHarness(upstream)
+			h.withCard(status, "trip-planner-r1")
+			pub := publishedPublication(upstream)
+			h.withPublished(pub)
+
+			h.svc.checkUpstreamDrift(context.Background())
+
+			queued := h.cardRepo.EnqueueCalls()
+			require.Len(t, queued, 1)
+			assert.Equal(t, pub.AgentName, queued[0].Card.AgentName)
+			assert.Equal(t, pub.EnvironmentName, queued[0].Card.EnvironmentName)
+			assert.Equal(t, models.A2AAgentCardSourcePlatform, queued[0].Card.Source)
+			assert.Empty(t, h.pubRepo.RequeueCalls())
+		})
+	}
+}
+
+func TestDriftCheckLeavesACardAlone(t *testing.T) {
+	const upstream = "http://trip-planner.dp-default:9099"
+	cases := map[string]func(h *a2aReconcilerHarness){
+		"from the serving release": func(h *a2aReconcilerHarness) { h.withCard(models.A2AAgentCardStatusFetched, "trip-planner-r2") },
+		"already being fetched":    func(h *a2aReconcilerHarness) { h.withCard(models.A2AAgentCardStatusPending, "trip-planner-r1") },
+		"with no row": func(h *a2aReconcilerHarness) {
+			h.cardRepo.GetFunc = func(context.Context, string, string, string, string) (*models.A2AAgentCard, error) {
+				return nil, repositories.ErrA2AAgentCardNotFound
+			}
+		},
+		"while the new release is still rolling out": func(h *a2aReconcilerHarness) {
+			h.withCard(models.A2AAgentCardStatusFetched, "trip-planner-r1")
+			h.ocClient.GetReleaseBindingRolloutFunc = func(context.Context, string, string, string) (client.ReleaseBindingRollout, error) {
+				return client.ReleaseBindingRollout{ServiceURL: upstream, ReleaseName: "trip-planner-r2"}, nil
+			}
+		},
+		"of an external agent": func(h *a2aReconcilerHarness) {
+			h.cardRepo.GetFunc = func(context.Context, string, string, string, string) (*models.A2AAgentCard, error) {
+				return &models.A2AAgentCard{Source: models.A2AAgentCardSourceExternal, Status: models.A2AAgentCardStatusFetched}, nil
+			}
+		},
+	}
+	for name, setup := range cases {
+		t.Run(name, func(t *testing.T) {
+			h := newA2AReconcilerHarness(upstream)
+			h.withPublished(publishedPublication(upstream))
+			setup(h)
+
+			h.svc.checkUpstreamDrift(context.Background())
+
+			assert.Empty(t, h.cardRepo.EnqueueCalls())
+		})
+	}
 }

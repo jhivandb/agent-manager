@@ -54,10 +54,12 @@ type A2AAgentCard struct {
 	EnvironmentName string             `gorm:"column:environment_name;not null"`
 	Source          A2AAgentCardSource `gorm:"column:source;not null"`
 	// SourceURL is the registered URL for external cards, and the last URL fetched for platform cards.
-	SourceURL     string             `gorm:"column:source_url;not null;default:''"`
-	Card          json.RawMessage    `gorm:"column:card;type:jsonb"`
-	CardHash      string             `gorm:"column:card_hash;not null;default:''"`
-	FetchedAt     *time.Time         `gorm:"column:fetched_at"`
+	SourceURL string          `gorm:"column:source_url;not null;default:''"`
+	Card      json.RawMessage `gorm:"column:card;type:jsonb"`
+	CardHash  string          `gorm:"column:card_hash;not null;default:''"`
+	FetchedAt *time.Time      `gorm:"column:fetched_at"`
+	// ReleaseName is the binding release a platform card was fetched from.
+	ReleaseName   string             `gorm:"column:release_name;not null;default:''"`
 	Status        A2AAgentCardStatus `gorm:"column:status;not null;default:'pending'"`
 	AttemptCount  int                `gorm:"column:attempt_count;not null;default:0"`
 	LastError     string             `gorm:"column:last_error;not null;default:''"`

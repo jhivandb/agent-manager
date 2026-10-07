@@ -49,7 +49,7 @@ type A2AAgentCardRepository interface {
 	// ErrA2AAgentCardSuperseded when updated_at moved (a newer Enqueue).
 
 	// MarkFetched rewrites card and card_hash only when cardHash differs from read.CardHash.
-	MarkFetched(ctx context.Context, read models.A2AAgentCard, card json.RawMessage, cardHash, fetchedURL string) error
+	MarkFetched(ctx context.Context, read models.A2AAgentCard, card json.RawMessage, cardHash, fetchedURL, releaseName string) error
 	MarkAttemptFailed(ctx context.Context, read models.A2AAgentCard, lastErr string, nextAttemptAt time.Time) error
 	MarkFailed(ctx context.Context, read models.A2AAgentCard, lastErr string) error
 
@@ -116,6 +116,7 @@ func newSourceURLAssignments(changed string) []clause.Assignment {
 		keepUnlessChanged("card", "NULL"),
 		keepUnlessChanged("card_hash", "''"),
 		keepUnlessChanged("fetched_at", "NULL"),
+		keepUnlessChanged("release_name", "''"),
 		keepUnlessChanged("source_url", "excluded.source_url"),
 	}
 }
@@ -141,13 +142,14 @@ func (r *a2aAgentCardRepository) ClaimDue(ctx context.Context, now time.Time, li
 	return claimed, nil
 }
 
-func (r *a2aAgentCardRepository) MarkFetched(ctx context.Context, read models.A2AAgentCard, card json.RawMessage, cardHash, fetchedURL string) error {
+func (r *a2aAgentCardRepository) MarkFetched(ctx context.Context, read models.A2AAgentCard, card json.RawMessage, cardHash, fetchedURL, releaseName string) error {
 	updates := map[string]interface{}{
 		"status":          models.A2AAgentCardStatusFetched,
 		"fetched_at":      time.Now(),
 		"last_error":      "",
 		"next_attempt_at": nil,
 		"source_url":      fetchedURL,
+		"release_name":    releaseName,
 	}
 	if cardHash != read.CardHash {
 		updates["card"] = card

@@ -29,6 +29,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/wso2/agent-manager/agent-manager-service/clients/clientmocks"
+	"github.com/wso2/agent-manager/agent-manager-service/clients/openchoreosvc/client"
 	"github.com/wso2/agent-manager/agent-manager-service/models"
 	"github.com/wso2/agent-manager/agent-manager-service/repositories"
 	"github.com/wso2/agent-manager/agent-manager-service/repositories/repomocks"
@@ -58,7 +59,7 @@ type cardReconcilerHarness struct {
 // and whose agent exposes one endpoint at endpointURL.
 func newCardReconcilerHarness(endpointURL string) *cardReconcilerHarness {
 	repo := &repomocks.A2AAgentCardRepositoryMock{
-		MarkFetchedFunc: func(context.Context, models.A2AAgentCard, json.RawMessage, string, string) error { return nil },
+		MarkFetchedFunc: func(context.Context, models.A2AAgentCard, json.RawMessage, string, string, string) error { return nil },
 		MarkAttemptFailedFunc: func(context.Context, models.A2AAgentCard, string, time.Time) error {
 			return nil
 		},
@@ -74,6 +75,9 @@ func newCardReconcilerHarness(endpointURL string) *cardReconcilerHarness {
 			return map[string]models.EndpointsResponse{
 				"trip-planner-endpoint": {Endpoint: models.Endpoint{Name: "trip-planner-endpoint", URL: endpointURL}},
 			}, nil
+		},
+		GetReleaseBindingRolloutFunc: func(context.Context, string, string, string) (client.ReleaseBindingRollout, error) {
+			return client.ReleaseBindingRollout{ReleaseName: "trip-planner-r1", Serving: true}, nil
 		},
 	}
 	return &cardReconcilerHarness{
@@ -100,11 +104,29 @@ func TestCardReconcilerFetchesAPlatformCardThroughTheEndpoint(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, wantHash, marked[0].CardHash)
 	assert.Equal(t, h.fetcher.calls[0].URL, marked[0].FetchedURL)
+	assert.Equal(t, "trip-planner-r1", marked[0].ReleaseName, "the drift check compares against it")
+}
+
+// Mid-rollout the old pods still answer, so a fetch then would store the old release's card.
+func TestCardReconcilerWaitsForTheRolloutToFinish(t *testing.T) {
+	h := newCardReconcilerHarness("http://dev-org.gw.example/trip-planner/")
+	h.ocClient.GetReleaseBindingRolloutFunc = func(context.Context, string, string, string) (client.ReleaseBindingRollout, error) {
+		return client.ReleaseBindingRollout{ReleaseName: "trip-planner-r2"}, nil
+	}
+
+	h.svc.fetchOne(context.Background(), pendingCard(models.A2AAgentCardSourcePlatform))
+
+	assert.Empty(t, h.fetcher.calls)
+	assert.Empty(t, h.repo.MarkFetchedCalls())
+	failed := h.repo.MarkAttemptFailedCalls()
+	require.Len(t, failed, 1)
+	assert.Contains(t, failed[0].LastErr, "rolling out")
 }
 
 func TestCardReconcilerFetchesAnExternalCardGuarded(t *testing.T) {
 	h := newCardReconcilerHarness("")
 	h.ocClient.GetComponentEndpointsFunc = nil // external rows never ask OpenChoreo
+	h.ocClient.GetReleaseBindingRolloutFunc = nil
 	row := pendingCard(models.A2AAgentCardSourceExternal)
 	row.SourceURL = "https://agent.example/.well-known/agent-card.json"
 
@@ -190,7 +212,7 @@ func TestCardReconcilerPlatformFailuresNameTheURL(t *testing.T) {
 
 func TestCardReconcilerTreatsSupersededAsBenign(t *testing.T) {
 	h := newCardReconcilerHarness("http://gw.example/a")
-	h.repo.MarkFetchedFunc = func(context.Context, models.A2AAgentCard, json.RawMessage, string, string) error {
+	h.repo.MarkFetchedFunc = func(context.Context, models.A2AAgentCard, json.RawMessage, string, string, string) error {
 		return repositories.ErrA2AAgentCardSuperseded
 	}
 
@@ -228,7 +250,7 @@ func TestA2ACardHashIgnoresKeyOrderAndWhitespace(t *testing.T) {
 // A card the store rejects (e.g. JSONB refusing \u0000) must charge an attempt, not loop pending.
 func TestCardReconcilerChargesAnAttemptWhenTheCardCannotBeStored(t *testing.T) {
 	h := newCardReconcilerHarness("http://gw.example/a")
-	h.repo.MarkFetchedFunc = func(context.Context, models.A2AAgentCard, json.RawMessage, string, string) error {
+	h.repo.MarkFetchedFunc = func(context.Context, models.A2AAgentCard, json.RawMessage, string, string, string) error {
 		return errors.New("ERROR: unsupported Unicode escape sequence (SQLSTATE 22P05)")
 	}
 
@@ -242,7 +264,7 @@ func TestCardReconcilerChargesAnAttemptWhenTheCardCannotBeStored(t *testing.T) {
 
 func TestCardReconcilerFailsTheRowWhenTheLastCardCannotBeStored(t *testing.T) {
 	h := newCardReconcilerHarness("http://gw.example/a")
-	h.repo.MarkFetchedFunc = func(context.Context, models.A2AAgentCard, json.RawMessage, string, string) error {
+	h.repo.MarkFetchedFunc = func(context.Context, models.A2AAgentCard, json.RawMessage, string, string, string) error {
 		return errors.New("SQLSTATE 22003")
 	}
 	row := pendingCard(models.A2AAgentCardSourcePlatform)

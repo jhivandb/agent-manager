@@ -170,8 +170,13 @@ func (s *a2aPublicationReconcilerService) checkUpstreamDrift(ctx context.Context
 	}
 
 	for _, pub := range rows {
-		current, err := s.ocClient.GetReleaseBindingServiceURL(ctx, pub.OUID, pub.AgentName, pub.EnvironmentName)
-		if err != nil || current == "" || current == pub.PublishedUpstreamURL {
+		rollout, err := s.ocClient.GetReleaseBindingRollout(ctx, pub.OUID, pub.AgentName, pub.EnvironmentName)
+		if err != nil {
+			continue
+		}
+		current := rollout.ServiceURL
+		if current == "" || current == pub.PublishedUpstreamURL {
+			s.refetchCardOfNewRelease(ctx, pub, rollout)
 			continue
 		}
 		s.logger.Info("A2A agent upstream drifted from what its gateway was given; republishing",
@@ -186,6 +191,29 @@ func (s *a2aPublicationReconcilerService) checkUpstreamDrift(ctx context.Context
 				"agentName", pub.AgentName, "environment", pub.EnvironmentName, "error", err)
 		}
 	}
+}
+
+// refetchCardOfNewRelease re-queues a platform card fetched from an older release than the one now serving.
+func (s *a2aPublicationReconcilerService) refetchCardOfNewRelease(ctx context.Context, pub models.A2APublication, rollout client.ReleaseBindingRollout) {
+	if !rollout.Serving || rollout.ReleaseName == "" {
+		return
+	}
+	card, err := s.cardRepo.Get(ctx, pub.OUID, pub.ProjectName, pub.AgentName, pub.EnvironmentName)
+	if err != nil {
+		if !errors.Is(err, repositories.ErrA2AAgentCardNotFound) {
+			s.logger.Warn("Failed to read A2A agent card for release drift",
+				"agentName", pub.AgentName, "environment", pub.EnvironmentName, "error", err)
+		}
+		return
+	}
+	if card.Source != models.A2AAgentCardSourcePlatform || card.Status == models.A2AAgentCardStatusPending ||
+		card.ReleaseName == rollout.ReleaseName {
+		return
+	}
+	s.logger.Info("A2A agent serves a new release; re-fetching its card",
+		"agentName", pub.AgentName, "environment", pub.EnvironmentName,
+		"cardRelease", card.ReleaseName, "currentRelease", rollout.ReleaseName)
+	s.enqueueCardFetch(ctx, pub)
 }
 
 // publishOne emits one agent-environment pair's Agent resource, or schedules a

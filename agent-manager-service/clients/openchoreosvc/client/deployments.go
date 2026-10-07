@@ -1835,8 +1835,39 @@ func (c *openChoreoClient) GetReleaseBindingServiceURL(ctx context.Context, ouID
 	if err != nil {
 		return "", fmt.Errorf("failed to find release binding for %s: %w", componentName, err)
 	}
+	return bindingServiceURL(binding), nil
+}
+
+// ReleaseBindingRollout is the release an environment's binding points at, and whether it serves it yet.
+type ReleaseBindingRollout struct {
+	ServiceURL  string
+	ReleaseName string
+	// Serving is false until the release's workload finishes rolling out, so old pods are gone.
+	Serving bool
+}
+
+func (c *openChoreoClient) GetReleaseBindingRollout(ctx context.Context, ouID, componentName, environment string) (ReleaseBindingRollout, error) {
+	binding, err := c.findReleaseBindingForEnv(ctx, c.NamespaceFor(ouID), componentName, environment)
+	if err != nil {
+		return ReleaseBindingRollout{}, fmt.Errorf("failed to find release binding for %s: %w", componentName, err)
+	}
+	if binding == nil {
+		return ReleaseBindingRollout{}, nil
+	}
+	rollout := ReleaseBindingRollout{
+		ServiceURL: bindingServiceURL(binding),
+		Serving:    determineDeploymentStatus(binding, runtimeReplicaState{}) == DeploymentStatusActive,
+	}
+	if binding.Spec != nil && binding.Spec.ReleaseName != nil {
+		rollout.ReleaseName = *binding.Spec.ReleaseName
+	}
+	return rollout, nil
+}
+
+// bindingServiceURL is the first endpoint's in-cluster URL, or "" before the binding reconciles.
+func bindingServiceURL(binding *gen.ReleaseBinding) string {
 	if binding == nil || binding.Status == nil || binding.Status.Endpoints == nil {
-		return "", nil
+		return ""
 	}
 	for _, ep := range *binding.Status.Endpoints {
 		if ep.ServiceURL == nil || strings.TrimSpace(ep.ServiceURL.Host) == "" {
@@ -1847,7 +1878,7 @@ func (c *openChoreoClient) GetReleaseBindingServiceURL(ctx context.Context, ouID
 			scheme := "http"
 			svc.Scheme = &scheme
 		}
-		return buildEndpointURLString(&svc), nil
+		return buildEndpointURLString(&svc)
 	}
-	return "", nil
+	return ""
 }

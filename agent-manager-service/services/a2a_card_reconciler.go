@@ -51,6 +51,9 @@ const (
 // errA2ACardEndpointNotReady means the agent's environment has no public endpoint URL yet.
 var errA2ACardEndpointNotReady = errors.New("agent has no public endpoint in this environment yet")
 
+// errA2ACardRolloutInProgress means the agent's latest release is not serving in this environment yet.
+var errA2ACardRolloutInProgress = errors.New("agent is still rolling out in this environment")
+
 // A2ACardReconcilerService drains the a2a_agent_cards fetch queue.
 type A2ACardReconcilerService interface {
 	Start(ctx context.Context) error
@@ -127,17 +130,17 @@ func (s *a2aCardReconcilerService) RunOnce(ctx context.Context) {
 
 // fetchOne fetches one row's card and records the outcome.
 func (s *a2aCardReconcilerService) fetchOne(ctx context.Context, row models.A2AAgentCard) {
-	url, body, err := s.attemptFetch(ctx, row)
+	fetched, err := s.attemptFetch(ctx, row)
 	if err != nil {
 		s.recordAttemptFailure(ctx, row, err)
 		return
 	}
-	hash, err := a2aCardHash(body)
+	hash, err := a2aCardHash(fetched.body)
 	if err != nil {
 		s.recordAttemptFailure(ctx, row, err)
 		return
 	}
-	err = s.cardRepo.MarkFetched(ctx, row, body, hash, url)
+	err = s.cardRepo.MarkFetched(ctx, row, fetched.body, hash, fetched.url, fetched.releaseName)
 	switch {
 	case errors.Is(err, repositories.ErrA2AAgentCardSuperseded):
 		s.logSuperseded(row)
@@ -146,26 +149,44 @@ func (s *a2aCardReconcilerService) fetchOne(ctx context.Context, row models.A2AA
 	}
 }
 
-// attemptFetch returns the URL it fetched and the card it got.
-func (s *a2aCardReconcilerService) attemptFetch(ctx context.Context, row models.A2AAgentCard) (string, json.RawMessage, error) {
+// a2aCardFetch is a fetched card, the URL it came from and, for platform cards, the release that served it.
+type a2aCardFetch struct {
+	url         string
+	releaseName string
+	body        json.RawMessage
+}
+
+func (s *a2aCardReconcilerService) attemptFetch(ctx context.Context, row models.A2AAgentCard) (a2aCardFetch, error) {
 	switch row.Source {
 	case models.A2AAgentCardSourceExternal:
 		body, err := s.fetcher.Fetch(ctx, row.SourceURL, true)
-		return row.SourceURL, body, err
+		return a2aCardFetch{url: row.SourceURL, body: body}, err
 	case models.A2AAgentCardSourcePlatform:
-		url, err := s.platformCardURL(ctx, row)
-		if err != nil {
-			return "", nil, err
-		}
-		body, err := s.fetcher.Fetch(ctx, url, false)
-		if err != nil {
-			// The derived URL is otherwise invisible to the user.
-			return url, nil, fmt.Errorf("%s: %w", url, err)
-		}
-		return url, body, nil
+		return s.fetchPlatformCard(ctx, row)
 	default:
-		return "", nil, fmt.Errorf("unknown agent card source %q", row.Source)
+		return a2aCardFetch{}, fmt.Errorf("unknown agent card source %q", row.Source)
 	}
+}
+
+// fetchPlatformCard waits out a rollout first, since until it finishes the old release can still answer.
+func (s *a2aCardReconcilerService) fetchPlatformCard(ctx context.Context, row models.A2AAgentCard) (a2aCardFetch, error) {
+	rollout, err := s.ocClient.GetReleaseBindingRollout(ctx, row.OUID, row.AgentName, row.EnvironmentName)
+	if err != nil {
+		return a2aCardFetch{}, fmt.Errorf("failed to read agent rollout: %w", err)
+	}
+	if !rollout.Serving {
+		return a2aCardFetch{}, errA2ACardRolloutInProgress
+	}
+	url, err := s.platformCardURL(ctx, row)
+	if err != nil {
+		return a2aCardFetch{}, err
+	}
+	body, err := s.fetcher.Fetch(ctx, url, false)
+	if err != nil {
+		// The derived URL is otherwise invisible to the user.
+		return a2aCardFetch{url: url}, fmt.Errorf("%s: %w", url, err)
+	}
+	return a2aCardFetch{url: url, releaseName: rollout.ReleaseName, body: body}, nil
 }
 
 // platformCardURL is the agent's public endpoint (routed through the gateway) plus the card path.

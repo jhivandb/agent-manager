@@ -42,7 +42,7 @@ import (
 //			MarkFailedFunc: func(ctx context.Context, read models.A2AAgentCard, lastErr string) error {
 //				panic("mock out the MarkFailed method")
 //			},
-//			MarkFetchedFunc: func(ctx context.Context, read models.A2AAgentCard, card json.RawMessage, cardHash string, fetchedURL string) error {
+//			MarkFetchedFunc: func(ctx context.Context, read models.A2AAgentCard, card json.RawMessage, cardHash string, fetchedURL string, releaseName string) error {
 //				panic("mock out the MarkFetched method")
 //			},
 //		}
@@ -77,7 +77,7 @@ type A2AAgentCardRepositoryMock struct {
 	MarkFailedFunc func(ctx context.Context, read models.A2AAgentCard, lastErr string) error
 
 	// MarkFetchedFunc mocks the MarkFetched method.
-	MarkFetchedFunc func(ctx context.Context, read models.A2AAgentCard, card json.RawMessage, cardHash string, fetchedURL string) error
+	MarkFetchedFunc func(ctx context.Context, read models.A2AAgentCard, card json.RawMessage, cardHash string, fetchedURL string, releaseName string) error
 
 	// calls tracks calls to the methods.
 	calls struct {
@@ -177,6 +177,8 @@ type A2AAgentCardRepositoryMock struct {
 			CardHash string
 			// FetchedURL is the fetchedURL argument value.
 			FetchedURL string
+			// ReleaseName is the releaseName argument value.
+			ReleaseName string
 		}
 	}
 	lockClaimDue          sync.RWMutex
@@ -535,27 +537,29 @@ func (mock *A2AAgentCardRepositoryMock) MarkFailedCalls() []struct {
 }
 
 // MarkFetched calls MarkFetchedFunc.
-func (mock *A2AAgentCardRepositoryMock) MarkFetched(ctx context.Context, read models.A2AAgentCard, card json.RawMessage, cardHash string, fetchedURL string) error {
+func (mock *A2AAgentCardRepositoryMock) MarkFetched(ctx context.Context, read models.A2AAgentCard, card json.RawMessage, cardHash string, fetchedURL string, releaseName string) error {
 	if mock.MarkFetchedFunc == nil {
 		panic("A2AAgentCardRepositoryMock.MarkFetchedFunc: method is nil but A2AAgentCardRepository.MarkFetched was just called")
 	}
 	callInfo := struct {
-		Ctx        context.Context
-		Read       models.A2AAgentCard
-		Card       json.RawMessage
-		CardHash   string
-		FetchedURL string
+		Ctx         context.Context
+		Read        models.A2AAgentCard
+		Card        json.RawMessage
+		CardHash    string
+		FetchedURL  string
+		ReleaseName string
 	}{
-		Ctx:        ctx,
-		Read:       read,
-		Card:       card,
-		CardHash:   cardHash,
-		FetchedURL: fetchedURL,
+		Ctx:         ctx,
+		Read:        read,
+		Card:        card,
+		CardHash:    cardHash,
+		FetchedURL:  fetchedURL,
+		ReleaseName: releaseName,
 	}
 	mock.lockMarkFetched.Lock()
 	mock.calls.MarkFetched = append(mock.calls.MarkFetched, callInfo)
 	mock.lockMarkFetched.Unlock()
-	return mock.MarkFetchedFunc(ctx, read, card, cardHash, fetchedURL)
+	return mock.MarkFetchedFunc(ctx, read, card, cardHash, fetchedURL, releaseName)
 }
 
 // MarkFetchedCalls gets all the calls that were made to MarkFetched.
@@ -563,18 +567,20 @@ func (mock *A2AAgentCardRepositoryMock) MarkFetched(ctx context.Context, read mo
 //
 //	len(mockedA2AAgentCardRepository.MarkFetchedCalls())
 func (mock *A2AAgentCardRepositoryMock) MarkFetchedCalls() []struct {
-	Ctx        context.Context
-	Read       models.A2AAgentCard
-	Card       json.RawMessage
-	CardHash   string
-	FetchedURL string
+	Ctx         context.Context
+	Read        models.A2AAgentCard
+	Card        json.RawMessage
+	CardHash    string
+	FetchedURL  string
+	ReleaseName string
 } {
 	var calls []struct {
-		Ctx        context.Context
-		Read       models.A2AAgentCard
-		Card       json.RawMessage
-		CardHash   string
-		FetchedURL string
+		Ctx         context.Context
+		Read        models.A2AAgentCard
+		Card        json.RawMessage
+		CardHash    string
+		FetchedURL  string
+		ReleaseName string
 	}
 	mock.lockMarkFetched.RLock()
 	calls = mock.calls.MarkFetched
