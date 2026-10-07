@@ -220,3 +220,50 @@ func TestDeleteA2ACardSourceRejectsAPlatformAgent(t *testing.T) {
 	assert.ErrorIs(t, err, utils.ErrAgentCardSourceNotExternal)
 	assert.Empty(t, repo.DeleteForAgentEnvCalls())
 }
+
+// agentGoneDuringEnqueue swaps the agent lookup the moment the row is written, as a racing delete would.
+func agentGoneDuringEnqueue(repo *repomocks.A2AAgentCardRepositoryMock, oc *clientmocks.OpenChoreoClientMock, after func(context.Context, string, string, string) (*models.AgentResponse, error)) {
+	repo.EnqueueFunc = func(context.Context, *models.A2AAgentCard) error {
+		oc.GetComponentFunc = after
+		return nil
+	}
+}
+
+func TestSetA2ACardSourceDropsTheRowWhenTheAgentIsDeletedMeanwhile(t *testing.T) {
+	svc, repo, oc := cardServiceFor("external", "a2a-agent")
+	agentGoneDuringEnqueue(repo, oc, func(context.Context, string, string, string) (*models.AgentResponse, error) {
+		return nil, utils.ErrNotFound
+	})
+
+	err := svc.SetA2ACardSource(tierGrantedCtx(t), "org", "proj", "agent", "dev", "https://93.184.215.14/.well-known/agent-card.json")
+
+	assert.ErrorIs(t, err, utils.ErrAgentNotFound)
+	deleted := repo.DeleteForAgentEnvCalls()
+	require.Len(t, deleted, 1)
+	assert.Equal(t, "dev", deleted[0].EnvironmentName)
+}
+
+func TestRefreshA2AAgentCardDropsTheRowWhenTheAgentIsReplacedMeanwhile(t *testing.T) {
+	svc, repo, oc := cardServiceFor("internal", "a2a-agent")
+	agentGoneDuringEnqueue(repo, oc, func(_ context.Context, _, _, name string) (*models.AgentResponse, error) {
+		return &models.AgentResponse{UUID: "new-agent-uuid", Name: name, Type: models.AgentType{SubType: "a2a-agent"}}, nil
+	})
+
+	err := svc.RefreshA2AAgentCard(tierGrantedCtx(t), "org", "proj", "agent", "dev")
+
+	assert.ErrorIs(t, err, utils.ErrAgentNotFound)
+	assert.Len(t, repo.DeleteForAgentEnvCalls(), 1)
+}
+
+func TestSetA2ACardSourceDoesNotMaskARecheckFailure(t *testing.T) {
+	svc, repo, oc := cardServiceFor("external", "a2a-agent")
+	agentGoneDuringEnqueue(repo, oc, func(context.Context, string, string, string) (*models.AgentResponse, error) {
+		return nil, assert.AnError
+	})
+
+	err := svc.SetA2ACardSource(tierGrantedCtx(t), "org", "proj", "agent", "dev", "https://93.184.215.14/.well-known/agent-card.json")
+
+	assert.Error(t, err)
+	assert.NotErrorIs(t, err, utils.ErrAgentNotFound)
+	assert.Empty(t, repo.DeleteForAgentEnvCalls())
+}

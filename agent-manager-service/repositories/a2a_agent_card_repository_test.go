@@ -181,6 +181,42 @@ func TestA2AAgentCardEnqueueKeepsTheCardForTheSameURL(t *testing.T) {
 	assert.NotNil(t, row.FetchedAt)
 }
 
+// A platform enqueue onto an external row must stop fetching the third-party URL.
+func TestA2AAgentCardEnqueueSwitchesExternalToPlatform(t *testing.T) {
+	repo := NewA2AAgentCardRepository(db.GetDB())
+	card := fetchedExternalCard(t, repo, "https://a.example/.well-known/agent-card.json")
+
+	platform := newTestCard(card.AgentName, models.A2AAgentCardSourcePlatform)
+	platform.OUID = card.OUID
+	require.NoError(t, repo.Enqueue(context.Background(), platform))
+
+	row := cardRowOf(t, card)
+	assert.Equal(t, models.A2AAgentCardSourcePlatform, row.Source)
+	assert.Empty(t, row.SourceURL)
+	assert.Empty(t, row.Card)
+	assert.Empty(t, row.CardHash)
+	assert.Nil(t, row.FetchedAt)
+}
+
+// A URL registered on an inherited platform row must be fetched as external.
+func TestA2AAgentCardEnqueueSwitchesPlatformToExternal(t *testing.T) {
+	ctx := context.Background()
+	repo := NewA2AAgentCardRepository(db.GetDB())
+	card := newTestCard("plat-"+uuid.New().String()[:8], models.A2AAgentCardSourcePlatform)
+	cleanupCard(t, repo, card)
+	require.NoError(t, repo.Enqueue(ctx, card))
+	read := dueCardFor(t, repo, card.AgentName)
+	require.NoError(t, repo.MarkFetched(ctx, read, json.RawMessage(sampleCard), "hash-a", "http://gw.internal/.well-known/agent-card.json"))
+
+	reenqueueExternal(t, repo, card, "https://b.example/.well-known/agent-card.json")
+
+	row := cardRowOf(t, card)
+	assert.Equal(t, models.A2AAgentCardSourceExternal, row.Source)
+	assert.Equal(t, "https://b.example/.well-known/agent-card.json", row.SourceURL)
+	assert.Empty(t, row.Card)
+	assert.Nil(t, row.FetchedAt)
+}
+
 // A row whose retry is scheduled for later is not handed out until then.
 func TestA2AAgentCardClaimDueRespectsBackoff(t *testing.T) {
 	repo := NewA2AAgentCardRepository(db.GetDB())

@@ -97,7 +97,7 @@ func (s *a2aAgentCardService) RefreshA2AAgentCard(
 		}
 		source = models.A2AAgentCardSourceExternal
 	}
-	return s.enqueue(ctx, ouID, projectName, agentName, envName, source, "")
+	return s.enqueue(ctx, agent, ouID, projectName, envName, source, "")
 }
 
 func (s *a2aAgentCardService) SetA2ACardSource(
@@ -114,7 +114,7 @@ func (s *a2aAgentCardService) SetA2ACardSource(
 	if _, err := requireEnvironmentTier(ctx, s.ocClient, s.logger, ouID, envName); err != nil {
 		return err
 	}
-	err = s.enqueue(ctx, ouID, projectName, agentName, envName, models.A2AAgentCardSourceExternal, sourceURL)
+	err = s.enqueue(ctx, agent, ouID, projectName, envName, models.A2AAgentCardSourceExternal, sourceURL)
 	recordCardSourceChange(ctx, audit.ActionAgentSetCardSource, agent, ouID, projectName, envName, err,
 		audit.Detail("sourceUrl", sourceURL))
 	return err
@@ -155,13 +155,13 @@ func recordCardSourceChange(
 }
 
 func (s *a2aAgentCardService) enqueue(
-	ctx context.Context, ouID, projectName, agentName, envName string,
+	ctx context.Context, agent *models.AgentResponse, ouID, projectName, envName string,
 	source models.A2AAgentCardSource, sourceURL string,
 ) error {
 	card := &models.A2AAgentCard{
 		OUID:            ouID,
 		ProjectName:     projectName,
-		AgentName:       agentName,
+		AgentName:       agent.Name,
 		EnvironmentName: envName,
 		Source:          source,
 		SourceURL:       sourceURL,
@@ -169,7 +169,25 @@ func (s *a2aAgentCardService) enqueue(
 	if err := s.cardRepo.Enqueue(ctx, card); err != nil {
 		return fmt.Errorf("failed to queue agent card fetch: %w", err)
 	}
-	return nil
+	return s.dropIfAgentGone(ctx, agent, ouID, projectName, envName)
+}
+
+// dropIfAgentGone deletes the just-written row when the agent was deleted or replaced during the upsert.
+func (s *a2aAgentCardService) dropIfAgentGone(
+	ctx context.Context, agent *models.AgentResponse, ouID, projectName, envName string,
+) error {
+	current, err := s.getAgent(ctx, ouID, projectName, agent.Name)
+	switch {
+	case errors.Is(err, utils.ErrAgentNotFound):
+	case err != nil:
+		return err
+	case current.UUID == agent.UUID:
+		return nil
+	}
+	if err := s.cardRepo.DeleteForAgentEnv(ctx, ouID, projectName, agent.Name, envName); err != nil {
+		return fmt.Errorf("failed to drop agent card of a deleted agent: %w", err)
+	}
+	return utils.ErrAgentNotFound
 }
 
 func (s *a2aAgentCardService) getAgent(

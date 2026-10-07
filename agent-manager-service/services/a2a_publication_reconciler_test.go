@@ -33,6 +33,7 @@ import (
 	"github.com/wso2/agent-manager/agent-manager-service/models"
 	"github.com/wso2/agent-manager/agent-manager-service/repositories"
 	"github.com/wso2/agent-manager/agent-manager-service/repositories/repomocks"
+	"github.com/wso2/agent-manager/agent-manager-service/utils"
 )
 
 func testLogger() *slog.Logger {
@@ -90,6 +91,9 @@ func newA2AReconcilerHarness(serviceURL string) *a2aReconcilerHarness {
 	ocClient := &clientmocks.OpenChoreoClientMock{
 		GetReleaseBindingServiceURLFunc: func(ctx context.Context, ouID, componentName, environment string) (string, error) {
 			return serviceURL, nil
+		},
+		GetComponentFunc: func(_ context.Context, _, _, name string) (*models.AgentResponse, error) {
+			return &models.AgentResponse{Name: name}, nil
 		},
 	}
 	gatewayRepo := &repomocks.GatewayRepositoryMock{
@@ -411,4 +415,33 @@ func TestReconcilerQueuesNoCardWhenThePublishFails(t *testing.T) {
 	h.svc.publishOne(context.Background(), pendingPublication())
 
 	assert.Empty(t, h.cardRepo.EnqueueCalls())
+}
+
+// A delete that clears the card rows between MarkPublished and the enqueue must not leave an orphan.
+func TestReconcilerDropsTheCardRowWhenTheAgentWasDeletedMeanwhile(t *testing.T) {
+	h := newA2AReconcilerHarness("http://trip-planner.dp-default:9099")
+	h.ocClient.GetComponentFunc = func(context.Context, string, string, string) (*models.AgentResponse, error) {
+		return nil, utils.ErrNotFound
+	}
+	h.cardRepo.DeleteForAgentEnvFunc = func(context.Context, string, string, string, string) error { return nil }
+	pub := pendingPublication()
+
+	h.svc.publishOne(context.Background(), pub)
+
+	require.Len(t, h.cardRepo.EnqueueCalls(), 1)
+	deleted := h.cardRepo.DeleteForAgentEnvCalls()
+	require.Len(t, deleted, 1)
+	assert.Equal(t, pub.AgentName, deleted[0].AgentName)
+	assert.Equal(t, pub.EnvironmentName, deleted[0].EnvironmentName)
+}
+
+func TestReconcilerKeepsTheCardRowWhenTheAgentLookupFails(t *testing.T) {
+	h := newA2AReconcilerHarness("http://trip-planner.dp-default:9099")
+	h.ocClient.GetComponentFunc = func(context.Context, string, string, string) (*models.AgentResponse, error) {
+		return nil, assert.AnError
+	}
+
+	h.svc.publishOne(context.Background(), pendingPublication())
+
+	assert.Empty(t, h.cardRepo.DeleteForAgentEnvCalls())
 }

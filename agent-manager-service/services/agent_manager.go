@@ -1585,6 +1585,17 @@ func (s *agentManagerService) createComponentAgent(ctx context.Context, ouID, pr
 		return err
 	}
 
+	// After the create, so a duplicate-name request cannot wipe a live agent's rows.
+	if err := s.clearInheritedA2ACards(ctx, ouID, projectName, req.Name); err != nil {
+		if hasSecrets {
+			s.cleanupSecretsOnRollback(ctx, secretLocation)
+		}
+		if errDeletion := s.ocClient.DeleteComponent(ctx, ouID, projectName, req.Name); errDeletion != nil {
+			s.logger.Error("Failed to rollback agent component after card cleanup failure", "agentName", req.Name, "error", errDeletion)
+		}
+		return err
+	}
+
 	var agentAPIArtifact *models.Artifact
 	var firstEnvUUID string
 	if req.AgentType.Type == string(utils.AgentTypeAPI) {
@@ -2820,6 +2831,17 @@ func withAgentConfigCleanupRetry(ctx context.Context, logger *slog.Logger, confi
 		}
 	}
 	return lastErr
+}
+
+// clearInheritedA2ACards drops card rows a deleted same-named agent left behind.
+func (s *agentManagerService) clearInheritedA2ACards(ctx context.Context, ouID, projectName, agentName string) error {
+	if s.a2aCardRepo == nil {
+		return nil
+	}
+	if err := s.a2aCardRepo.DeleteForAgent(ctx, ouID, projectName, agentName); err != nil {
+		return fmt.Errorf("failed to clear leftover A2A agent card rows: %w", err)
+	}
+	return nil
 }
 
 // cleanupAgentMonitors removes all monitors owned by an agent. Best-effort: orphaned

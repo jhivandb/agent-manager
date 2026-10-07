@@ -29,6 +29,7 @@ import (
 	"github.com/wso2/agent-manager/agent-manager-service/clients/openchoreosvc/client"
 	"github.com/wso2/agent-manager/agent-manager-service/models"
 	"github.com/wso2/agent-manager/agent-manager-service/repositories"
+	"github.com/wso2/agent-manager/agent-manager-service/utils"
 )
 
 const (
@@ -218,6 +219,20 @@ func (s *a2aPublicationReconcilerService) enqueueCardFetch(ctx context.Context, 
 	}
 	if err := s.cardRepo.Enqueue(ctx, card); err != nil {
 		s.logger.Warn("Published A2A agent but failed to queue its card fetch",
+			"agentName", pub.AgentName, "environment", pub.EnvironmentName, "error", err)
+		return
+	}
+	s.dropCardIfAgentGone(ctx, pub)
+}
+
+// dropCardIfAgentGone removes a card row written after a racing DeleteAgent cleared the agent's rows.
+func (s *a2aPublicationReconcilerService) dropCardIfAgentGone(ctx context.Context, pub models.A2APublication) {
+	_, err := s.ocClient.GetComponent(ctx, pub.OUID, pub.ProjectName, pub.AgentName)
+	if !errors.Is(err, utils.ErrNotFound) {
+		return
+	}
+	if err := s.cardRepo.DeleteForAgentEnv(ctx, pub.OUID, pub.ProjectName, pub.AgentName, pub.EnvironmentName); err != nil {
+		s.logger.Warn("Failed to drop the card row of a deleted A2A agent",
 			"agentName", pub.AgentName, "environment", pub.EnvironmentName, "error", err)
 	}
 }

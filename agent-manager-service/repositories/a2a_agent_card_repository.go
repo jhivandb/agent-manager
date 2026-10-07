@@ -39,7 +39,7 @@ var ErrA2AAgentCardNotFound = errors.New("a2a agent card not found")
 //go:generate moq -rm -fmt goimports -skip-ensure -pkg repomocks -out repomocks/a2a_agent_card_repository_mock.go . A2AAgentCardRepository:A2AAgentCardRepositoryMock
 type A2AAgentCardRepository interface {
 	// Enqueue upserts the row as pending with a fresh budget, keeping card, card_hash and fetched_at.
-	// An external row that names a different source_url replaces it and clears that card state.
+	// A different source, or an external row naming a different source_url, replaces them and clears the card state.
 	Enqueue(ctx context.Context, card *models.A2AAgentCard) error
 
 	// ClaimDue leases up to limit pending rows whose next_attempt_at has passed; NULL is never due.
@@ -82,10 +82,12 @@ func (r *a2aAgentCardRepository) Enqueue(ctx context.Context, card *models.A2AAg
 	card.NextAttemptAt = &now
 	card.UpdatedAt = now
 
-	updates := clause.AssignmentColumns([]string{"status", "attempt_count", "last_error", "next_attempt_at", "updated_at"})
+	changed := a2aCardSourceChanged
 	if card.Source == models.A2AAgentCardSourceExternal && card.SourceURL != "" {
-		updates = append(updates, newSourceURLAssignments()...)
+		changed += " OR " + a2aCardSourceURLChanged
 	}
+	updates := clause.AssignmentColumns([]string{"status", "attempt_count", "last_error", "next_attempt_at", "updated_at", "source"})
+	updates = append(updates, newSourceURLAssignments(changed)...)
 	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns: []clause.Column{
 			{Name: "ou_id"},
@@ -97,20 +99,24 @@ func (r *a2aAgentCardRepository) Enqueue(ctx context.Context, card *models.A2AAg
 	}).Create(card).Error
 }
 
-// newSourceURLAssignments takes the new source_url and drops the old URL's card if it changed.
-func newSourceURLAssignments() []clause.Assignment {
-	const changed = "a2a_agent_cards.source_url IS DISTINCT FROM excluded.source_url"
-	keepUnlessChanged := func(column, cleared string) clause.Assignment {
+const (
+	a2aCardSourceChanged    = "a2a_agent_cards.source IS DISTINCT FROM excluded.source"
+	a2aCardSourceURLChanged = "a2a_agent_cards.source_url IS DISTINCT FROM excluded.source_url"
+)
+
+// newSourceURLAssignments takes the new source_url and drops the old card when changed holds.
+func newSourceURLAssignments(changed string) []clause.Assignment {
+	keepUnlessChanged := func(column, replacement string) clause.Assignment {
 		return clause.Assignment{
 			Column: clause.Column{Name: column},
-			Value:  gorm.Expr("CASE WHEN " + changed + " THEN " + cleared + " ELSE a2a_agent_cards." + column + " END"),
+			Value:  gorm.Expr("CASE WHEN " + changed + " THEN " + replacement + " ELSE a2a_agent_cards." + column + " END"),
 		}
 	}
 	return []clause.Assignment{
 		keepUnlessChanged("card", "NULL"),
 		keepUnlessChanged("card_hash", "''"),
 		keepUnlessChanged("fetched_at", "NULL"),
-		{Column: clause.Column{Name: "source_url"}, Value: gorm.Expr("excluded.source_url")},
+		keepUnlessChanged("source_url", "excluded.source_url"),
 	}
 }
 
