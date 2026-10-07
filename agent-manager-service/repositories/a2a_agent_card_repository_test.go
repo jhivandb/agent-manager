@@ -131,6 +131,56 @@ func TestA2AAgentCardEnqueueKeepsSourceURLUnlessGiven(t *testing.T) {
 	assert.Equal(t, moved.SourceURL, cardRowOf(t, card).SourceURL)
 }
 
+// fetchedExternalCard enqueues an external card at sourceURL and records it as fetched.
+func fetchedExternalCard(t *testing.T, repo A2AAgentCardRepository, sourceURL string) *models.A2AAgentCard {
+	t.Helper()
+	ctx := context.Background()
+	card := newTestCard("url-"+uuid.New().String()[:8], models.A2AAgentCardSourceExternal)
+	card.SourceURL = sourceURL
+	cleanupCard(t, repo, card)
+	require.NoError(t, repo.Enqueue(ctx, card))
+	read := dueCardFor(t, repo, card.AgentName)
+	require.NoError(t, repo.MarkFetched(ctx, read, json.RawMessage(sampleCard), "hash-a", sourceURL))
+	return card
+}
+
+func reenqueueExternal(t *testing.T, repo A2AAgentCardRepository, card *models.A2AAgentCard, sourceURL string) {
+	t.Helper()
+	again := newTestCard(card.AgentName, models.A2AAgentCardSourceExternal)
+	again.OUID = card.OUID
+	again.SourceURL = sourceURL
+	require.NoError(t, repo.Enqueue(context.Background(), again))
+}
+
+// A new URL's row must never show the previous URL's card.
+func TestA2AAgentCardEnqueueDropsTheCardWhenTheURLChanges(t *testing.T) {
+	repo := NewA2AAgentCardRepository(db.GetDB())
+	card := fetchedExternalCard(t, repo, "https://a.example/.well-known/agent-card.json")
+
+	reenqueueExternal(t, repo, card, "https://b.example/.well-known/agent-card.json")
+
+	row := cardRowOf(t, card)
+	assert.Equal(t, "https://b.example/.well-known/agent-card.json", row.SourceURL)
+	assert.Equal(t, models.A2AAgentCardStatusPending, row.Status)
+	assert.Empty(t, row.Card)
+	assert.Empty(t, row.CardHash)
+	assert.Nil(t, row.FetchedAt)
+	assert.Empty(t, row.LastError)
+	assert.Equal(t, 0, row.AttemptCount)
+}
+
+func TestA2AAgentCardEnqueueKeepsTheCardForTheSameURL(t *testing.T) {
+	repo := NewA2AAgentCardRepository(db.GetDB())
+	card := fetchedExternalCard(t, repo, "https://a.example/.well-known/agent-card.json")
+
+	reenqueueExternal(t, repo, card, "https://a.example/.well-known/agent-card.json")
+
+	row := cardRowOf(t, card)
+	assert.JSONEq(t, sampleCard, string(row.Card))
+	assert.Equal(t, "hash-a", row.CardHash)
+	assert.NotNil(t, row.FetchedAt)
+}
+
 // A row whose retry is scheduled for later is not handed out until then.
 func TestA2AAgentCardClaimDueRespectsBackoff(t *testing.T) {
 	repo := NewA2AAgentCardRepository(db.GetDB())

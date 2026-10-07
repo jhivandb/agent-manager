@@ -39,7 +39,7 @@ var ErrA2AAgentCardNotFound = errors.New("a2a agent card not found")
 //go:generate moq -rm -fmt goimports -skip-ensure -pkg repomocks -out repomocks/a2a_agent_card_repository_mock.go . A2AAgentCardRepository:A2AAgentCardRepositoryMock
 type A2AAgentCardRepository interface {
 	// Enqueue upserts the row as pending with a fresh budget, keeping card, card_hash and fetched_at.
-	// source_url is overwritten on conflict only for an external row that names one.
+	// An external row that names a different source_url replaces it and clears that card state.
 	Enqueue(ctx context.Context, card *models.A2AAgentCard) error
 
 	// ClaimDue leases up to limit pending rows whose next_attempt_at has passed; NULL is never due.
@@ -82,9 +82,9 @@ func (r *a2aAgentCardRepository) Enqueue(ctx context.Context, card *models.A2AAg
 	card.NextAttemptAt = &now
 	card.UpdatedAt = now
 
-	updates := []string{"status", "attempt_count", "last_error", "next_attempt_at", "updated_at"}
+	updates := clause.AssignmentColumns([]string{"status", "attempt_count", "last_error", "next_attempt_at", "updated_at"})
 	if card.Source == models.A2AAgentCardSourceExternal && card.SourceURL != "" {
-		updates = append(updates, "source_url")
+		updates = append(updates, newSourceURLAssignments()...)
 	}
 	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns: []clause.Column{
@@ -93,8 +93,25 @@ func (r *a2aAgentCardRepository) Enqueue(ctx context.Context, card *models.A2AAg
 			{Name: "agent_name"},
 			{Name: "environment_name"},
 		},
-		DoUpdates: clause.AssignmentColumns(updates),
+		DoUpdates: updates,
 	}).Create(card).Error
+}
+
+// newSourceURLAssignments takes the new source_url and drops the old URL's card if it changed.
+func newSourceURLAssignments() []clause.Assignment {
+	const changed = "a2a_agent_cards.source_url IS DISTINCT FROM excluded.source_url"
+	keepUnlessChanged := func(column, cleared string) clause.Assignment {
+		return clause.Assignment{
+			Column: clause.Column{Name: column},
+			Value:  gorm.Expr("CASE WHEN " + changed + " THEN " + cleared + " ELSE a2a_agent_cards." + column + " END"),
+		}
+	}
+	return []clause.Assignment{
+		keepUnlessChanged("card", "NULL"),
+		keepUnlessChanged("card_hash", "''"),
+		keepUnlessChanged("fetched_at", "NULL"),
+		{Column: clause.Column{Name: "source_url"}, Value: gorm.Expr("excluded.source_url")},
+	}
 }
 
 func (r *a2aAgentCardRepository) ClaimDue(ctx context.Context, now time.Time, limit int) ([]models.A2AAgentCard, error) {
