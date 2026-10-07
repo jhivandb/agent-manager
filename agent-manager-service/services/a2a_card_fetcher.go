@@ -22,9 +22,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"time"
 
+	"github.com/wso2/agent-manager/agent-manager-service/config"
 	"github.com/wso2/agent-manager/agent-manager-service/utils"
 	"github.com/wso2/agent-manager/agent-manager-service/utils/ssrf"
 )
@@ -49,22 +51,33 @@ type a2aCardFetcher struct {
 
 // NewA2ACardFetcher creates an A2ACardFetcher with the spec's 5s timeout.
 func NewA2ACardFetcher() A2ACardFetcher {
-	return newA2ACardFetcher(a2aCardFetchTimeout)
+	return newA2ACardFetcher(a2aCardFetchTimeout, config.GetConfig().A2ACardFetchDialAddr)
 }
 
-func newA2ACardFetcher(timeout time.Duration) *a2aCardFetcher {
+func newA2ACardFetcher(timeout time.Duration, dialAddr string) *a2aCardFetcher {
 	return &a2aCardFetcher{
 		// Platform URLs resolve to loopback in local setups, which the SSRF guard rejects.
-		plain:   &http.Client{Timeout: timeout, Transport: plainTransport(), CheckRedirect: sameHostRedirectOnly},
+		plain:   &http.Client{Timeout: timeout, Transport: plainTransport(dialAddr), CheckRedirect: sameHostRedirectOnly},
 		guarded: ssrf.NewClient(timeout),
 	}
 }
 
 // plainTransport ignores proxy env so a tenant cannot steer the platform fetch.
-func plainTransport() http.RoundTripper {
+func plainTransport(dialAddr string) http.RoundTripper {
 	t := http.DefaultTransport.(*http.Transport).Clone()
 	t.Proxy = nil
+	if dialAddr != "" {
+		t.DialContext = pinnedDial(dialAddr)
+	}
 	return t
+}
+
+// pinnedDial dials addr regardless of the URL host, keeping the Host header intact (local dev: AMS in a container).
+func pinnedDial(addr string) func(ctx context.Context, network, _ string) (net.Conn, error) {
+	d := &net.Dialer{Timeout: a2aCardFetchTimeout}
+	return func(ctx context.Context, network, _ string) (net.Conn, error) {
+		return d.DialContext(ctx, network, addr)
+	}
 }
 
 // sameHostRedirectOnly stops redirects that leave the original scheme and host.

@@ -46,9 +46,23 @@ func cardServer(t *testing.T, status int, body string) *httptest.Server {
 
 func TestA2ACardFetcherReturnsTheCardAsServed(t *testing.T) {
 	srv := cardServer(t, http.StatusOK, validTestCard)
-	got, err := newA2ACardFetcher(time.Second).Fetch(context.Background(), srv.URL+a2aAgentCardPath, false)
+	got, err := newA2ACardFetcher(time.Second, "").Fetch(context.Background(), srv.URL+a2aAgentCardPath, false)
 	require.NoError(t, err)
 	assert.JSONEq(t, validTestCard, string(got), "unknown fields pass through")
+}
+
+func TestA2ACardFetcherPinnedDialKeepsTheURLHost(t *testing.T) {
+	var gotHost string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotHost = r.Host
+		_, _ = w.Write([]byte(validTestCard))
+	}))
+	t.Cleanup(srv.Close)
+
+	url := "http://default-default.gateway.invalid:19080" + a2aAgentCardPath
+	_, err := newA2ACardFetcher(time.Second, srv.Listener.Addr().String()).Fetch(context.Background(), url, false)
+	require.NoError(t, err)
+	assert.Equal(t, "default-default.gateway.invalid:19080", gotHost)
 }
 
 func TestA2ACardFetcherRejectsInvalidCards(t *testing.T) {
@@ -67,7 +81,7 @@ func TestA2ACardFetcherRejectsInvalidCards(t *testing.T) {
 	for name, body := range cases {
 		t.Run(name, func(t *testing.T) {
 			srv := cardServer(t, http.StatusOK, body)
-			_, err := newA2ACardFetcher(time.Second).Fetch(context.Background(), srv.URL, false)
+			_, err := newA2ACardFetcher(time.Second, "").Fetch(context.Background(), srv.URL, false)
 			require.Error(t, err)
 		})
 	}
@@ -76,14 +90,14 @@ func TestA2ACardFetcherRejectsInvalidCards(t *testing.T) {
 func TestA2ACardFetcherRejectsNonObjects(t *testing.T) {
 	for _, body := range []string{`[]`, `"card"`, `null`, `42`} {
 		srv := cardServer(t, http.StatusOK, body)
-		_, err := newA2ACardFetcher(time.Second).Fetch(context.Background(), srv.URL, false)
+		_, err := newA2ACardFetcher(time.Second, "").Fetch(context.Background(), srv.URL, false)
 		require.Error(t, err, body)
 	}
 }
 
 func TestA2ACardFetcherReportsTheStatusCode(t *testing.T) {
 	srv := cardServer(t, http.StatusNotFound, `{"name":"n"}`)
-	_, err := newA2ACardFetcher(time.Second).Fetch(context.Background(), srv.URL, false)
+	_, err := newA2ACardFetcher(time.Second, "").Fetch(context.Background(), srv.URL, false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "404")
 }
@@ -92,7 +106,7 @@ func TestA2ACardFetcherRejectsAnOversizedBody(t *testing.T) {
 	padding := strings.Repeat("a", a2aCardMaxBytes)
 	body := `{"name":"n","supportedInterfaces":[{"url":"u"}],"skills":[],"pad":"` + padding + `"}`
 	srv := cardServer(t, http.StatusOK, body)
-	_, err := newA2ACardFetcher(time.Second).Fetch(context.Background(), srv.URL, false)
+	_, err := newA2ACardFetcher(time.Second, "").Fetch(context.Background(), srv.URL, false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "1 MiB")
 }
@@ -103,7 +117,7 @@ func TestA2ACardFetcherTimesOut(t *testing.T) {
 		_, _ = w.Write([]byte(validTestCard))
 	}))
 	t.Cleanup(srv.Close)
-	_, err := newA2ACardFetcher(50*time.Millisecond).Fetch(context.Background(), srv.URL, false)
+	_, err := newA2ACardFetcher(50*time.Millisecond, "").Fetch(context.Background(), srv.URL, false)
 	require.Error(t, err)
 }
 
@@ -116,7 +130,7 @@ func TestA2ACardFetcherGuardedModeRejectsLoopback(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	_, err := newA2ACardFetcher(time.Second).Fetch(context.Background(), srv.URL, true)
+	_, err := newA2ACardFetcher(time.Second, "").Fetch(context.Background(), srv.URL, true)
 	require.Error(t, err)
 	assert.Equal(t, int32(0), hits.Load())
 }
@@ -149,7 +163,7 @@ func TestA2ACardFetcherPlatformDoesNotFollowRedirectsToOtherHosts(t *testing.T) 
 	}))
 	t.Cleanup(redirector.Close)
 
-	_, err := newA2ACardFetcher(time.Second).Fetch(context.Background(), redirector.URL+a2aAgentCardPath, false)
+	_, err := newA2ACardFetcher(time.Second, "").Fetch(context.Background(), redirector.URL+a2aAgentCardPath, false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "HTTP 302")
 	assert.False(t, hit.Load())
