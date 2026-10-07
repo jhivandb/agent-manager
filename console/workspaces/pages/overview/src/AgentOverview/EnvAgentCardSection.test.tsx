@@ -93,7 +93,8 @@ describe("EnvAgentCardSection", () => {
     });
     renderSection();
     expect(screen.getByText("Trip Planner")).toBeInTheDocument();
-    expect(screen.getByText("Fetched")).toBeInTheDocument();
+    expect(screen.queryByText("Fetched")).not.toBeInTheDocument();
+    expect(screen.getByText(`Fetched ${new Date("2026-10-07T10:00:00Z").toLocaleString()}`)).toBeInTheDocument();
     expect(screen.getByText("plan")).toBeInTheDocument();
     expect(screen.getByText("https://gw/a/rpc")).toBeInTheDocument();
   });
@@ -106,11 +107,11 @@ describe("EnvAgentCardSection", () => {
     expect(screen.getByText(/HTTP 404/)).toBeInTheDocument();
   });
 
-  it("refreshes on demand", () => {
+  it("refetches on demand", () => {
     mockAgent("a2a-agent");
     mockCard({ data: { source: "platform", status: "fetched", sourceUrl: "", lastError: "" } });
     renderSection();
-    fireEvent.click(screen.getByRole("button", { name: /refresh/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Refetch" }));
     expect(refresh).toHaveBeenCalledWith({ orgName: "org", projName: "proj", agentName: "agent", envId: "dev" });
   });
 
@@ -127,10 +128,11 @@ describe("EnvAgentCardSection", () => {
         params: { orgName: "org", projName: "proj", agentName: "agent", envId: "dev" },
         body: { url: "https://agent.example/.well-known/agent-card.json" },
       },
+      { onSuccess: undefined },
     );
   });
 
-  it("survives a malformed card and keeps the source form", () => {
+  it("survives a malformed card and shows the registered URL instead of the form", () => {
     mockAgent("a2a-agent");
     mockCard({
       data: {
@@ -146,6 +148,9 @@ describe("EnvAgentCardSection", () => {
     expect(screen.getByText("Odd")).toBeInTheDocument();
     expect(screen.getByText("https://x/rpc")).toBeInTheDocument();
     expect(screen.getAllByText("dup")).toHaveLength(2);
-    expect(screen.getByPlaceholderText(/agent-card\.json/)).toBeInTheDocument();
+    expect(screen.getByText("https://agent.example/.well-known/agent-card.json")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Edit URL" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Remove" })).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText(/agent-card\.json/)).not.toBeInTheDocument();
   });
 });
