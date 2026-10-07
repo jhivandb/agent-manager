@@ -7946,7 +7946,7 @@ paths:
       tags:
         - Agent Card
       summary: Get an A2A agent's stored agent card for an environment
-      description: Returns the last good public agent card the platform fetched, and the state of the current fetch. A platform agent that was never published to the environment reports `pending` with no card.
+      description: Returns the last good public agent card the platform fetched, and the state of the current fetch. Returns 404 when no fetch was ever queued for the environment; refreshing queues one.
       operationId: getAgentCard
       responses:
         "200":

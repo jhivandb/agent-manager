@@ -67,17 +67,16 @@ func TestGetA2AAgentCardReturnsTheStoredRow(t *testing.T) {
 	assert.Same(t, stored, got)
 }
 
-func TestGetA2AAgentCardIsPendingForAnUnpublishedPlatformAgent(t *testing.T) {
+// No row means no fetch is queued, so a synthetic pending would be polled forever.
+func TestGetA2AAgentCardIsNotFoundForAPlatformAgentWithNoRow(t *testing.T) {
 	svc, repo, _ := cardServiceFor("internal", "a2a-agent")
 	repo.GetFunc = func(context.Context, string, string, string, string) (*models.A2AAgentCard, error) {
 		return nil, repositories.ErrA2AAgentCardNotFound
 	}
 
-	got, err := svc.GetA2AAgentCard(context.Background(), "org", "proj", "agent", "dev")
-	require.NoError(t, err)
-	assert.Equal(t, models.A2AAgentCardSourcePlatform, got.Source)
-	assert.Equal(t, models.A2AAgentCardStatusPending, got.Status)
-	assert.Nil(t, got.Card)
+	_, err := svc.GetA2AAgentCard(context.Background(), "org", "proj", "agent", "dev")
+	assert.ErrorIs(t, err, utils.ErrAgentCardNotFound)
+	assert.Empty(t, repo.EnqueueCalls(), "a read never queues a fetch")
 }
 
 func TestGetA2AAgentCardIsNotFoundForAnExternalAgentWithNoSource(t *testing.T) {

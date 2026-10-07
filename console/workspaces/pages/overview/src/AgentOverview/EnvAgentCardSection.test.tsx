@@ -132,6 +132,25 @@ describe("EnvAgentCardSection", () => {
     );
   });
 
+  it("offers a refetch when a platform agent has no card fetch queued", () => {
+    mockAgent("a2a-agent");
+    mockCard({ isError: true, error: Object.assign(new Error("nf"), { status: 404 }) });
+    renderSection();
+    expect(screen.getByText(/no agent card has been fetched/i)).toBeInTheDocument();
+    expect(screen.queryByText(/register this agent/i)).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText(/agent-card\.json/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Refetch" }));
+    expect(refresh).toHaveBeenCalledWith({ orgName: "org", projName: "proj", agentName: "agent", envId: "dev" });
+  });
+
+  it("offers no refetch to an external agent with no source", () => {
+    mockAgent("a2a-agent");
+    mockCard({ isError: true, error: Object.assign(new Error("nf"), { status: 404 }) });
+    renderSection(true);
+    expect(screen.getByText(/register this agent/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Refetch" })).not.toBeInTheDocument();
+  });
+
   it("survives a malformed card and shows the registered URL instead of the form", () => {
     mockAgent("a2a-agent");
     mockCard({

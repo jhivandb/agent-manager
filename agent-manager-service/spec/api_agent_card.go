@@ -185,7 +185,7 @@ func (r ApiGetAgentCardRequest) Execute() (*AgentCardResponse, *http.Response, e
 /*
 GetAgentCard Get an A2A agent's stored agent card for an environment
 
-Returns the last good public agent card the platform fetched, and the state of the current fetch. A platform agent that was never published to the environment reports `pending` with no card.
+Returns the last good public agent card the platform fetched, and the state of the current fetch. Returns 404 when no fetch was ever queued for the environment; refreshing queues one.
 
 	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
 	@param orgName Organization name/handle

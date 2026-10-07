@@ -45,7 +45,7 @@ export function agentCardRefetchInterval(data: AgentCardResponse | undefined): n
   return data?.status === "pending" ? POLL_INTERVAL : false;
 }
 
-/** A 404 (not an A2A agent, or no source set) is expected: it errors silently with status 404. */
+/** A 404 (not an A2A agent, or no fetch queued yet) is expected: it errors silently. */
 export function useGetAgentCard(params: AgentCardPathParams, options: { enabled?: boolean } = {}) {
   const { getToken } = useAuthHooks();
   return useApiQuery<AgentCardResponse>({

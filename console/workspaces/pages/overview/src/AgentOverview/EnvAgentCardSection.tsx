@@ -115,7 +115,7 @@ export function EnvAgentCardSection({
         ))
       }
       headerAction={
-        !noSource && (
+        !(noSource && external) && (
           <Button
             size="small"
             variant="text"
@@ -135,7 +135,9 @@ export function EnvAgentCardSection({
       {isLoading && <CircularProgress size={16} />}
       {noSource && (
         <Typography variant="body2" color="text.secondary">
-          Register this agent&apos;s card URL for the environment to fetch its card.
+          {external
+            ? "Register this agent's card URL for the environment to fetch its card."
+            : "No agent card has been fetched for this environment yet."}
         </Typography>
       )}
       {isError && !noSource && (

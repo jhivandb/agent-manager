@@ -67,27 +67,14 @@ func (s *a2aAgentCardService) GetA2AAgentCard(
 		return nil, utils.ErrAgentCardNotFound
 	}
 	row, err := s.cardRepo.Get(ctx, ouID, projectName, agentName, envName)
-	if err == nil {
-		return row, nil
-	}
-	if !errors.Is(err, repositories.ErrA2AAgentCardNotFound) {
-		return nil, fmt.Errorf("failed to read agent card: %w", err)
-	}
-	if isExternalProvisioned(agent) {
+	if errors.Is(err, repositories.ErrA2AAgentCardNotFound) {
+		// No row means no fetch is queued; a synthetic pending would never resolve.
 		return nil, utils.ErrAgentCardNotFound
 	}
-	// Never published here yet; confirm the environment before reporting pending.
-	if _, err := s.ocClient.GetEnvironment(ctx, ouID, envName); err != nil {
-		return nil, translateEnvironmentError(err)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read agent card: %w", err)
 	}
-	return &models.A2AAgentCard{
-		OUID:            ouID,
-		ProjectName:     projectName,
-		AgentName:       agentName,
-		EnvironmentName: envName,
-		Source:          models.A2AAgentCardSourcePlatform,
-		Status:          models.A2AAgentCardStatusPending,
-	}, nil
+	return row, nil
 }
 
 func (s *a2aAgentCardService) RefreshA2AAgentCard(
