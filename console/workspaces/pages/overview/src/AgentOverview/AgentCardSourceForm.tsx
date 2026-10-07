@@ -17,27 +17,68 @@
  */
 
 import { useEffect, useState } from "react";
-import { Box, Button } from "@wso2/oxygen-ui";
-import { useDeleteAgentCardSource, useSetAgentCardSource } from "@agent-management-platform/api-client";
+import { Box, Button, IconButton, TextField, Tooltip } from "@wso2/oxygen-ui";
+import { Check, X } from "@wso2/oxygen-ui-icons-react";
+import { useSetAgentCardSource } from "@agent-management-platform/api-client";
 import type { AgentCardPathParams } from "@agent-management-platform/types";
 import { TextInput } from "@agent-management-platform/views";
 
 interface AgentCardSourceFormProps {
   params: AgentCardPathParams;
   currentUrl?: string;
+  /** Compact header editor with tick/X; requires onDone. */
+  inline?: boolean;
+  /** Called after a successful save or on cancel. */
+  onDone?: () => void;
 }
 
 const URL_MAX = 2048;
+const INVALID_HINT = "Enter a public http(s) URL of at most 2048 characters";
 
 /** Card URL for an external A2A agent in one environment. */
-export function AgentCardSourceForm({ params, currentUrl }: AgentCardSourceFormProps) {
+export function AgentCardSourceForm({ params, currentUrl, inline, onDone }: AgentCardSourceFormProps) {
   const [url, setUrl] = useState(currentUrl ?? "");
   useEffect(() => setUrl(currentUrl ?? ""), [currentUrl]);
   const { mutate: save, isPending: isSaving } = useSetAgentCardSource();
-  const { mutate: remove, isPending: isRemoving } = useDeleteAgentCardSource();
 
   const trimmed = url.trim();
   const invalid = trimmed !== "" && (!/^https?:\/\//i.test(trimmed) || trimmed.length > URL_MAX);
+  const canSave = !!trimmed && !invalid && trimmed !== currentUrl && !isSaving;
+  const submit = () => {
+    if (canSave) save({ params, body: { url: trimmed } }, { onSuccess: onDone });
+  };
+
+  if (inline) {
+    return (
+      <Box display="flex" alignItems="center" gap={0.5} sx={{ flex: 1, minWidth: 0 }}>
+        <TextField
+          size="small"
+          autoFocus
+          fullWidth
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") submit();
+            if (e.key === "Escape") onDone?.();
+          }}
+          error={invalid}
+          inputProps={{ "aria-label": "Agent card URL", style: { fontFamily: "monospace" } }}
+        />
+        <Tooltip title={invalid ? INVALID_HINT : "Save"}>
+          <span>
+            <IconButton size="small" color="primary" disabled={!canSave} onClick={submit}>
+              <Check size={16} />
+            </IconButton>
+          </span>
+        </Tooltip>
+        <Tooltip title="Cancel">
+          <IconButton size="small" onClick={onDone}>
+            <X size={16} />
+          </IconButton>
+        </Tooltip>
+      </Box>
+    );
+  }
 
   return (
     <Box display="flex" gap={1} alignItems="flex-start" sx={{ mb: 1 }}>
@@ -47,30 +88,12 @@ export function AgentCardSourceForm({ params, currentUrl }: AgentCardSourceFormP
         value={url}
         onChange={(e: React.ChangeEvent<HTMLInputElement>) => setUrl(e.target.value)}
         error={invalid}
-        helperText={invalid ? "Enter a public http(s) URL of at most 2048 characters" : undefined}
+        helperText={invalid ? INVALID_HINT : undefined}
         fullWidth
       />
-      <Button
-        variant="contained"
-        size="small"
-        disabled={!trimmed || invalid || trimmed === currentUrl || isSaving}
-        onClick={() => save({ params, body: { url: trimmed } })}
-        sx={{ mt: 3 }}
-      >
+      <Button variant="contained" size="small" disabled={!canSave} onClick={submit} sx={{ mt: 3 }}>
         Save
       </Button>
-      {currentUrl && (
-        <Button
-          variant="text"
-          size="small"
-          color="error"
-          disabled={isRemoving}
-          onClick={() => remove(params)}
-          sx={{ mt: 3 }}
-        >
-          Remove
-        </Button>
-      )}
     </Box>
   );
 }

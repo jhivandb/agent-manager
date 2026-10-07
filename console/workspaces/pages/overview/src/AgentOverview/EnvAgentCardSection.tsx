@@ -17,10 +17,10 @@
  */
 
 import { useState } from "react";
-import { Alert, Box, Button, Chip, CircularProgress, Typography } from "@wso2/oxygen-ui";
-import { RefreshCw } from "@wso2/oxygen-ui-icons-react";
-import { useGetAgent, useGetAgentCard, useRefreshAgentCard } from "@agent-management-platform/api-client";
-import { CodeBlock, OverviewSectionCard } from "@agent-management-platform/shared-component";
+import { Alert, Box, Button, Chip, CircularProgress, IconButton, Stack, Tooltip, Typography } from "@wso2/oxygen-ui";
+import { Copy, Edit, RefreshCw, Trash } from "@wso2/oxygen-ui-icons-react";
+import { useDeleteAgentCardSource, useGetAgent, useGetAgentCard, useRefreshAgentCard } from "@agent-management-platform/api-client";
+import { CodeBlock, OverviewSectionCard, copyToClipboard, useConfirmationDialog } from "@agent-management-platform/shared-component";
 import type { AgentCardStatus } from "@agent-management-platform/types";
 import { AgentCardSourceForm } from "./AgentCardSourceForm";
 
@@ -56,7 +56,18 @@ export function EnvAgentCardSection({
   const isA2A = agent?.agentType?.subType === "a2a-agent";
   const { data: card, isLoading, isError, error } = useGetAgentCard(params, { enabled: isA2A });
   const { mutate: refresh, isPending: isRefreshing } = useRefreshAgentCard();
+  const { mutate: removeSource, isPending: isRemoving } = useDeleteAgentCardSource();
+  const { addConfirmation } = useConfirmationDialog();
   const [showJson, setShowJson] = useState(false);
+  const [editingUrl, setEditingUrl] = useState(false);
+  const [copiedUrl, setCopiedUrl] = useState<string>();
+  const copyUrl = (url: string) => {
+    void copyToClipboard(url).then((ok) => {
+      if (!ok) return;
+      setCopiedUrl(url);
+      setTimeout(() => setCopiedUrl(undefined), 1500);
+    });
+  };
 
   if (!isA2A) {
     return null;
@@ -64,10 +75,40 @@ export function EnvAgentCardSection({
   // Card content is third-party: read it as untyped JSON.
   const cardJson: Json = isObject(card?.card) ? card.card : {};
   const noSource = isError && isNotFound(error);
+  const sourceUrl = card?.sourceUrl;
+  const showUrlForm = external && !sourceUrl;
+
+  const confirmRemove = () => addConfirmation({
+    analytics: { entity: "agent-card-source", action: "remove" },
+    title: "Remove agent card URL",
+    description: "The stored agent card for this environment will be removed. You can register a URL again later.",
+    confirmButtonText: "Remove",
+    confirmButtonColor: "error",
+    confirmButtonIcon: <Trash size={16} />,
+    onConfirm: () => removeSource(params),
+  });
 
   return (
     <OverviewSectionCard
       title="Agent Card"
+      titleAdornment={
+        sourceUrl && (editingUrl ? (
+          <AgentCardSourceForm inline params={params} currentUrl={sourceUrl} onDone={() => setEditingUrl(false)} />
+        ) : (
+          <>
+            <Typography variant="body2" color="text.secondary" noWrap sx={{ fontFamily: "monospace" }}>
+              {sourceUrl}
+            </Typography>
+            {external && (
+              <Tooltip title="Edit URL">
+                <IconButton size="small" onClick={() => setEditingUrl(true)} sx={{ p: 0.25, flexShrink: 0 }}>
+                  <Edit size={14} />
+                </IconButton>
+              </Tooltip>
+            )}
+          </>
+        ))
+      }
       headerAction={
         !noSource && (
           <Button
@@ -77,13 +118,15 @@ export function EnvAgentCardSection({
             disabled={isRefreshing}
             onClick={() => refresh(params)}
           >
-            Refresh
+            Refetch
           </Button>
         )
       }
       sx={{ mb: 1.5 }}
     >
-      {external && <AgentCardSourceForm params={params} currentUrl={card?.sourceUrl} />}
+      {showUrlForm && (
+        <AgentCardSourceForm params={params} currentUrl={sourceUrl} />
+      )}
       {isLoading && <CircularProgress size={16} />}
       {noSource && (
         <Typography variant="body2" color="text.secondary">
@@ -96,52 +139,106 @@ export function EnvAgentCardSection({
       {card && (
         <>
           <Box display="flex" alignItems="center" gap={1} sx={{ mb: 1 }}>
-            <Chip
-              variant="outlined"
-              size="small"
-              label={STATUS_CHIP[card.status].label}
-              color={STATUS_CHIP[card.status].color}
-            />
+            {card.status !== "fetched" && (
+              <Chip
+                variant="outlined"
+                size="small"
+                label={STATUS_CHIP[card.status].label}
+                color={STATUS_CHIP[card.status].color}
+              />
+            )}
             {card.fetchedAt && (
-              <Typography variant="caption" color="text.secondary">
-                Fetched {new Date(card.fetchedAt).toLocaleString()}
-              </Typography>
+              <Chip
+                variant="outlined"
+                size="small"
+                label={`Fetched ${new Date(card.fetchedAt).toLocaleString()}`}
+              />
             )}
           </Box>
           {card.status === "failed" && card.lastError && (
             <Alert severity="error" sx={{ mb: 1 }}>Fetch failed: {card.lastError}</Alert>
           )}
           {card.card && (
-            <>
-              <Typography variant="subtitle2">{asString(cardJson.name)}</Typography>
-              {asString(cardJson.version) && <Typography variant="caption">Version {asString(cardJson.version)}</Typography>}
-              {asString(cardJson.description) && <Typography variant="body2" sx={{ mb: 1 }}>{asString(cardJson.description)}</Typography>}
-              <Typography variant="overline">Interfaces</Typography>
-              {objectsIn(cardJson.supportedInterfaces).map((iface, i) => (
-                <Box key={`${i}-${asString(iface.url) ?? ""}`} display="flex" gap={1} alignItems="center">
-                  {asString(iface.protocolBinding) && <Chip size="small" label={asString(iface.protocolBinding)} />}
-                  <Typography variant="body2">{asString(iface.url)}</Typography>
+            <Stack spacing={3} sx={{ mt: 2 }}>
+              <Box>
+                <Box display="flex" alignItems="baseline" gap={1}>
+                  <Typography variant="h6">{asString(cardJson.name)}</Typography>
+                  {asString(cardJson.version) && (
+                    <Typography variant="caption" color="text.secondary">v{asString(cardJson.version)}</Typography>
+                  )}
                 </Box>
-              ))}
-              <Typography variant="overline">Skills</Typography>
-              {objectsIn(cardJson.skills).map((skill, i) => (
-                <Box key={`${i}-${asString(skill.id) ?? asString(skill.name) ?? ""}`} sx={{ mb: 0.5 }}>
-                  <Typography variant="body2" fontWeight={600}>{asString(skill.name)}</Typography>
-                  {asString(skill.description) && <Typography variant="caption">{asString(skill.description)}</Typography>}
-                  <Box display="flex" gap={0.5} flexWrap="wrap">
-                    {stringsIn(skill.tags).map((tag, j) => <Chip key={`${j}-${tag}`} size="small" variant="outlined" label={tag} />)}
+                {asString(cardJson.description) && (
+                  <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>{asString(cardJson.description)}</Typography>
+                )}
+              </Box>
+              <Box>
+                <Typography variant="overline" color="text.secondary" display="block" sx={{ mb: 1 }}>Interfaces</Typography>
+                <Stack spacing={1}>
+                  {objectsIn(cardJson.supportedInterfaces).map((iface, i) => (
+                    <Box key={`${i}-${asString(iface.url) ?? ""}`} display="flex" gap={1.5} alignItems="center">
+                      {asString(iface.protocolBinding) && (
+                        <Chip size="small" label={asString(iface.protocolBinding)} sx={{ minWidth: 96 }} />
+                      )}
+                      <Typography variant="body2" sx={{ fontFamily: "monospace", wordBreak: "break-all" }}>{asString(iface.url)}</Typography>
+                      {asString(iface.url) && (
+                        <Tooltip title={copiedUrl === iface.url ? "Copied" : "Copy URL"}>
+                          <IconButton size="small" onClick={() => copyUrl(iface.url as string)} sx={{ p: 0.25, flexShrink: 0 }}>
+                            <Copy size={14} />
+                          </IconButton>
+                        </Tooltip>
+                      )}
+                    </Box>
+                  ))}
+                </Stack>
+              </Box>
+              <Box>
+                <Typography variant="overline" color="text.secondary" display="block" sx={{ mb: 1 }}>Skills</Typography>
+                <Stack spacing={1.5}>
+                  {objectsIn(cardJson.skills).map((skill, i) => (
+                    <Box
+                      key={`${i}-${asString(skill.id) ?? asString(skill.name) ?? ""}`}
+                      sx={{ p: 2, border: 1, borderColor: "divider", borderRadius: 1 }}
+                    >
+                      <Typography variant="subtitle2">{asString(skill.name)}</Typography>
+                      {asString(skill.description) && (
+                        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>{asString(skill.description)}</Typography>
+                      )}
+                      {stringsIn(skill.tags).length > 0 && (
+                        <Box display="flex" gap={0.75} flexWrap="wrap" sx={{ mt: 1.5 }}>
+                          {stringsIn(skill.tags).map((tag, j) => <Chip key={`${j}-${tag}`} size="small" variant="outlined" label={tag} />)}
+                        </Box>
+                      )}
+                    </Box>
+                  ))}
+                </Stack>
+              </Box>
+              <Box>
+                <Button size="small" variant="text" onClick={() => setShowJson((v) => !v)} sx={{ ml: -1 }}>
+                  {showJson ? "Hide JSON" : "View JSON"}
+                </Button>
+                {showJson && (
+                  <Box sx={{ mt: 1 }}>
+                    <CodeBlock code={JSON.stringify(card.card, null, 2)} language="json" fieldId="agent-card-json" analyticsId="agent-card-json" />
                   </Box>
-                </Box>
-              ))}
-              <Button size="small" variant="text" onClick={() => setShowJson((v) => !v)}>
-                {showJson ? "Hide JSON" : "View JSON"}
-              </Button>
-              {showJson && (
-                <CodeBlock code={JSON.stringify(card.card, null, 2)} language="json" fieldId="agent-card-json" analyticsId="agent-card-json" />
-              )}
-            </>
+                )}
+              </Box>
+            </Stack>
           )}
         </>
+      )}
+      {external && sourceUrl && (
+        <Box display="flex" justifyContent="flex-end" sx={{ mt: 3 }}>
+          <Button
+            size="small"
+            variant="text"
+            color="error"
+            startIcon={<Trash size={14} />}
+            disabled={isRemoving}
+            onClick={confirmRemove}
+          >
+            Remove
+          </Button>
+        </Box>
       )}
     </OverviewSectionCard>
   );
