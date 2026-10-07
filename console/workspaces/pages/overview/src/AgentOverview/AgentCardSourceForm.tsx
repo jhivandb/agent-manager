@@ -16,7 +16,7 @@
  * under the License.
  */
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Box, Button, IconButton, TextField, Tooltip } from "@wso2/oxygen-ui";
 import { Check, X } from "@wso2/oxygen-ui-icons-react";
 import { useSetAgentCardSource } from "@agent-management-platform/api-client";
@@ -40,7 +40,6 @@ export function AgentCardSourceForm({
   params, currentUrl, inline, onDone,
 }: AgentCardSourceFormProps) {
   const [url, setUrl] = useState(currentUrl ?? "");
-  useEffect(() => setUrl(currentUrl ?? ""), [currentUrl]);
   const { mutate: save, isPending: isSaving } = useSetAgentCardSource();
 
   const trimmed = url.trim();

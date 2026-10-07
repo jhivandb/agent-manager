@@ -21,35 +21,13 @@ import { type AgentPathParams } from './common';
 export type AgentCardSource = 'platform' | 'external';
 export type AgentCardStatus = 'pending' | 'fetched' | 'failed';
 
-export interface AgentCardInterface {
-  url: string;
-  protocolBinding?: string;
-  protocolVersion?: string;
-}
-
-export interface AgentCardSkill {
-  id?: string;
-  name: string;
-  description?: string;
-  tags?: string[];
-}
-
-/** An A2A 1.0 public agent card; unknown fields pass through. */
-export interface AgentCard {
-  name: string;
-  description?: string;
-  version?: string;
-  supportedInterfaces: AgentCardInterface[];
-  skills: AgentCardSkill[];
-  [key: string]: unknown;
-}
-
 export interface AgentCardResponse {
   source: AgentCardSource;
   status: AgentCardStatus;
   sourceUrl: string;
   lastError: string;
-  card?: AgentCard;
+  /** Untrusted A2A card JSON; read fields defensively. */
+  card?: Record<string, unknown>;
   fetchedAt?: string;
 }
 

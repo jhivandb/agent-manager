@@ -326,7 +326,8 @@ asyncio.run(main())
   the exporter yourself in that case — see the `manual-instrumentation-agent`
   sample for that path.
 - **The card the gateway serves advertises the gateway.** The gateway's passthrough
-  rewrite points every `supportedInterfaces[].url` at itself, so resolve the card
+  rewrite points each gateway-fronted A2A 1.0 `supportedInterfaces[].url` at
+  itself (unfronted entries and `securitySchemes` are left as-is), so resolve the card
   through the gateway and use the URLs it returns.
 
 ## File guide

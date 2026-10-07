@@ -161,7 +161,7 @@ describe("EnvAgentCardSection", () => {
           supportedInterfaces: [null, { url: "https://x/rpc", protocolBinding: {} }, "str"],
           skills: [null, { name: { x: 1 }, tags: "a" }, { name: "dup" }, { name: "dup", tags: ["t", 5] }],
         },
-      } as never,
+      },
     });
     renderSection(true);
     expect(screen.getByText("Odd")).toBeInTheDocument();

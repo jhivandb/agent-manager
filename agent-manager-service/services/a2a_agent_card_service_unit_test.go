@@ -52,7 +52,7 @@ func cardServiceFor(provisioning, subType string) (*a2aAgentCardService, *repomo
 		RequeueFunc:           func(context.Context, string, string, string, string) error { return nil },
 		DeleteForAgentEnvFunc: func(context.Context, string, string, string, string) error { return nil },
 	}
-	return &a2aAgentCardService{ocClient: oc, cardRepo: repo, logger: testLogger()}, repo, oc
+	return NewA2AAgentCardService(oc, repo, testLogger()).(*a2aAgentCardService), repo, oc
 }
 
 func TestGetA2AAgentCardReturnsTheStoredRow(t *testing.T) {
