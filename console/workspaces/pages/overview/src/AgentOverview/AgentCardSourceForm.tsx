@@ -36,7 +36,9 @@ const URL_MAX = 2048;
 const INVALID_HINT = "Enter a public http(s) URL of at most 2048 characters";
 
 /** Card URL for an external A2A agent in one environment. */
-export function AgentCardSourceForm({ params, currentUrl, inline, onDone }: AgentCardSourceFormProps) {
+export function AgentCardSourceForm({
+  params, currentUrl, inline, onDone,
+}: AgentCardSourceFormProps) {
   const [url, setUrl] = useState(currentUrl ?? "");
   useEffect(() => setUrl(currentUrl ?? ""), [currentUrl]);
   const { mutate: save, isPending: isSaving } = useSetAgentCardSource();

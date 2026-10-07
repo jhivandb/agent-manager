@@ -93,7 +93,12 @@ export function EnvAgentCardSection({
       title="Agent Card"
       titleAdornment={
         sourceUrl && (editingUrl ? (
-          <AgentCardSourceForm inline params={params} currentUrl={sourceUrl} onDone={() => setEditingUrl(false)} />
+          <AgentCardSourceForm
+            inline
+            params={params}
+            currentUrl={sourceUrl}
+            onDone={() => setEditingUrl(false)}
+          />
         ) : (
           <>
             <Typography variant="body2" color="text.secondary" noWrap sx={{ fontFamily: "monospace" }}>
