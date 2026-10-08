@@ -43,7 +43,7 @@ func TestCreateAgentClearsALeftoverA2ACardRow(t *testing.T) {
 	cardRepo := repositories.NewA2AAgentCardRepository(db.GetDB())
 	t.Cleanup(func() { _ = cardRepo.DeleteForAgent(context.Background(), ouID, testProjName, agentName) })
 	require.NoError(t, cardRepo.Enqueue(context.Background(), &models.A2AAgentCard{
-		OUID: ouID, ProjectName: testProjName, AgentName: agentName, EnvironmentName: "Development",
+		OUID: ouID, ProjectName: testProjName, AgentName: agentName, EnvironmentName: "Development", EnvironmentUUID: uuid.New(),
 		Source: models.A2AAgentCardSourceExternal, SourceURL: "https://third-party.example/.well-known/agent-card.json",
 	}))
 

@@ -22,6 +22,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -34,6 +35,8 @@ import (
 )
 
 // cardServiceFor builds the service over an agent of the given provisioning and subtype.
+const cardTestEnvUUID = "55555555-5555-5555-5555-555555555555"
+
 func cardServiceFor(provisioning, subType string) (*a2aAgentCardService, *repomocks.A2AAgentCardRepositoryMock, *clientmocks.OpenChoreoClientMock) {
 	oc := &clientmocks.OpenChoreoClientMock{
 		GetComponentFunc: func(_ context.Context, _, _, name string) (*models.AgentResponse, error) {
@@ -44,7 +47,7 @@ func cardServiceFor(provisioning, subType string) (*a2aAgentCardService, *repomo
 			}, nil
 		},
 		GetEnvironmentFunc: func(_ context.Context, _, name string) (*models.EnvironmentResponse, error) {
-			return &models.EnvironmentResponse{UUID: "env-uuid", Name: name}, nil
+			return &models.EnvironmentResponse{UUID: cardTestEnvUUID, Name: name}, nil
 		},
 	}
 	repo := &repomocks.A2AAgentCardRepositoryMock{
@@ -128,6 +131,7 @@ func TestRefreshA2AAgentCardQueuesAPlatformFetch(t *testing.T) {
 	require.Len(t, queued, 1)
 	assert.Equal(t, models.A2AAgentCardSourcePlatform, queued[0].Card.Source)
 	assert.Empty(t, queued[0].Card.SourceURL)
+	assert.Equal(t, uuid.MustParse(cardTestEnvUUID), queued[0].Card.EnvironmentUUID)
 }
 
 func TestRefreshA2AAgentCardRequeuesTheExternalRowInPlace(t *testing.T) {
@@ -185,6 +189,7 @@ func TestSetA2ACardSourceQueuesTheExternalURL(t *testing.T) {
 	assert.Equal(t, models.A2AAgentCardSourceExternal, queued[0].Card.Source)
 	assert.Equal(t, url, queued[0].Card.SourceURL)
 	assert.Equal(t, "dev", queued[0].Card.EnvironmentName)
+	assert.Equal(t, uuid.MustParse(cardTestEnvUUID), queued[0].Card.EnvironmentUUID)
 }
 
 func TestSetA2ACardSourceRejects(t *testing.T) {
@@ -314,4 +319,17 @@ func TestSetA2ACardSourceCountsURLLengthInCharacters(t *testing.T) {
 
 	require.NoError(t, svc.SetA2ACardSource(tierGrantedCtx(t), "org", "proj", "agent", "dev", url))
 	assert.Len(t, repo.EnqueueCalls(), 1)
+}
+
+// A row keyed on a zero environment UUID could never be told apart from another environment's.
+func TestSetA2ACardSourceRefusesAnEnvironmentWithoutAUUID(t *testing.T) {
+	svc, repo, oc := cardServiceFor("external", "a2a-agent")
+	repo.EnqueueFunc = nil
+	oc.GetEnvironmentFunc = func(_ context.Context, _, name string) (*models.EnvironmentResponse, error) {
+		return &models.EnvironmentResponse{UUID: "not-a-uuid", Name: name}, nil
+	}
+
+	err := svc.SetA2ACardSource(tierGrantedCtx(t), "org", "proj", "agent", "dev", "https://93.184.215.14/.well-known/agent-card.json")
+
+	require.Error(t, err)
 }

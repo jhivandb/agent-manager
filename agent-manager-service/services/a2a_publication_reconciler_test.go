@@ -397,6 +397,7 @@ func TestReconcilerQueuesAPlatformCardFetchOncePublished(t *testing.T) {
 	assert.Equal(t, pub.ProjectName, got.ProjectName)
 	assert.Equal(t, pub.AgentName, got.AgentName)
 	assert.Equal(t, pub.EnvironmentName, got.EnvironmentName)
+	assert.Equal(t, pub.EnvironmentUUID, got.EnvironmentUUID)
 	assert.Equal(t, models.A2AAgentCardSourcePlatform, got.Source)
 }
 
@@ -476,6 +477,7 @@ func TestDriftCheckRefetchesACardFromAnOlderRelease(t *testing.T) {
 			require.Len(t, queued, 1)
 			assert.Equal(t, pub.AgentName, queued[0].Card.AgentName)
 			assert.Equal(t, pub.EnvironmentName, queued[0].Card.EnvironmentName)
+			assert.Equal(t, pub.EnvironmentUUID, queued[0].Card.EnvironmentUUID)
 			assert.Equal(t, models.A2AAgentCardSourcePlatform, queued[0].Card.Source)
 			assert.Empty(t, h.pubRepo.RequeueCalls())
 		})

@@ -37,11 +37,13 @@ var migration047 = migration{
 				project_name     VARCHAR(255) NOT NULL,
 				agent_name       VARCHAR(255) NOT NULL,
 				environment_name VARCHAR(255) NOT NULL,
+				environment_uuid UUID NOT NULL,
 				source           VARCHAR(32) NOT NULL,
 				source_url       TEXT NOT NULL DEFAULT '',
 				card             JSONB,
 				card_hash        VARCHAR(64) NOT NULL DEFAULT '',
 				fetched_at       TIMESTAMPTZ,
+				release_name     VARCHAR(255) NOT NULL DEFAULT '',
 				status           VARCHAR(32) NOT NULL DEFAULT 'pending',
 				attempt_count    INTEGER NOT NULL DEFAULT 0,
 				last_error       TEXT NOT NULL DEFAULT '',
@@ -50,7 +52,7 @@ var migration047 = migration{
 				updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
 				CONSTRAINT uq_a2a_agent_cards_agent_env
-					UNIQUE (ou_id, project_name, agent_name, environment_name)
+					UNIQUE (ou_id, project_name, agent_name, environment_uuid)
 			)`
 			if err := runSQL(tx, createTable); err != nil {
 				return err

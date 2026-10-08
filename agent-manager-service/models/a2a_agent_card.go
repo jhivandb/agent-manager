@@ -52,6 +52,7 @@ type A2AAgentCard struct {
 	ProjectName     string             `gorm:"column:project_name;not null"`
 	AgentName       string             `gorm:"column:agent_name;not null"`
 	EnvironmentName string             `gorm:"column:environment_name;not null"`
+	EnvironmentUUID uuid.UUID          `gorm:"column:environment_uuid;type:uuid;not null"`
 	Source          A2AAgentCardSource `gorm:"column:source;not null"`
 	// SourceURL is the registered URL for external cards, and the last URL fetched for platform cards.
 	SourceURL string          `gorm:"column:source_url;not null;default:''"`

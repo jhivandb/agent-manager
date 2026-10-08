@@ -5995,9 +5995,20 @@ func (s *agentManagerService) UpdateAgentDeploymentState(ctx context.Context, ou
 		s.logger.Error("Failed to update deployment state", "agentName", agentName, "environment", environment, "state", state, "error", err)
 		return fmt.Errorf("failed to update deployment state for agent %s in environment %s: %w", agentName, environment, err)
 	}
+	if bindingState == gen.ReleaseBindingSpecStateUndeploy {
+		s.dropPlatformCard(ctx, ouID, projectName, agentName, environment)
+	}
 
 	s.logger.Info("Updated deployment state successfully", "agentName", agentName, "ouID", ouID, "projectName", projectName, "environment", environment, "state", state)
 	return nil
+}
+
+// dropPlatformCard removes an undeployed agent's gateway card; a user-registered URL stays. Best effort.
+func (s *agentManagerService) dropPlatformCard(ctx context.Context, ouID, projectName, agentName, environment string) {
+	if err := s.a2aCardRepo.DeletePlatformForAgentEnv(ctx, ouID, projectName, agentName, environment); err != nil {
+		s.logger.Warn("Undeployed agent but failed to drop its A2A card",
+			"agentName", agentName, "environment", environment, "error", err)
+	}
 }
 
 func (s *agentManagerService) GetAgentEndpoints(ctx context.Context, ouID string, projectName string, agentName string, environmentName string) (map[string]models.EndpointsResponse, error) {

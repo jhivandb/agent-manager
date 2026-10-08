@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/wso2/agent-manager/agent-manager-service/models"
 )
 
@@ -26,6 +27,12 @@ import (
 //			},
 //			DeleteForAgentEnvFunc: func(ctx context.Context, ouID string, projectName string, agentName string, environmentName string) error {
 //				panic("mock out the DeleteForAgentEnv method")
+//			},
+//			DeleteForEnvironmentFunc: func(ctx context.Context, ouID string, environmentUUID uuid.UUID) error {
+//				panic("mock out the DeleteForEnvironment method")
+//			},
+//			DeletePlatformForAgentEnvFunc: func(ctx context.Context, ouID string, projectName string, agentName string, environmentName string) error {
+//				panic("mock out the DeletePlatformForAgentEnv method")
 //			},
 //			EnqueueFunc: func(ctx context.Context, card *models.A2AAgentCard) error {
 //				panic("mock out the Enqueue method")
@@ -63,6 +70,12 @@ type A2AAgentCardRepositoryMock struct {
 
 	// DeleteForAgentEnvFunc mocks the DeleteForAgentEnv method.
 	DeleteForAgentEnvFunc func(ctx context.Context, ouID string, projectName string, agentName string, environmentName string) error
+
+	// DeleteForEnvironmentFunc mocks the DeleteForEnvironment method.
+	DeleteForEnvironmentFunc func(ctx context.Context, ouID string, environmentUUID uuid.UUID) error
+
+	// DeletePlatformForAgentEnvFunc mocks the DeletePlatformForAgentEnv method.
+	DeletePlatformForAgentEnvFunc func(ctx context.Context, ouID string, projectName string, agentName string, environmentName string) error
 
 	// EnqueueFunc mocks the Enqueue method.
 	EnqueueFunc func(ctx context.Context, card *models.A2AAgentCard) error
@@ -109,6 +122,28 @@ type A2AAgentCardRepositoryMock struct {
 		}
 		// DeleteForAgentEnv holds details about calls to the DeleteForAgentEnv method.
 		DeleteForAgentEnv []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// OuID is the ouID argument value.
+			OuID string
+			// ProjectName is the projectName argument value.
+			ProjectName string
+			// AgentName is the agentName argument value.
+			AgentName string
+			// EnvironmentName is the environmentName argument value.
+			EnvironmentName string
+		}
+		// DeleteForEnvironment holds details about calls to the DeleteForEnvironment method.
+		DeleteForEnvironment []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// OuID is the ouID argument value.
+			OuID string
+			// EnvironmentUUID is the environmentUUID argument value.
+			EnvironmentUUID uuid.UUID
+		}
+		// DeletePlatformForAgentEnv holds details about calls to the DeletePlatformForAgentEnv method.
+		DeletePlatformForAgentEnv []struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
 			// OuID is the ouID argument value.
@@ -200,16 +235,18 @@ type A2AAgentCardRepositoryMock struct {
 			EnvironmentName string
 		}
 	}
-	lockClaimDue          sync.RWMutex
-	lockDeleteForAgent    sync.RWMutex
-	lockDeleteForAgentEnv sync.RWMutex
-	lockEnqueue           sync.RWMutex
-	lockGet               sync.RWMutex
-	lockListForAgent      sync.RWMutex
-	lockMarkAttemptFailed sync.RWMutex
-	lockMarkFailed        sync.RWMutex
-	lockMarkFetched       sync.RWMutex
-	lockRequeue           sync.RWMutex
+	lockClaimDue                  sync.RWMutex
+	lockDeleteForAgent            sync.RWMutex
+	lockDeleteForAgentEnv         sync.RWMutex
+	lockDeleteForEnvironment      sync.RWMutex
+	lockDeletePlatformForAgentEnv sync.RWMutex
+	lockEnqueue                   sync.RWMutex
+	lockGet                       sync.RWMutex
+	lockListForAgent              sync.RWMutex
+	lockMarkAttemptFailed         sync.RWMutex
+	lockMarkFailed                sync.RWMutex
+	lockMarkFetched               sync.RWMutex
+	lockRequeue                   sync.RWMutex
 }
 
 // ClaimDue calls ClaimDueFunc.
@@ -341,6 +378,94 @@ func (mock *A2AAgentCardRepositoryMock) DeleteForAgentEnvCalls() []struct {
 	mock.lockDeleteForAgentEnv.RLock()
 	calls = mock.calls.DeleteForAgentEnv
 	mock.lockDeleteForAgentEnv.RUnlock()
+	return calls
+}
+
+// DeleteForEnvironment calls DeleteForEnvironmentFunc.
+func (mock *A2AAgentCardRepositoryMock) DeleteForEnvironment(ctx context.Context, ouID string, environmentUUID uuid.UUID) error {
+	if mock.DeleteForEnvironmentFunc == nil {
+		panic("A2AAgentCardRepositoryMock.DeleteForEnvironmentFunc: method is nil but A2AAgentCardRepository.DeleteForEnvironment was just called")
+	}
+	callInfo := struct {
+		Ctx             context.Context
+		OuID            string
+		EnvironmentUUID uuid.UUID
+	}{
+		Ctx:             ctx,
+		OuID:            ouID,
+		EnvironmentUUID: environmentUUID,
+	}
+	mock.lockDeleteForEnvironment.Lock()
+	mock.calls.DeleteForEnvironment = append(mock.calls.DeleteForEnvironment, callInfo)
+	mock.lockDeleteForEnvironment.Unlock()
+	return mock.DeleteForEnvironmentFunc(ctx, ouID, environmentUUID)
+}
+
+// DeleteForEnvironmentCalls gets all the calls that were made to DeleteForEnvironment.
+// Check the length with:
+//
+//	len(mockedA2AAgentCardRepository.DeleteForEnvironmentCalls())
+func (mock *A2AAgentCardRepositoryMock) DeleteForEnvironmentCalls() []struct {
+	Ctx             context.Context
+	OuID            string
+	EnvironmentUUID uuid.UUID
+} {
+	var calls []struct {
+		Ctx             context.Context
+		OuID            string
+		EnvironmentUUID uuid.UUID
+	}
+	mock.lockDeleteForEnvironment.RLock()
+	calls = mock.calls.DeleteForEnvironment
+	mock.lockDeleteForEnvironment.RUnlock()
+	return calls
+}
+
+// DeletePlatformForAgentEnv calls DeletePlatformForAgentEnvFunc.
+func (mock *A2AAgentCardRepositoryMock) DeletePlatformForAgentEnv(ctx context.Context, ouID string, projectName string, agentName string, environmentName string) error {
+	if mock.DeletePlatformForAgentEnvFunc == nil {
+		panic("A2AAgentCardRepositoryMock.DeletePlatformForAgentEnvFunc: method is nil but A2AAgentCardRepository.DeletePlatformForAgentEnv was just called")
+	}
+	callInfo := struct {
+		Ctx             context.Context
+		OuID            string
+		ProjectName     string
+		AgentName       string
+		EnvironmentName string
+	}{
+		Ctx:             ctx,
+		OuID:            ouID,
+		ProjectName:     projectName,
+		AgentName:       agentName,
+		EnvironmentName: environmentName,
+	}
+	mock.lockDeletePlatformForAgentEnv.Lock()
+	mock.calls.DeletePlatformForAgentEnv = append(mock.calls.DeletePlatformForAgentEnv, callInfo)
+	mock.lockDeletePlatformForAgentEnv.Unlock()
+	return mock.DeletePlatformForAgentEnvFunc(ctx, ouID, projectName, agentName, environmentName)
+}
+
+// DeletePlatformForAgentEnvCalls gets all the calls that were made to DeletePlatformForAgentEnv.
+// Check the length with:
+//
+//	len(mockedA2AAgentCardRepository.DeletePlatformForAgentEnvCalls())
+func (mock *A2AAgentCardRepositoryMock) DeletePlatformForAgentEnvCalls() []struct {
+	Ctx             context.Context
+	OuID            string
+	ProjectName     string
+	AgentName       string
+	EnvironmentName string
+} {
+	var calls []struct {
+		Ctx             context.Context
+		OuID            string
+		ProjectName     string
+		AgentName       string
+		EnvironmentName string
+	}
+	mock.lockDeletePlatformForAgentEnv.RLock()
+	calls = mock.calls.DeletePlatformForAgentEnv
+	mock.lockDeletePlatformForAgentEnv.RUnlock()
 	return calls
 }
 

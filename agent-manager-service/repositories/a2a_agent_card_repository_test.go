@@ -39,8 +39,18 @@ func newTestCard(agentName string, source models.A2AAgentCardSource) *models.A2A
 		ProjectName:     "checkout",
 		AgentName:       agentName,
 		EnvironmentName: "Development",
+		EnvironmentUUID: envUUIDOf("Development"),
 		Source:          source,
 	}
+}
+
+func envUUIDOf(name string) uuid.UUID {
+	return uuid.NewSHA1(uuid.NameSpaceOID, []byte(name))
+}
+
+func inEnv(card *models.A2AAgentCard, name string) *models.A2AAgentCard {
+	card.EnvironmentName, card.EnvironmentUUID = name, envUUIDOf(name)
+	return card
 }
 
 func cleanupCard(t *testing.T, repo A2AAgentCardRepository, card *models.A2AAgentCard) {
@@ -399,8 +409,8 @@ func TestA2AAgentCardListForAgentOrdersByEnvironment(t *testing.T) {
 	repo := NewA2AAgentCardRepository(db.GetDB())
 	ctx := context.Background()
 	dev := newTestCard("list-"+uuid.New().String()[:8], models.A2AAgentCardSourcePlatform)
-	prod := newTestCard(dev.AgentName, models.A2AAgentCardSourcePlatform)
-	prod.OUID, prod.EnvironmentName = dev.OUID, "Production"
+	prod := inEnv(newTestCard(dev.AgentName, models.A2AAgentCardSourcePlatform), "Production")
+	prod.OUID = dev.OUID
 	other := newTestCard("other-"+uuid.New().String()[:8], models.A2AAgentCardSourcePlatform)
 	other.OUID = dev.OUID
 	cleanupCard(t, repo, dev)
@@ -424,8 +434,8 @@ func TestA2AAgentCardGetAndDelete(t *testing.T) {
 	repo := NewA2AAgentCardRepository(db.GetDB())
 	ctx := context.Background()
 	dev := newTestCard("get-"+uuid.New().String()[:8], models.A2AAgentCardSourcePlatform)
-	prod := newTestCard(dev.AgentName, models.A2AAgentCardSourcePlatform)
-	prod.OUID, prod.EnvironmentName = dev.OUID, "Production"
+	prod := inEnv(newTestCard(dev.AgentName, models.A2AAgentCardSourcePlatform), "Production")
+	prod.OUID = dev.OUID
 	cleanupCard(t, repo, dev)
 	require.NoError(t, repo.Enqueue(ctx, dev))
 	require.NoError(t, repo.Enqueue(ctx, prod))
@@ -499,4 +509,85 @@ func TestA2AAgentCardClaimDueLeavesTheCardBodyBehind(t *testing.T) {
 	assert.Equal(t, "h1", claimed.CardHash)
 	assert.Equal(t, card.ID, claimed.ID)
 	assert.False(t, claimed.UpdatedAt.IsZero())
+}
+
+// A re-created environment of the same name must not inherit the deleted one's card or URL.
+func TestA2AAgentCardEnqueueForARecreatedEnvironmentStartsFresh(t *testing.T) {
+	ctx := context.Background()
+	repo := NewA2AAgentCardRepository(db.GetDB())
+	old := fetchedExternalCard(t, repo, "https://a.example/.well-known/agent-card.json")
+
+	recreated := newTestCardLike(old)
+	recreated.EnvironmentUUID = uuid.New()
+	require.NoError(t, repo.Enqueue(ctx, recreated))
+
+	row, err := repo.Get(ctx, old.OUID, old.ProjectName, old.AgentName, old.EnvironmentName)
+	require.NoError(t, err)
+	assert.Equal(t, recreated.EnvironmentUUID, row.EnvironmentUUID)
+	assert.NotEqual(t, old.ID, row.ID)
+	assert.Empty(t, row.SourceURL)
+	assert.Empty(t, row.Card)
+	assert.Nil(t, row.FetchedAt)
+
+	rows, err := repo.ListForAgent(ctx, old.OUID, old.ProjectName, old.AgentName)
+	require.NoError(t, err)
+	assert.Len(t, rows, 1, "the deleted environment's row is gone")
+}
+
+func TestA2AAgentCardClaimDueCarriesTheEnvironmentUUID(t *testing.T) {
+	repo := NewA2AAgentCardRepository(db.GetDB())
+	card := newTestCard("claim-env-"+uuid.New().String()[:8], models.A2AAgentCardSourcePlatform)
+	cleanupCard(t, repo, card)
+	require.NoError(t, repo.Enqueue(context.Background(), card))
+
+	row := dueCardFor(t, repo, card.AgentName)
+
+	assert.Equal(t, envUUIDOf("Development"), row.EnvironmentUUID)
+}
+
+func TestA2AAgentCardDeleteForEnvironmentLeavesOtherEnvironments(t *testing.T) {
+	ctx := context.Background()
+	repo := NewA2AAgentCardRepository(db.GetDB())
+	dev := newTestCard("env-del-"+uuid.New().String()[:8], models.A2AAgentCardSourcePlatform)
+	otherAgent := newTestCard("env-del-other-"+uuid.New().String()[:8], models.A2AAgentCardSourceExternal)
+	otherAgent.OUID = dev.OUID
+	prod := inEnv(newTestCardLike(dev), "Production")
+	elsewhere := newTestCardLike(dev)
+	elsewhere.OUID = "other-org-" + uuid.New().String()[:8]
+	for _, c := range []*models.A2AAgentCard{dev, otherAgent, prod, elsewhere} {
+		cleanupCard(t, repo, c)
+		require.NoError(t, repo.Enqueue(ctx, c))
+	}
+
+	require.NoError(t, repo.DeleteForEnvironment(ctx, dev.OUID, dev.EnvironmentUUID))
+
+	_, err := repo.Get(ctx, dev.OUID, dev.ProjectName, dev.AgentName, "Development")
+	assert.ErrorIs(t, err, ErrA2AAgentCardNotFound)
+	_, err = repo.Get(ctx, otherAgent.OUID, otherAgent.ProjectName, otherAgent.AgentName, "Development")
+	assert.ErrorIs(t, err, ErrA2AAgentCardNotFound, "every agent's row in that environment goes")
+	_, err = repo.Get(ctx, prod.OUID, prod.ProjectName, prod.AgentName, "Production")
+	require.NoError(t, err, "other environments keep their rows")
+	_, err = repo.Get(ctx, elsewhere.OUID, elsewhere.ProjectName, elsewhere.AgentName, "Development")
+	require.NoError(t, err, "rows are org-scoped")
+}
+
+// An undeploy drops the platform card but keeps a URL the user registered.
+func TestA2AAgentCardDeletePlatformForAgentEnvKeepsExternalRows(t *testing.T) {
+	ctx := context.Background()
+	repo := NewA2AAgentCardRepository(db.GetDB())
+	platform := newTestCard("undeploy-"+uuid.New().String()[:8], models.A2AAgentCardSourcePlatform)
+	cleanupCard(t, repo, platform)
+	require.NoError(t, repo.Enqueue(ctx, platform))
+	external := inEnv(newTestCardLike(platform), "Production")
+	external.Source, external.SourceURL = models.A2AAgentCardSourceExternal, "https://a.example/.well-known/agent-card.json"
+	require.NoError(t, repo.Enqueue(ctx, external))
+
+	require.NoError(t, repo.DeletePlatformForAgentEnv(ctx, platform.OUID, platform.ProjectName, platform.AgentName, "Development"))
+	require.NoError(t, repo.DeletePlatformForAgentEnv(ctx, platform.OUID, platform.ProjectName, platform.AgentName, "Production"))
+
+	_, err := repo.Get(ctx, platform.OUID, platform.ProjectName, platform.AgentName, "Development")
+	assert.ErrorIs(t, err, ErrA2AAgentCardNotFound)
+	row, err := repo.Get(ctx, platform.OUID, platform.ProjectName, platform.AgentName, "Production")
+	require.NoError(t, err)
+	assert.Equal(t, "https://a.example/.well-known/agent-card.json", row.SourceURL)
 }

@@ -243,6 +243,7 @@ func (s *a2aPublicationReconcilerService) enqueueCardFetch(ctx context.Context, 
 		ProjectName:     pub.ProjectName,
 		AgentName:       pub.AgentName,
 		EnvironmentName: pub.EnvironmentName,
+		EnvironmentUUID: pub.EnvironmentUUID,
 		Source:          models.A2AAgentCardSourcePlatform,
 	}
 	if err := s.cardRepo.Enqueue(ctx, card); err != nil {

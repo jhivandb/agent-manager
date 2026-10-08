@@ -22,6 +22,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
@@ -38,7 +39,8 @@ var ErrA2AAgentCardNotFound = errors.New("a2a agent card not found")
 //
 //go:generate moq -rm -fmt goimports -skip-ensure -pkg repomocks -out repomocks/a2a_agent_card_repository_mock.go . A2AAgentCardRepository:A2AAgentCardRepositoryMock
 type A2AAgentCardRepository interface {
-	// Enqueue upserts the row as pending with a fresh budget, keeping card, card_hash and fetched_at.
+	// Enqueue upserts the environment's row as pending, replacing a same-named row from a deleted environment,
+	// and leaves it with a fresh budget, keeping card, card_hash and fetched_at.
 	// A different source, or an external row naming a different source_url, replaces them and clears the card state.
 	Enqueue(ctx context.Context, card *models.A2AAgentCard) error
 
@@ -62,6 +64,10 @@ type A2AAgentCardRepository interface {
 	ListForAgent(ctx context.Context, ouID, projectName, agentName string) ([]models.A2AAgentCard, error)
 	DeleteForAgent(ctx context.Context, ouID, projectName, agentName string) error
 	DeleteForAgentEnv(ctx context.Context, ouID, projectName, agentName, environmentName string) error
+	// DeletePlatformForAgentEnv drops a platform row and keeps an external one, whose URL is user config.
+	DeletePlatformForAgentEnv(ctx context.Context, ouID, projectName, agentName, environmentName string) error
+	// DeleteForEnvironment drops every agent's row in a deleted environment.
+	DeleteForEnvironment(ctx context.Context, ouID string, environmentUUID uuid.UUID) error
 }
 
 // A2AAgentCardClaimLease is how long a claimed row stays invisible to other claimers.
@@ -91,15 +97,24 @@ func (r *a2aAgentCardRepository) Enqueue(ctx context.Context, card *models.A2AAg
 	}
 	updates := clause.AssignmentColumns([]string{"status", "attempt_count", "last_error", "next_attempt_at", "updated_at", "source"})
 	updates = append(updates, newSourceURLAssignments(changed)...)
-	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
-		Columns: []clause.Column{
-			{Name: "ou_id"},
-			{Name: "project_name"},
-			{Name: "agent_name"},
-			{Name: "environment_name"},
-		},
-		DoUpdates: updates,
-	}).Create(card).Error
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// A same-named row from a deleted environment must not outlive its replacement.
+		err := tx.Where("ou_id = ? AND project_name = ? AND agent_name = ? AND environment_name = ? AND environment_uuid <> ?",
+			card.OUID, card.ProjectName, card.AgentName, card.EnvironmentName, card.EnvironmentUUID).
+			Delete(&models.A2AAgentCard{}).Error
+		if err != nil {
+			return err
+		}
+		return tx.Clauses(clause.OnConflict{
+			Columns: []clause.Column{
+				{Name: "ou_id"},
+				{Name: "project_name"},
+				{Name: "agent_name"},
+				{Name: "environment_uuid"},
+			},
+			DoUpdates: updates,
+		}).Create(card).Error
+	})
 }
 
 func (r *a2aAgentCardRepository) Requeue(ctx context.Context, ouID, projectName, agentName, environmentName string) error {
@@ -146,7 +161,7 @@ func newSourceURLAssignments(changed string) []clause.Assignment {
 }
 
 // a2aCardClaimColumns omits card: the reconciler compares card_hash and never reads the stored body.
-const a2aCardClaimColumns = `id, ou_id, project_name, agent_name, environment_name, source, source_url, card_hash,
+const a2aCardClaimColumns = `id, ou_id, project_name, agent_name, environment_name, environment_uuid, source, source_url, card_hash,
 	fetched_at, release_name, status, attempt_count, last_error, next_attempt_at, created_at, updated_at`
 
 func (r *a2aAgentCardRepository) ClaimDue(ctx context.Context, now time.Time, limit int) ([]models.A2AAgentCard, error) {
@@ -254,5 +269,18 @@ func (r *a2aAgentCardRepository) DeleteForAgentEnv(ctx context.Context, ouID, pr
 	return r.db.WithContext(ctx).
 		Where("ou_id = ? AND project_name = ? AND agent_name = ? AND environment_name = ?",
 			ouID, projectName, agentName, environmentName).
+		Delete(&models.A2AAgentCard{}).Error
+}
+
+func (r *a2aAgentCardRepository) DeletePlatformForAgentEnv(ctx context.Context, ouID, projectName, agentName, environmentName string) error {
+	return r.db.WithContext(ctx).
+		Where("ou_id = ? AND project_name = ? AND agent_name = ? AND environment_name = ? AND source = ?",
+			ouID, projectName, agentName, environmentName, models.A2AAgentCardSourcePlatform).
+		Delete(&models.A2AAgentCard{}).Error
+}
+
+func (r *a2aAgentCardRepository) DeleteForEnvironment(ctx context.Context, ouID string, environmentUUID uuid.UUID) error {
+	return r.db.WithContext(ctx).
+		Where("ou_id = ? AND environment_uuid = ?", ouID, environmentUUID).
 		Delete(&models.A2AAgentCard{}).Error
 }

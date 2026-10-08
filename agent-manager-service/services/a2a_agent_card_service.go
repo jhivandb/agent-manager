@@ -24,6 +24,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/google/uuid"
 	"github.com/wso2/agent-manager/agent-manager-service/audit"
 	"github.com/wso2/agent-manager/agent-manager-service/clients/openchoreosvc/client"
 	"github.com/wso2/agent-manager/agent-manager-service/models"
@@ -85,11 +86,12 @@ func (s *a2aAgentCardService) RefreshA2AAgentCard(
 	if err != nil {
 		return err
 	}
-	if _, err := requireEnvironmentTier(ctx, s.ocClient, s.logger, ouID, envName); err != nil {
+	env, err := requireEnvironmentTier(ctx, s.ocClient, s.logger, ouID, envName)
+	if err != nil {
 		return err
 	}
 	if !isExternalProvisioned(agent) {
-		return s.enqueue(ctx, agent, ouID, projectName, envName, models.A2AAgentCardSourcePlatform, "")
+		return s.enqueue(ctx, agent, ouID, projectName, env, models.A2AAgentCardSourcePlatform, "")
 	}
 	// Update-only, so a concurrent remove can't be undone by an upsert.
 	if err := s.cardRepo.Requeue(ctx, ouID, projectName, agentName, envName); err != nil {
@@ -108,14 +110,15 @@ func (s *a2aAgentCardService) SetA2ACardSource(
 	if err != nil {
 		return err
 	}
-	if _, err := requireEnvironmentTier(ctx, s.ocClient, s.logger, ouID, envName); err != nil {
+	env, err := requireEnvironmentTier(ctx, s.ocClient, s.logger, ouID, envName)
+	if err != nil {
 		return err
 	}
 	sourceURL = strings.TrimSpace(sourceURL)
 	if err := validateCardSourceURL(ctx, sourceURL); err != nil {
 		return err
 	}
-	err = s.enqueue(ctx, agent, ouID, projectName, envName, models.A2AAgentCardSourceExternal, sourceURL)
+	err = s.enqueue(ctx, agent, ouID, projectName, env, models.A2AAgentCardSourceExternal, sourceURL)
 	recordCardSourceChange(ctx, audit.ActionAgentSetCardSource, agent, ouID, projectName, envName, err,
 		audit.Detail("sourceUrl", sourceURL))
 	return err
@@ -156,21 +159,26 @@ func recordCardSourceChange(
 }
 
 func (s *a2aAgentCardService) enqueue(
-	ctx context.Context, agent *models.AgentResponse, ouID, projectName, envName string,
+	ctx context.Context, agent *models.AgentResponse, ouID, projectName string, env *models.EnvironmentResponse,
 	source models.A2AAgentCardSource, sourceURL string,
 ) error {
+	envUUID, err := uuid.Parse(env.UUID)
+	if err != nil {
+		return fmt.Errorf("invalid UUID for environment %s: %w", env.Name, err)
+	}
 	card := &models.A2AAgentCard{
 		OUID:            ouID,
 		ProjectName:     projectName,
 		AgentName:       agent.Name,
-		EnvironmentName: envName,
+		EnvironmentName: env.Name,
+		EnvironmentUUID: envUUID,
 		Source:          source,
 		SourceURL:       sourceURL,
 	}
 	if err := s.cardRepo.Enqueue(ctx, card); err != nil {
 		return fmt.Errorf("failed to queue agent card fetch: %w", err)
 	}
-	return s.dropIfAgentGone(ctx, agent, ouID, projectName, envName)
+	return s.dropIfAgentGone(ctx, agent, ouID, projectName, env.Name)
 }
 
 // dropIfAgentGone deletes the just-written row when the agent was deleted or replaced during the upsert.
