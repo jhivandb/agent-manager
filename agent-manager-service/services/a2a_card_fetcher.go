@@ -98,9 +98,6 @@ func sameHostRedirectOnly(req *http.Request, via []*http.Request) error {
 func (f *a2aCardFetcher) Fetch(ctx context.Context, url string, guarded bool) (json.RawMessage, error) {
 	client := f.plain
 	if guarded {
-		if err := ssrf.ValidateURL(ctx, url); err != nil {
-			return nil, refusedCardURL(err)
-		}
 		client = f.guarded
 	}
 

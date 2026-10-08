@@ -12824,6 +12824,7 @@ components:
           type: string
           description: Visibility level of the endpoint
           enum: [Public, Private, Internal]
+          x-enum-varnames: [DeploymentEndpointVisibilityPublic, DeploymentEndpointVisibilityPrivate, DeploymentEndpointVisibilityInternal]
       required:
         - name
         - url

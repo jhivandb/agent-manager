@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -125,7 +126,7 @@ func TestA2ACardFetcherTimesOut(t *testing.T) {
 	require.Error(t, err)
 }
 
-// External URLs are user-supplied: a loopback address is refused before any request.
+// External URLs are user-supplied: the guarded client refuses hosts that resolve to loopback.
 func TestA2ACardFetcherGuardedModeRejectsLoopback(t *testing.T) {
 	var hits atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -133,9 +134,14 @@ func TestA2ACardFetcherGuardedModeRejectsLoopback(t *testing.T) {
 		_, _ = w.Write([]byte(validTestCard))
 	}))
 	t.Cleanup(srv.Close)
+	_, port, err := net.SplitHostPort(srv.Listener.Addr().String())
+	require.NoError(t, err)
 
-	_, err := newA2ACardFetcher(time.Second, "").Fetch(context.Background(), srv.URL, true)
-	require.Error(t, err)
+	for _, url := range []string{srv.URL, "http://localhost:" + port} {
+		_, err := newA2ACardFetcher(time.Second, "").Fetch(context.Background(), url, true)
+		require.Error(t, err, url)
+		assert.Contains(t, err.Error(), "agent card URL is not allowed", url)
+	}
 	assert.Equal(t, int32(0), hits.Load())
 }
 
@@ -196,7 +202,6 @@ func (rt *recordingTransport) RoundTrip(req *http.Request) (*http.Response, erro
 	}, nil
 }
 
-// The pre-check alone is not enough: the guarded client also pins the dial and re-checks redirects.
 func TestA2ACardFetcherSendsEachModeThroughItsOwnClient(t *testing.T) {
 	plain, guarded := &recordingTransport{}, &recordingTransport{}
 	f := &a2aCardFetcher{plain: &http.Client{Transport: plain}, guarded: &http.Client{Transport: guarded}}

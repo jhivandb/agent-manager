@@ -443,19 +443,19 @@ func (e CreateMonitorRequestType) Valid() bool {
 
 // Defines values for DeploymentEndpointVisibility.
 const (
-	Internal DeploymentEndpointVisibility = "Internal"
-	Private  DeploymentEndpointVisibility = "Private"
-	Public   DeploymentEndpointVisibility = "Public"
+	DeploymentEndpointVisibilityInternal DeploymentEndpointVisibility = "Internal"
+	DeploymentEndpointVisibilityPrivate  DeploymentEndpointVisibility = "Private"
+	DeploymentEndpointVisibilityPublic   DeploymentEndpointVisibility = "Public"
 )
 
 // Valid indicates whether the value is a known member of the DeploymentEndpointVisibility enum.
 func (e DeploymentEndpointVisibility) Valid() bool {
 	switch e {
-	case Internal:
+	case DeploymentEndpointVisibilityInternal:
 		return true
-	case Private:
+	case DeploymentEndpointVisibilityPrivate:
 		return true
-	case Public:
+	case DeploymentEndpointVisibilityPublic:
 		return true
 	default:
 		return false

@@ -18,9 +18,10 @@
 
 import { useState } from "react";
 import { Alert, Box, Button, Chip, CircularProgress, IconButton, Stack, Tooltip, Typography } from "@wso2/oxygen-ui";
-import { Copy, Edit, RefreshCw, Trash } from "@wso2/oxygen-ui-icons-react";
+import { Edit, RefreshCw, Trash } from "@wso2/oxygen-ui-icons-react";
 import { useDeleteAgentCardSource, useGetAgent, useGetAgentCard, useRefreshAgentCard } from "@agent-management-platform/api-client";
-import { CodeBlock, OverviewSectionCard, copyToClipboard, useConfirmationDialog } from "@agent-management-platform/shared-component";
+import { CodeBlock, OverviewSectionCard, useConfirmationDialog } from "@agent-management-platform/shared-component";
+import { TextInput } from "@agent-management-platform/views";
 import type { AgentCardStatus } from "@agent-management-platform/types";
 import { AgentCardSourceForm } from "./AgentCardSourceForm";
 
@@ -60,14 +61,6 @@ export function EnvAgentCardSection({
   const { addConfirmation } = useConfirmationDialog();
   const [showJson, setShowJson] = useState(false);
   const [editingUrl, setEditingUrl] = useState(false);
-  const [copiedUrl, setCopiedUrl] = useState<string>();
-  const copyUrl = (url: string) => {
-    void copyToClipboard(url).then((ok) => {
-      if (!ok) return;
-      setCopiedUrl(url);
-      setTimeout(() => setCopiedUrl(undefined), 1500);
-    });
-  };
 
   if (!isA2A) {
     return null;
@@ -192,14 +185,13 @@ export function EnvAgentCardSection({
                     return (
                       <Box key={`${i}-${url ?? ""}`} display="flex" gap={1.5} alignItems="center">
                         {binding && <Chip size="small" label={binding} sx={{ minWidth: 96 }} />}
-                        <Typography variant="body2" sx={{ fontFamily: "monospace", wordBreak: "break-all" }}>{url}</Typography>
-                        {url && (
-                          <Tooltip title={copiedUrl === url ? "Copied" : "Copy URL"}>
-                            <IconButton size="small" onClick={() => copyUrl(url)} sx={{ p: 0.25, flexShrink: 0 }}>
-                              <Copy size={14} />
-                            </IconButton>
-                          </Tooltip>
-                        )}
+                        <TextInput
+                          value={url ?? ""}
+                          copyable
+                          copyTooltipText="Copy URL"
+                          size="small"
+                          slotProps={{ input: { readOnly: true, sx: { fontFamily: "monospace" } } }}
+                        />
                       </Box>
                     );
                   })}

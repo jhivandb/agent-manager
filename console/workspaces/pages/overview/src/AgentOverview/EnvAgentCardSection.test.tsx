@@ -96,7 +96,8 @@ describe("EnvAgentCardSection", () => {
     expect(screen.queryByText("Fetched")).not.toBeInTheDocument();
     expect(screen.getByText(`Fetched ${new Date("2026-10-07T10:00:00Z").toLocaleString()}`)).toBeInTheDocument();
     expect(screen.getByText("plan")).toBeInTheDocument();
-    expect(screen.getByText("https://gw/a/rpc")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("https://gw/a/rpc")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Copy URL" })).toBeInTheDocument();
   });
 
   it("shows the last error when the fetch failed", () => {
@@ -165,7 +166,7 @@ describe("EnvAgentCardSection", () => {
     });
     renderSection(true);
     expect(screen.getByText("Odd")).toBeInTheDocument();
-    expect(screen.getByText("https://x/rpc")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("https://x/rpc")).toBeInTheDocument();
     expect(screen.getAllByText("dup")).toHaveLength(2);
     expect(screen.getByText("https://agent.example/.well-known/agent-card.json")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Edit URL" })).toBeInTheDocument();
