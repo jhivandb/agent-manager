@@ -76,7 +76,7 @@ help:
 	@echo ""
 
 # Complete setup
-setup: setup-colima setup-k3d setup-openchoreo setup-platform setup-sandbox setup-console-local
+setup: setup-colima setup-k3d setup-openchoreo setup-console-local setup-platform setup-sandbox
 	@$(MAKE) dev-migrate
 	@cd deployments/setup && ./port-forward.sh --platform --background
 	@$(MAKE) setup-default-env-thunder
