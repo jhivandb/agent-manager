@@ -10,7 +10,9 @@ export PATH := $(TOOLS_BIN):$(PATH)
 
 # GOTOOLCHAIN=auto lets a tool that needs a newer Go than the job's (cli is on 1.25)
 # fetch that toolchain for its own build; it doesn't change how the repo builds.
-GO_INSTALL = GOBIN=$(TOOLS_BIN) GOTOOLCHAIN=auto go install
+# Go only switches toolchains in module mode, and CI runners set GO111MODULE=auto
+# while the repo root has no go.mod, so module mode is forced here.
+GO_INSTALL = GOBIN=$(TOOLS_BIN) GOTOOLCHAIN=auto GO111MODULE=on go install
 
 # In GitHub Actions, later steps outside make (lint actions, plain run steps) need the tools too.
 TOOLS_CI_PATH = @[ -z "$$GITHUB_PATH" ] || echo "$(TOOLS_BIN)" >> "$$GITHUB_PATH"
