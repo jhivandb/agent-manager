@@ -71,13 +71,19 @@ export function AgentCardSourceForm({
         />
         <Tooltip title={invalid ? INVALID_HINT : "Save"}>
           <span>
-            <IconButton size="small" color="primary" disabled={!canSave} onClick={submit}>
+            <IconButton
+              size="small"
+              color="primary"
+              aria-label="Save agent card URL"
+              disabled={!canSave}
+              onClick={submit}
+            >
               <Check size={16} />
             </IconButton>
           </span>
         </Tooltip>
         <Tooltip title="Cancel">
-          <IconButton size="small" onClick={onDone}>
+          <IconButton size="small" aria-label="Cancel" onClick={onDone}>
             <X size={16} />
           </IconButton>
         </Tooltip>
@@ -86,7 +92,17 @@ export function AgentCardSourceForm({
   }
 
   return (
-    <Box display="flex" gap={1} alignItems="flex-start" sx={{ mb: 1 }}>
+    <Box
+      component="form"
+      onSubmit={(e: React.FormEvent) => {
+        e.preventDefault();
+        submit();
+      }}
+      display="flex"
+      gap={1}
+      alignItems="flex-start"
+      sx={{ mb: 1 }}
+    >
       <TextInput
         label="Agent card URL"
         placeholder="https://agent.example.com/.well-known/agent-card.json"
@@ -97,7 +113,7 @@ export function AgentCardSourceForm({
         maxLength={INPUT_LIMITS.URL}
         fullWidth
       />
-      <Button variant="contained" size="small" disabled={!canSave} onClick={submit} sx={{ mt: 3 }}>
+      <Button type="submit" variant="contained" size="small" disabled={!canSave} sx={{ mt: 3 }}>
         Save
       </Button>
     </Box>

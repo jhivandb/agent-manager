@@ -6005,6 +6005,9 @@ func (s *agentManagerService) UpdateAgentDeploymentState(ctx context.Context, ou
 
 // dropPlatformCard removes an undeployed agent's gateway card; a user-registered URL stays. Best effort.
 func (s *agentManagerService) dropPlatformCard(ctx context.Context, ouID, projectName, agentName, environment string) {
+	if s.a2aCardRepo == nil {
+		return
+	}
 	if err := s.a2aCardRepo.DeletePlatformForAgentEnv(ctx, ouID, projectName, agentName, environment); err != nil {
 		s.logger.Warn("Undeployed agent but failed to drop its A2A card",
 			"agentName", agentName, "environment", environment, "error", err)
