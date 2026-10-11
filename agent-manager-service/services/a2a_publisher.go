@@ -157,6 +157,25 @@ func (p *A2APublisher) TeardownEnv(
 	return a2aTeardown{artifactUUID: artifactUUID, gatewayIDs: gatewayIDs}, nil
 }
 
+// TeardownEnvAndDropArtifact is TeardownEnv for an environment that is going away: it also deletes
+// the artifact, whose API keys must not outlive it. uuid.Nil means it has none.
+func (p *A2APublisher) TeardownEnvAndDropArtifact(
+	ctx context.Context, tx *gorm.DB, key a2aPublicationKey, artifactUUID uuid.UUID,
+) (a2aTeardown, error) {
+	teardown, err := p.TeardownEnv(ctx, tx, key, artifactUUID)
+	if err != nil {
+		return a2aTeardown{}, err
+	}
+	if artifactUUID == uuid.Nil {
+		return teardown, nil
+	}
+	err = p.artifactRepo.Delete(tx, artifactUUID.String())
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return a2aTeardown{}, fmt.Errorf("failed to delete the agent's API artifact: %w", err)
+	}
+	return teardown, nil
+}
+
 // SendTeardown tells each gateway to drop the torn-down Agent; best effort.
 func (p *A2APublisher) SendTeardown(ctx context.Context, t a2aTeardown) {
 	sendA2AAgentDeletion(ctx, p.events, t.artifactUUID, t.gatewayIDs, p.logger)

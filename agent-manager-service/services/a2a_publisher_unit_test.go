@@ -200,3 +200,45 @@ func TestA2APublisherDeleteForAgentDropsPublicationsAndProxies(t *testing.T) {
 	assert.Len(t, m.pubs.DeleteForAgentCalls(), 1)
 	assert.Len(t, m.proxies.DeleteForAgentCalls(), 1)
 }
+
+func TestA2APublisherTeardownEnvAndDropArtifactDeletesTheArtifactInTheTransaction(t *testing.T) {
+	m := newPublisherMocks(t)
+	m.txDeployments.DeleteForArtifactFunc = func(context.Context, uuid.UUID, string) error { return nil }
+	m.txPubs.DeleteForAgentEnvFunc = func(context.Context, string, string, string, uuid.UUID) error { return nil }
+	m.artifacts.DeleteFunc = func(tx *gorm.DB, _ string) error {
+		assert.Same(t, txSentinel, tx)
+		return gorm.ErrRecordNotFound // already gone is not a failure
+	}
+	artifactUUID := uuid.New()
+
+	teardown, err := m.publisher().TeardownEnvAndDropArtifact(context.Background(), txSentinel, testA2AKey(), artifactUUID)
+
+	require.NoError(t, err)
+	assert.Equal(t, artifactUUID, teardown.artifactUUID)
+	require.Len(t, m.artifacts.DeleteCalls(), 1)
+	assert.Equal(t, artifactUUID.String(), m.artifacts.DeleteCalls()[0].UUID)
+	assert.Len(t, m.txPubs.DeleteForAgentEnvCalls(), 1)
+}
+
+func TestA2APublisherTeardownEnvAndDropArtifactSkipsAMissingArtifact(t *testing.T) {
+	m := newPublisherMocks(t)
+	m.txPubs.DeleteForAgentEnvFunc = func(context.Context, string, string, string, uuid.UUID) error { return nil }
+	// artifacts.DeleteFunc is nil: deleting would panic.
+
+	_, err := m.publisher().TeardownEnvAndDropArtifact(context.Background(), txSentinel, testA2AKey(), uuid.Nil)
+
+	require.NoError(t, err)
+	assert.Empty(t, m.txDeployments.DeleteForArtifactCalls())
+	assert.Len(t, m.txPubs.DeleteForAgentEnvCalls(), 1)
+}
+
+func TestA2APublisherTeardownEnvAndDropArtifactReportsAFailedDelete(t *testing.T) {
+	m := newPublisherMocks(t)
+	m.txDeployments.DeleteForArtifactFunc = func(context.Context, uuid.UUID, string) error { return nil }
+	m.txPubs.DeleteForAgentEnvFunc = func(context.Context, string, string, string, uuid.UUID) error { return nil }
+	m.artifacts.DeleteFunc = func(*gorm.DB, string) error { return assert.AnError }
+
+	_, err := m.publisher().TeardownEnvAndDropArtifact(context.Background(), txSentinel, testA2AKey(), uuid.New())
+
+	assert.ErrorIs(t, err, assert.AnError)
+}

@@ -142,6 +142,7 @@ func TestCredentialAndIdentityActionsAreCritical(t *testing.T) {
 		ActionUserInvite, ActionUserCreate, ActionUserUpdate, ActionUserDelete,
 		// Changing a gateway's trusted issuers decides whose tokens it accepts.
 		ActionGatewaySetIdentityProvider, ActionGatewayRemoveIdentityProvider,
+		ActionAgentSetA2AProxy, ActionAgentRemoveA2AProxy,
 	}
 
 	for _, action := range critical {

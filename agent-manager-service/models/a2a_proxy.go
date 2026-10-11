@@ -49,3 +49,16 @@ func (p *A2AProxy) UpstreamAuth() *UpstreamAuth {
 	authType, header, secret := AuthTypeAPIKey, p.UpstreamAuthHeader, p.UpstreamAuthSecret
 	return &UpstreamAuth{Type: &authType, Header: &header, SecretRef: &secret}
 }
+
+// A2AProxyAuthUpdate is a requested upstream credential; a nil Value keeps the stored secret.
+type A2AProxyAuthUpdate struct {
+	Header string
+	Value  *string
+}
+
+// A2AProxyStatus is a proxied environment's gateway publication state; the secret is never part of it.
+type A2AProxyStatus struct {
+	Status             A2APublicationStatus
+	LastError          string
+	UpstreamAuthHeader string
+}
