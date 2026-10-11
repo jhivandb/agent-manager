@@ -95,7 +95,7 @@ type agentManagerService struct {
 	monitorManagerService     MonitorManagerService
 	agentIdentityInjection    AgentIdentityInjectionService
 	identityClient            thundersvc.IdentityClient
-	a2aPublicationRepo        repositories.A2APublicationRepository
+	a2aPublisher              *A2APublisher
 	a2aCardRepo               repositories.A2AAgentCardRepository
 	deploymentRepo            repositories.DeploymentRepository
 	gatewayEventsService      *GatewayEventsService
@@ -118,7 +118,7 @@ func NewAgentManagerService(
 	monitorManagerService MonitorManagerService,
 	agentIdentityInjection AgentIdentityInjectionService,
 	identityClient thundersvc.IdentityClient,
-	a2aPublicationRepo repositories.A2APublicationRepository,
+	a2aPublisher *A2APublisher,
 	a2aCardRepo repositories.A2AAgentCardRepository,
 	deploymentRepo repositories.DeploymentRepository,
 	gatewayEventsService *GatewayEventsService,
@@ -137,7 +137,7 @@ func NewAgentManagerService(
 		monitorManagerService:     monitorManagerService,
 		agentIdentityInjection:    agentIdentityInjection,
 		identityClient:            identityClient,
-		a2aPublicationRepo:        a2aPublicationRepo,
+		a2aPublisher:              a2aPublisher,
 		a2aCardRepo:               a2aCardRepo,
 		deploymentRepo:            deploymentRepo,
 		gatewayEventsService:      gatewayEventsService,
@@ -1586,7 +1586,7 @@ func (s *agentManagerService) createComponentAgent(ctx context.Context, ouID, pr
 	}
 
 	// After the create, so a duplicate-name request cannot wipe a live agent's rows.
-	if err := s.clearInheritedA2ACards(ctx, ouID, projectName, req.Name); err != nil {
+	if err := s.clearInheritedA2AState(ctx, ouID, projectName, req.Name); err != nil {
 		if hasSecrets {
 			s.cleanupSecretsOnRollback(ctx, secretLocation)
 		}
@@ -2833,13 +2833,17 @@ func withAgentConfigCleanupRetry(ctx context.Context, logger *slog.Logger, confi
 	return lastErr
 }
 
-// clearInheritedA2ACards drops card rows a deleted same-named agent left behind.
-func (s *agentManagerService) clearInheritedA2ACards(ctx context.Context, ouID, projectName, agentName string) error {
-	if s.a2aCardRepo == nil {
-		return nil
+// clearInheritedA2AState drops card, publication and proxy rows a deleted same-named agent left behind.
+func (s *agentManagerService) clearInheritedA2AState(ctx context.Context, ouID, projectName, agentName string) error {
+	if s.a2aCardRepo != nil {
+		if err := s.a2aCardRepo.DeleteForAgent(ctx, ouID, projectName, agentName); err != nil {
+			return fmt.Errorf("failed to clear leftover A2A agent card rows: %w", err)
+		}
 	}
-	if err := s.a2aCardRepo.DeleteForAgent(ctx, ouID, projectName, agentName); err != nil {
-		return fmt.Errorf("failed to clear leftover A2A agent card rows: %w", err)
+	if s.a2aPublisher != nil {
+		if err := s.a2aPublisher.DeleteForAgent(ctx, ouID, projectName, agentName); err != nil {
+			return fmt.Errorf("failed to clear leftover A2A publication rows: %w", err)
+		}
 	}
 	return nil
 }
@@ -2855,16 +2859,16 @@ func (s *agentManagerService) cleanupAgentMonitors(ctx context.Context, ouID, pr
 // deleteAgentAPIArtifact removes the agent's per-environment API artifacts and
 // tells gateways holding an A2A Agent for them to drop it.
 //
-// Order matters: queue rows go first so the reconciler cannot re-publish,
+// Order matters: publication and proxy rows go first so the reconciler cannot re-publish,
 // gateway targets are read before the artifact delete cascades the deployment
 // rows away, and the broadcast goes last so a gateway re-fetching the Agent
 // finds nothing left to serve. isA2AAgent is false when the subtype is unknown;
 // deployment rows then stand in for it.
 func (s *agentManagerService) deleteAgentAPIArtifact(ctx context.Context, ouID, projectName, agentName string, isA2AAgent bool) {
-	if s.a2aPublicationRepo != nil {
-		if pubErr := s.a2aPublicationRepo.DeleteForAgent(ctx, ouID, projectName, agentName); pubErr != nil {
-			s.logger.Warn("Failed to clear A2A publication queue rows for deleted agent",
-				"agentName", agentName, "error", pubErr)
+	if s.a2aPublisher != nil {
+		if err := s.a2aPublisher.DeleteForAgent(ctx, ouID, projectName, agentName); err != nil {
+			s.logger.Warn("Failed to clear A2A publication and proxy rows for deleted agent",
+				"agentName", agentName, "error", err)
 		}
 	}
 	if s.a2aCardRepo != nil {
@@ -6207,26 +6211,14 @@ func a2aGatewayRouteTrait(upstreamPort int32) client.TraitRequest {
 // succeeded. A missed row surfaces as an agent that never appears on its
 // gateway, which the next deploy, promotion or deploy-settings save re-queues.
 func (s *agentManagerService) enqueueA2APublication(
-	ctx context.Context,
-	ouID, projectName, agentName, environmentName string,
-	environmentUUID, artifactUUID uuid.UUID,
-	agentUUID *uuid.UUID,
+	ctx context.Context, key a2aPublicationKey, source models.A2APublicationSource, artifactUUID uuid.UUID,
 ) {
-	if s.a2aPublicationRepo == nil {
+	if s.a2aPublisher == nil {
 		return
 	}
-	pub := &models.A2APublication{
-		OUID:            ouID,
-		ProjectName:     projectName,
-		AgentName:       agentName,
-		EnvironmentName: environmentName,
-		EnvironmentUUID: environmentUUID,
-		ArtifactUUID:    artifactUUID,
-		AgentUUID:       agentUUID,
-	}
-	if err := s.a2aPublicationRepo.Enqueue(ctx, pub); err != nil {
+	if err := s.a2aPublisher.Enqueue(ctx, nil, key, source, artifactUUID); err != nil {
 		s.logger.Error("Failed to queue A2A agent gateway publication; the agent is deployed but will not reach its gateway until it is next deployed, promoted, or its deploy settings are saved",
-			"agentName", agentName, "environment", environmentName, "error", err)
+			"agentName", key.AgentName, "environment", key.EnvironmentName, "error", err)
 	}
 }
 
@@ -6253,7 +6245,8 @@ func (s *agentManagerService) enqueueCreatedA2AAgent(
 	} else {
 		agentUUID = parseAgentUUID(agent.UUID)
 	}
-	s.enqueueA2APublication(ctx, ouID, projectName, agentName, environmentName, envUUID, artifact.UUID, agentUUID)
+	key := a2aPublicationKey{OUID: ouID, ProjectName: projectName, AgentName: agentName, EnvironmentName: environmentName, EnvironmentUUID: envUUID, AgentUUID: agentUUID}
+	s.enqueueA2APublication(ctx, key, models.A2APublicationSourcePlatform, artifact.UUID)
 }
 
 // parseAgentUUID returns nil for a missing or malformed UUID; the reconciler then checks by name.
@@ -6269,20 +6262,25 @@ func parseAgentUUID(raw string) *uuid.UUID {
 // it is built from changed. Call it only after that config is persisted: the
 // reconciler builds from the stored row, so queueing first can publish the old
 // settings. Other agent kinds are left alone — their policies ride on the
-// release binding's trait.
+// release binding's trait. An external agent publishes only while its environment is proxied.
 func (s *agentManagerService) republishA2AAgent(
 	ctx context.Context,
 	agent *models.AgentResponse,
 	ouID, projectName, agentName, environmentName, environmentUUID string,
 	artifactUUID uuid.UUID,
 ) error {
-	if !utils.IsA2AAgentSubType(agent.Type.SubType) {
+	if s.a2aPublisher == nil || !utils.IsA2AAgentSubType(agent.Type.SubType) {
 		return nil
 	}
 	envUUID, err := uuid.Parse(environmentUUID)
 	if err != nil {
 		return fmt.Errorf("environment %q has an unparseable UUID %q: %w", environmentName, environmentUUID, err)
 	}
-	s.enqueueA2APublication(ctx, ouID, projectName, agentName, environmentName, envUUID, artifactUUID, parseAgentUUID(agent.UUID))
+	publish, err := s.a2aPublisher.ShouldPublish(ctx, agent, ouID, projectName, envUUID)
+	if err != nil || !publish {
+		return err
+	}
+	key := a2aPublicationKey{OUID: ouID, ProjectName: projectName, AgentName: agentName, EnvironmentName: environmentName, EnvironmentUUID: envUUID, AgentUUID: parseAgentUUID(agent.UUID)}
+	s.enqueueA2APublication(ctx, key, a2aPublicationSourceFor(agent), artifactUUID)
 	return nil
 }

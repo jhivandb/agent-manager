@@ -209,16 +209,16 @@ func newAgentArtifactDeletionFixture(t *testing.T, artifacts map[string]uuid.UUI
 			return nil
 		},
 	}
-	f.svc = &agentManagerService{
-		ocClient:             oc,
-		artifactRepo:         artifactRepo,
-		deploymentRepo:       deploymentRepo,
-		gatewayRepo:          gatewayRepo,
-		a2aPublicationRepo:   pubRepo,
-		a2aCardRepo:          cardRepo,
-		gatewayEventsService: NewGatewayEventsService(f.hub),
-		logger:               testLogger(),
+	proxyRepo := &repomocks.A2AProxyRepositoryMock{
+		DeleteForAgentFunc: func(context.Context, string, string, string) error {
+			f.steps = append(f.steps, "delete-proxies")
+			return nil
+		},
 	}
+	events := NewGatewayEventsService(f.hub)
+	publisher := NewA2APublisher(nil, pubRepo, proxyRepo, artifactRepo, deploymentRepo, gatewayRepo, events, testLogger())
+	f.svc = NewAgentManagerService(nil, oc, nil, nil, nil, nil, nil, nil, artifactRepo, nil, gatewayRepo, nil, nil, nil, nil,
+		publisher, cardRepo, deploymentRepo, events, testLogger()).(*agentManagerService)
 	return f
 }
 
@@ -253,7 +253,7 @@ func TestDeleteAgentAPIArtifactBroadcastsLast(t *testing.T) {
 
 	f.svc.deleteAgentAPIArtifact(context.Background(), "org-1", "proj", "agent", true)
 
-	assert.Equal(t, []string{"delete-queue", "delete-cards", "collect", "delete-artifact", "broadcast"}, f.steps)
+	assert.Equal(t, []string{"delete-queue", "delete-proxies", "delete-cards", "collect", "delete-artifact", "broadcast"}, f.steps)
 }
 
 // A REST agent's artifacts never reached a gateway as an A2A Agent: no events.

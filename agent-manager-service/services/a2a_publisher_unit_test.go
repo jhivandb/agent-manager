@@ -1,0 +1,202 @@
+// Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
+package services
+
+import (
+	"context"
+	"testing"
+
+	"github.com/google/uuid"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
+
+	"github.com/wso2/agent-manager/agent-manager-service/models"
+	"github.com/wso2/agent-manager/agent-manager-service/repositories"
+	"github.com/wso2/agent-manager/agent-manager-service/repositories/repomocks"
+)
+
+// txSentinel stands in for an open transaction; tx-bound mocks check they were handed it.
+var txSentinel = &gorm.DB{}
+
+// publisherMocks keeps the plain and the transaction-bound mocks apart, so a write that
+// escapes the transaction reaches a nil func and panics.
+type publisherMocks struct {
+	pubs, txPubs               *repomocks.A2APublicationRepositoryMock
+	proxies                    *repomocks.A2AProxyRepositoryMock
+	deployments, txDeployments *repomocks.DeploymentRepositoryMock
+	gateways                   *repomocks.GatewayRepositoryMock
+	artifacts                  *repomocks.ArtifactRepositoryMock
+	hub                        *recordingEventHub
+	// transactions counts the transactions opened; txErr, when set, makes each one fail to commit.
+	transactions int
+	txErr        error
+}
+
+// tx is the runner the services open transactions with; it hands fn the sentinel.
+func (m *publisherMocks) tx() TxRunner {
+	return func(_ context.Context, fn func(tx *gorm.DB) error) error {
+		m.transactions++
+		if m.txErr != nil {
+			return m.txErr
+		}
+		return fn(txSentinel)
+	}
+}
+
+func newPublisherMocks(t *testing.T) *publisherMocks {
+	m := &publisherMocks{
+		txPubs:        &repomocks.A2APublicationRepositoryMock{},
+		proxies:       &repomocks.A2AProxyRepositoryMock{},
+		txDeployments: &repomocks.DeploymentRepositoryMock{},
+		gateways: &repomocks.GatewayRepositoryMock{
+			ListWithFiltersFunc: func(repositories.GatewayFilterOptions) ([]*models.Gateway, error) {
+				return []*models.Gateway{}, nil
+			},
+		},
+		artifacts: &repomocks.ArtifactRepositoryMock{},
+		hub:       &recordingEventHub{},
+	}
+	m.pubs = &repomocks.A2APublicationRepositoryMock{
+		WithTxFunc: func(tx *gorm.DB) repositories.A2APublicationRepository {
+			assert.Same(t, txSentinel, tx)
+			return m.txPubs
+		},
+	}
+	m.deployments = &repomocks.DeploymentRepositoryMock{
+		WithTxFunc: func(tx *gorm.DB) repositories.DeploymentRepository {
+			assert.Same(t, txSentinel, tx)
+			return m.txDeployments
+		},
+		GetDeployedGatewaysByProviderFunc: func(uuid.UUID, string) ([]string, error) { return []string{"gw-1"}, nil },
+	}
+	return m
+}
+
+func (m *publisherMocks) publisher() *A2APublisher {
+	return NewA2APublisher(m.tx(), m.pubs, m.proxies, m.artifacts, m.deployments, m.gateways, NewGatewayEventsService(m.hub), testLogger())
+}
+
+func testA2AKey() a2aPublicationKey {
+	return a2aPublicationKey{
+		OUID: "org-1", ProjectName: "checkout", AgentName: "weather", EnvironmentName: "dev",
+		EnvironmentUUID: uuid.MustParse("55555555-5555-5555-5555-555555555555"),
+	}
+}
+
+func externalA2AAgent() *models.AgentResponse {
+	return &models.AgentResponse{
+		UUID: "agent-uuid", Name: "weather",
+		Provisioning: models.Provisioning{Type: "external"},
+		Type:         models.AgentType{Type: "external-agent-api", SubType: "a2a-agent"},
+	}
+}
+
+func TestA2APublisherShouldPublish(t *testing.T) {
+	internal := &models.AgentResponse{
+		Name: "weather", Provisioning: models.Provisioning{Type: "internal"},
+		Type: models.AgentType{Type: "agent-api", SubType: "a2a-agent"},
+	}
+	chat := &models.AgentResponse{Name: "weather", Type: models.AgentType{Type: "agent-api", SubType: "chat-api"}}
+	cases := []struct {
+		name   string
+		agent  *models.AgentResponse
+		lookup func(context.Context, string, string, string, uuid.UUID) (*models.A2AProxy, error)
+		want   bool
+	}{
+		{name: "an internal A2A agent always, without a proxy lookup", agent: internal, want: true},
+		{name: "a non-A2A agent never", agent: chat, want: false},
+		{
+			name: "an external A2A agent in a direct environment", agent: externalA2AAgent(),
+			lookup: func(context.Context, string, string, string, uuid.UUID) (*models.A2AProxy, error) {
+				return nil, repositories.ErrA2AProxyNotFound
+			},
+		},
+		{
+			name: "an external A2A agent in a proxied environment", agent: externalA2AAgent(), want: true,
+			lookup: func(context.Context, string, string, string, uuid.UUID) (*models.A2AProxy, error) {
+				return &models.A2AProxy{}, nil
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newPublisherMocks(t)
+			m.proxies.GetByEnvUUIDFunc = tc.lookup
+			got, err := m.publisher().ShouldPublish(context.Background(), tc.agent, "org-1", "checkout", testA2AKey().EnvironmentUUID)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestA2APublisherShouldPublishDoesNotMaskALookupFailure(t *testing.T) {
+	m := newPublisherMocks(t)
+	m.proxies.GetByEnvUUIDFunc = func(context.Context, string, string, string, uuid.UUID) (*models.A2AProxy, error) {
+		return nil, assert.AnError
+	}
+	_, err := m.publisher().ShouldPublish(context.Background(), externalA2AAgent(), "org-1", "checkout", uuid.New())
+	assert.ErrorIs(t, err, assert.AnError)
+}
+
+func TestA2APublisherEnqueueJoinsTheCallersTransaction(t *testing.T) {
+	m := newPublisherMocks(t)
+	m.txPubs.EnqueueFunc = func(context.Context, *models.A2APublication) error { return nil }
+	artifactUUID := uuid.New()
+
+	require.NoError(t, m.publisher().Enqueue(context.Background(), txSentinel, testA2AKey(),
+		models.A2APublicationSourceExternal, artifactUUID))
+
+	queued := m.txPubs.EnqueueCalls()
+	require.Len(t, queued, 1)
+	assert.Equal(t, models.A2APublicationSourceExternal, queued[0].Pub.Source)
+	assert.Equal(t, artifactUUID, queued[0].Pub.ArtifactUUID)
+	assert.Equal(t, testA2AKey().EnvironmentUUID, queued[0].Pub.EnvironmentUUID)
+	assert.Equal(t, "dev", queued[0].Pub.EnvironmentName)
+}
+
+// The artifact stays so the environment's API keys survive a switch back to proxied.
+func TestA2APublisherTeardownEnvKeepsTheArtifactAndWaitsToTellTheGateway(t *testing.T) {
+	m := newPublisherMocks(t)
+	m.txDeployments.DeleteForArtifactFunc = func(context.Context, uuid.UUID, string) error { return nil }
+	m.txPubs.DeleteForAgentEnvFunc = func(context.Context, string, string, string, uuid.UUID) error { return nil }
+	artifactUUID := uuid.New()
+	publisher := m.publisher()
+
+	teardown, err := publisher.TeardownEnv(context.Background(), txSentinel, testA2AKey(), artifactUUID)
+	require.NoError(t, err)
+	assert.Empty(t, m.artifacts.DeleteCalls())
+	require.Len(t, m.txDeployments.DeleteForArtifactCalls(), 1)
+	assert.Equal(t, artifactUUID, m.txDeployments.DeleteForArtifactCalls()[0].ArtifactUUID)
+	require.Len(t, m.txPubs.DeleteForAgentEnvCalls(), 1)
+	assert.Empty(t, m.hub.published, "nothing is sent before the transaction commits")
+
+	publisher.SendTeardown(context.Background(), teardown)
+	require.Len(t, m.hub.published, 1)
+	assert.Equal(t, "gw-1", m.hub.published[0].GatewayID)
+	assert.Equal(t, artifactUUID.String(), deletedAgentID(t, m.hub.published[0]))
+}
+
+func TestA2APublisherDeleteForAgentDropsPublicationsAndProxies(t *testing.T) {
+	m := newPublisherMocks(t)
+	m.pubs.DeleteForAgentFunc = func(context.Context, string, string, string) error { return nil }
+	m.proxies.DeleteForAgentFunc = func(context.Context, string, string, string) error { return nil }
+
+	require.NoError(t, m.publisher().DeleteForAgent(context.Background(), "org-1", "checkout", "weather"))
+	assert.Len(t, m.pubs.DeleteForAgentCalls(), 1)
+	assert.Len(t, m.proxies.DeleteForAgentCalls(), 1)
+}

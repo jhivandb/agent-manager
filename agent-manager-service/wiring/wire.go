@@ -20,6 +20,7 @@
 package wiring
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"time"
@@ -85,6 +86,8 @@ var serviceProviderSet = wire.NewSet(
 	services.NewA2ACardFetcher,
 	services.NewA2ACardReconcilerService,
 	services.NewA2AAgentCardService,
+	ProvideTxRunner,
+	services.NewA2APublisher,
 	services.NewEvaluatorManagerService,
 	services.NewEnvironmentService,
 	services.NewPlatformGatewayService,
@@ -372,6 +375,7 @@ var repositoryProviderSet = wire.NewSet(
 	ProvideDeploymentRepository,
 	ProvideA2APublicationRepository,
 	ProvideA2AAgentCardRepository,
+	ProvideA2AProxyRepository,
 	ProvideArtifactRepository,
 	ProvideScoreRepository,
 	ProvideCatalogRepository,
@@ -487,6 +491,17 @@ func ProvideDeploymentRepository(db *gorm.DB) repositories.DeploymentRepository 
 
 func ProvideA2AAgentCardRepository(db *gorm.DB) repositories.A2AAgentCardRepository {
 	return repositories.NewA2AAgentCardRepository(db)
+}
+
+func ProvideA2AProxyRepository(db *gorm.DB) repositories.A2AProxyRepository {
+	return repositories.NewA2AProxyRepository(db)
+}
+
+// ProvideTxRunner opens database transactions for the services that hold no *gorm.DB.
+func ProvideTxRunner(db *gorm.DB) services.TxRunner {
+	return func(ctx context.Context, fn func(tx *gorm.DB) error) error {
+		return db.WithContext(ctx).Transaction(fn)
+	}
 }
 
 func ProvideA2APublicationRepository(db *gorm.DB) repositories.A2APublicationRepository {
