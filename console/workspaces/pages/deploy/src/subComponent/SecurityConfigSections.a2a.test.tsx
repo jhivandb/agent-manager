@@ -34,6 +34,11 @@ const mockAgent = (subType: string) =>
     data: { agentType: { type: "agent-api", subType } },
   } as unknown as ReturnType<typeof useGetAgent>);
 
+const mockAgentOfType = (type: string, subType: string) =>
+  vi.mocked(useGetAgent).mockReturnValue({
+    data: { agentType: { type, subType } },
+  } as unknown as ReturnType<typeof useGetAgent>);
+
 const configurations = (overrides: Partial<ConfigurationResponse> = {}): ConfigurationResponse => ({
   projectName: "proj",
   agentName: "agent",
@@ -105,5 +110,19 @@ describe("SecurityConfigSections for A2A agents", () => {
     expect(screen.queryByText(/can be called by anyone/)).not.toBeInTheDocument();
     expect(ref.current?.buildBody()).not.toHaveProperty("agentCardCorsConfig");
     expect(ref.current?.buildBody()).toHaveProperty("resilienceTimeoutSeconds", 30);
+  });
+
+  it("serves a proxied external A2A agent's inbound auth and CORS", () => {
+    mockAgentOfType("external-agent-api", "a2a-agent");
+    const ref = renderSections(configurations());
+    expect(screen.getByText("CORS Configuration")).toBeInTheDocument();
+    expect(ref.current?.buildBody()).toMatchObject({ enableApiKeySecurity: true });
+  });
+
+  it("renders nothing for an external agent that is not A2A", () => {
+    mockAgentOfType("external-agent-api", "custom");
+    const ref = renderSections(configurations());
+    expect(screen.queryByText("CORS Configuration")).not.toBeInTheDocument();
+    expect(ref.current?.buildBody()).toEqual({});
   });
 });

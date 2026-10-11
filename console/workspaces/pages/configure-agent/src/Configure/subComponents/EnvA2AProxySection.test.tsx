@@ -33,6 +33,10 @@ vi.mock("@agent-management-platform/shared-component", () => ({
   useConfirmationDialog: () => ({ addConfirmation }),
 }));
 
+vi.mock("@agent-management-platform/deploy", () => ({
+  ProxySecurityDrawer: ({ open }: { open: boolean }) => (open ? <div>security drawer</div> : null),
+}));
+
 import { EnvA2AProxySection } from "./EnvA2AProxySection";
 
 const params = { orgName: "org", projName: "proj", agentName: "agent", envId: "dev" };
@@ -106,5 +110,13 @@ describe("EnvA2AProxySection", () => {
     expect(screen.getByText(/no JSONRPC interface/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(republish).toHaveBeenCalledWith(params);
+  });
+
+  it("opens the gateway security settings only while proxied", () => {
+    const { rerender } = render(<EnvA2AProxySection params={params} />);
+    expect(screen.queryByRole("button", { name: /security settings/i })).not.toBeInTheDocument();
+    rerender(<EnvA2AProxySection params={params} proxy={stored} />);
+    fireEvent.click(screen.getByRole("button", { name: /security settings/i }));
+    expect(screen.getByText("security drawer")).toBeInTheDocument();
   });
 });

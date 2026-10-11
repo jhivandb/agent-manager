@@ -31,6 +31,9 @@ vi.mock("@agent-management-platform/api-client", () => ({
   useSetAgentCardSource: vi.fn(),
   useDeleteAgentCardSource: vi.fn(),
 }));
+vi.mock("@agent-management-platform/deploy", () => ({
+  ProxySecurityDrawer: ({ open }: { open: boolean }) => (open ? <div>security drawer</div> : null),
+}));
 
 import {
   useDeleteA2AProxy,

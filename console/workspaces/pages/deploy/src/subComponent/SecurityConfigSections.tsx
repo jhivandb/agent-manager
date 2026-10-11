@@ -124,12 +124,14 @@ export const SecurityConfigSections = forwardRef<SecurityConfigHandle, SecurityC
     // GetAgent is used only for the env-independent agent type; CORS + Auth are seeded from the
     // env-scoped `configurations` prop below.
     const { data: agent } = useGetAgent({ orgName, projName, agentName });
-    const isApiAgent = agent?.agentType?.type === "agent-api";
+    // A proxied external A2A agent takes inbound auth and CORS at the gateway, like an API agent.
+    const hasGatewayPolicies = agent?.agentType?.type === "agent-api" ||
+      (agent?.agentType?.type === "external-agent-api" && agent?.agentType?.subType === "a2a-agent");
     const isA2AAgent = agent?.agentType?.subType === "a2a-agent";
 
     const { data: idpResp } = useListEnvironmentIdentityProviders({
       orgName,
-      environmentId: open && isApiAgent ? environment : undefined,
+      environmentId: open && hasGatewayPolicies ? environment : undefined,
     });
     const identityProviderOptions = useMemo(
       () => (idpResp?.list ?? []).map((p) => p.name),
@@ -229,12 +231,12 @@ export const SecurityConfigSections = forwardRef<SecurityConfigHandle, SecurityC
       ? corsHeaders.filter((header) => !isA2AVersionHeader(header))
       : corsHeaders;
     const cardInvalid = isA2AAgent && isCardDraftInvalid(cardDraft);
-    const oauthInvalid = isApiAgent && authMode === "oauth" && oauthIssuers.length === 0;
+    const oauthInvalid = hasGatewayPolicies && authMode === "oauth" && oauthIssuers.length === 0;
 
     const resilienceTimeoutSeconds = timeoutUnit === "minutes"
       ? Number(timeoutDuration) * 60
       : Number(timeoutDuration);
-    const timeoutInvalid = isApiAgent && !isA2AAgent && (
+    const timeoutInvalid = hasGatewayPolicies && !isA2AAgent && (
       timeoutDuration.trim() === ""
       || !Number.isFinite(resilienceTimeoutSeconds)
       || !Number.isInteger(resilienceTimeoutSeconds)
@@ -258,7 +260,7 @@ export const SecurityConfigSections = forwardRef<SecurityConfigHandle, SecurityC
       () => ({
         validate: () => !oauthInvalid && !timeoutInvalid && !cardInvalid,
         buildBody: () => {
-          if (!isApiAgent) return {};
+          if (!hasGatewayPolicies) return {};
           return {
             enableApiKeySecurity: authMode === "apikey",
             enableOAuthSecurity: authMode === "oauth",
@@ -288,14 +290,14 @@ export const SecurityConfigSections = forwardRef<SecurityConfigHandle, SecurityC
         },
       }),
       [
-        isApiAgent, oauthInvalid, authMode, oauthIssuers, oauthAudiences, oauthHeaderName,
+        hasGatewayPolicies, oauthInvalid, authMode, oauthIssuers, oauthAudiences, oauthHeaderName,
         oauthHeaderPrefix, oauthForwardToken, corsEnabled, corsOrigins, corsMethods,
         corsAllowCredentials, hasWildcardOrigin, timeoutInvalid,
         resilienceTimeoutSeconds, isA2AAgent, editableCorsHeaders, cardDraft, cardInvalid,
       ],
     );
 
-    if (!isApiAgent) return null;
+    if (!hasGatewayPolicies) return null;
 
     return (
       <>
