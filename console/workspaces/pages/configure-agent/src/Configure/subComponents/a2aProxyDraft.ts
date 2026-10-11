@@ -31,6 +31,15 @@ export interface A2AProxyDraft {
 export const UPSTREAM_HEADER_MAX = 255;
 export const UPSTREAM_VALUE_MAX_BYTES = 8192;
 const HEADER_PATTERN = /^[A-Za-z0-9_-]+$/;
+// These frame or route the request, so the gateway owns them (as do all Proxy-* headers).
+const RESERVED_HEADERS = new Set([
+  "host", "content-length", "transfer-encoding", "connection", "upgrade", "te", "keep-alive", "trailer",
+]);
+
+const isReservedHeader = (header: string) => {
+  const name = header.toLowerCase();
+  return name.startsWith("proxy-") || RESERVED_HEADERS.has(name);
+};
 
 /** A non-empty header means the server stores a secret for it. */
 export const hasStoredSecret = (proxy?: A2AProxyResponse) => !!proxy?.upstreamAuthHeader;
@@ -50,7 +59,7 @@ export function upstreamAuthError(draft: A2AProxyDraft, proxy?: A2AProxyResponse
   if (!draft.enabled || draft.secret === "clear" || (header === "" && draft.value === "")) return null;
   if (!HEADER_PATTERN.test(header)) return "Use only letters, digits, '-' and '_' in the header name";
   if (header.length > UPSTREAM_HEADER_MAX) return `The header name can be at most ${UPSTREAM_HEADER_MAX} characters`;
-  if (header.toLowerCase() === "host") return "The Host header cannot be set";
+  if (isReservedHeader(header)) return `The ${header} header cannot be set`;
   if (draft.secret === "keep" && hasStoredSecret(proxy)) return null;
   if (draft.value === "") return "Enter the header value";
   if (new TextEncoder().encode(draft.value).length > UPSTREAM_VALUE_MAX_BYTES) {

@@ -63,6 +63,17 @@ describe("a2aProxyDraft", () => {
     expect(upstreamAuthError(draftFromProxy(stored), stored)).toBeNull();
   });
 
+  it("refuses the headers the gateway owns, in any case", () => {
+    for (const header of [
+      "host", "Content-Length", "transfer-encoding", "CONNECTION", "Upgrade", "TE", "Keep-Alive", "Trailer",
+      "Proxy-Authorization", "proxy-connection",
+    ]) {
+      expect(upstreamAuthError(fresh(header, "v")), header).toBe(`The ${header} header cannot be set`);
+    }
+    expect(upstreamAuthError(fresh("Authorization", "Bearer t"))).toBeNull();
+    expect(upstreamAuthError(fresh("X-Proxy-Key", "v"))).toBeNull();
+  });
+
   it("sees toggle-only and auth-only changes", () => {
     expect(draftChanged({ ...draftFromProxy(undefined), enabled: true })).toBe(true);
     expect(draftChanged(draftFromProxy(stored), stored)).toBe(false);

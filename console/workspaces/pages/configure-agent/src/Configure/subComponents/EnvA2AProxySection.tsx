@@ -44,8 +44,17 @@ const PROXY_CHIP: Record<A2AProxyStatus, { label: string; color: "warning" | "su
 
 interface EnvA2AProxySectionProps {
   params: AgentCardPathParams;
-  /** Undefined while the environment is direct. */
+  /** Undefined while the environment is direct; render only once that is known. */
   proxy?: A2AProxyResponse;
+}
+
+/** Stands in for the routing controls until the environment's routing is known. */
+export function A2AProxyUnknown({ failed }: { failed: boolean }) {
+  return failed ? (
+    <Typography variant="body2" color="error" sx={{ mb: 2 }}>Couldn&apos;t load gateway routing.</Typography>
+  ) : (
+    <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>Loading gateway routing…</Typography>
+  );
 }
 
 /** Gateway routing for one environment of an external A2A agent that has a registered card URL. */

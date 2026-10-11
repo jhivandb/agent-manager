@@ -60,7 +60,7 @@ const notFound = () => Object.assign(new Error("nf"), { status: 404 });
 
 const mockProxy = (value: Partial<ReturnType<typeof useGetA2AProxy>>) =>
   vi.mocked(useGetA2AProxy).mockReturnValue({
-    data: undefined, isError: false, error: null, ...value,
+    data: undefined, isSuccess: false, isError: false, error: null, ...value,
   } as unknown as ReturnType<typeof useGetA2AProxy>);
 
 const idleMutation = (hook: unknown) =>
@@ -187,12 +187,64 @@ describe("A2AAgentCardPanel", () => {
 
   it("stops polling a parked card once the gateway publish failed, and says why", () => {
     mockCard({ data: { source: "external", status: "pending", sourceUrl: "https://agent.example/.well-known/agent-card.json", lastError: "" } });
-    mockProxy({ data: { status: "failed", lastError: "the agent cannot be proxied through the gateway", upstreamAuthHeader: "" } });
+    mockProxy({
+      isSuccess: true,
+      data: { status: "failed", lastError: "the agent cannot be proxied through the gateway", upstreamAuthHeader: "" },
+    });
     renderPanel(true);
     expect(screen.getByText("Gateway publish failed")).toBeInTheDocument();
     expect(screen.queryByText("Pending")).not.toBeInTheDocument();
     expect(vi.mocked(useGetAgentCard))
       .toHaveBeenLastCalledWith(params, { poll: false });
+  });
+
+  const registeredCard = {
+    source: "external", status: "fetched", sourceUrl: "https://agent.example/.well-known/agent-card.json", lastError: "",
+  } as const;
+
+  const spyOnProxyWrites = () => {
+    const write = vi.fn().mockResolvedValue(undefined);
+    for (const hook of [useSetA2AProxy, useDeleteA2AProxy]) {
+      vi.mocked(hook as () => unknown).mockReturnValue(
+        { mutate: write, mutateAsync: write, isPending: false });
+    }
+    return write;
+  };
+
+  // An unknown routing would read as direct, and saving it would drop a stored upstream secret.
+  it("offers no routing controls when the gateway routing could not be loaded", () => {
+    const write = spyOnProxyWrites();
+    mockCard({ data: registeredCard });
+    mockProxy({ isError: true, error: Object.assign(new Error("boom"), { status: 500 }) });
+    renderPanel(true);
+    expect(screen.getByText("Couldn't load gateway routing.")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Route through gateway")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
+    expect(write).not.toHaveBeenCalled();
+  });
+
+  it("offers no routing controls while the gateway routing loads", () => {
+    mockCard({ data: registeredCard });
+    mockProxy({ isLoading: true });
+    renderPanel(true);
+    expect(screen.getByText("Loading gateway routing…")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Route through gateway")).not.toBeInTheDocument();
+  });
+
+  it("registers a URL without routing when the gateway routing could not be loaded", async () => {
+    const write = spyOnProxyWrites();
+    mockCard({ isError: true, error: notFound() });
+    mockProxy({ isError: true, error: Object.assign(new Error("boom"), { status: 500 }) });
+    renderPanel(true);
+    expect(screen.queryByLabelText("Route through gateway")).not.toBeInTheDocument();
+    expect(screen.getByText("Couldn't load gateway routing.")).toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText(/agent-card\.json/), {
+      target: { value: "https://agent.example/.well-known/agent-card.json" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /save/i }));
+    await waitFor(() => expect(setSource).toHaveBeenCalledTimes(1));
+    await Promise.resolve();
+    expect(write).not.toHaveBeenCalled();
   });
 
   it("offers a refetch when a platform agent has no card fetch queued", () => {

@@ -30,7 +30,7 @@ import { CodeBlock, OverviewSectionCard, useConfirmationDialog } from "@agent-ma
 import { TextInput } from "@agent-management-platform/views";
 import type { AgentCardStatus } from "@agent-management-platform/types";
 import { AgentCardSourceForm } from "./AgentCardSourceForm";
-import { EnvA2AProxySection } from "./EnvA2AProxySection";
+import { A2AProxyUnknown, EnvA2AProxySection } from "./EnvA2AProxySection";
 
 interface A2AAgentCardPanelProps {
   orgId: string;
@@ -58,10 +58,13 @@ export function A2AAgentCardPanel({
   orgId, projectId, agentId, envId, external,
 }: A2AAgentCardPanelProps) {
   const params = { orgName: orgId, projName: projectId, agentName: agentId, envId };
-  const { data: proxyData, isError: proxyIsError, error: proxyError } =
+  const { data: proxyData, isSuccess: proxyIsSuccess, isError: proxyIsError, error: proxyError } =
     useGetA2AProxy(params, { enabled: !!external });
-  // A 404 means direct; TanStack keeps the previous data on error, so it is dropped here.
-  const proxy = proxyIsError && isAgentCardNotFound(proxyError) ? undefined : proxyData;
+  const proxyIsDirect = proxyIsError && isAgentCardNotFound(proxyError);
+  // Unknown routing reads as direct, and saving it would drop a stored secret.
+  const proxyKnown = proxyIsSuccess || proxyIsDirect;
+  // TanStack keeps the previous data on error, so a 404 drops it here.
+  const proxy = proxyIsDirect ? undefined : proxyData;
   const proxyFailed = proxy?.status === "failed";
   const { data, isLoading, isError, error } = useGetAgentCard(params, { poll: !proxyFailed });
   const { mutate: refresh, isPending: isRefreshing } = useRefreshAgentCard();
@@ -134,9 +137,18 @@ export function A2AAgentCardPanel({
       }
     >
       {showUrlForm && (
-        <AgentCardSourceForm params={params} currentUrl={sourceUrl} />
+        <>
+          <AgentCardSourceForm
+            params={params}
+            currentUrl={sourceUrl}
+            offerRouting={proxyIsDirect}
+          />
+          {!proxyKnown && <A2AProxyUnknown failed={proxyIsError} />}
+        </>
       )}
-      {external && sourceUrl && <EnvA2AProxySection params={params} proxy={proxy} />}
+      {external && sourceUrl && (proxyKnown
+        ? <EnvA2AProxySection params={params} proxy={proxy} />
+        : <A2AProxyUnknown failed={proxyIsError} />)}
       {isLoading && <CircularProgress size={16} />}
       {noSource && (
         <Typography variant="body2" color="text.secondary">

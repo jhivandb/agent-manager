@@ -40,7 +40,12 @@ vi.mock("@agent-management-platform/views", () => ({
   PageLayout: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
-import { useGetA2AProxy, useGetAgent, useListAgentDeployments } from "@agent-management-platform/api-client";
+import {
+  useGetA2AProxy,
+  useGetAgent,
+  useGetAgentConfigurations,
+  useListAgentDeployments,
+} from "@agent-management-platform/api-client";
 import { SecurityComponent } from "./Security.Component";
 
 const renderPage = () =>
@@ -80,5 +85,39 @@ describe("SecurityComponent", () => {
     } as unknown as ReturnType<typeof useGetA2AProxy>);
     renderPage();
     expect(screen.getByText(/not routed through the gateway/i)).toBeInTheDocument();
+  });
+
+  const securityDisabled = () =>
+    vi.mocked(useGetAgentConfigurations).mockReturnValue({
+      data: { enableApiKeySecurity: false, enableOAuthSecurity: false }, isLoading: false,
+    } as unknown as ReturnType<typeof useGetAgentConfigurations>);
+
+  it("points an external A2A agent with security off to its gateway security settings", () => {
+    externalA2A();
+    securityDisabled();
+    vi.mocked(useGetA2AProxy).mockReturnValue({
+      data: { status: "published", lastError: "", upstreamAuthHeader: "" }, isLoading: false, isError: false, error: null,
+    } as unknown as ReturnType<typeof useGetA2AProxy>);
+    renderPage();
+    expect(screen.getByText(/gateway security settings on the agent's/i)).toBeInTheDocument();
+    expect(screen.queryByText(/redeploy/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Go to overview" })).toBeInTheDocument();
+  });
+
+  it("points a deployed agent with security off to its deployment settings", () => {
+    vi.mocked(useGetAgent).mockReturnValue({
+      data: { provisioning: { type: "internal" }, agentType: { type: "agent-api", subType: "chat-api" } },
+      isLoading: false,
+    } as unknown as ReturnType<typeof useGetAgent>);
+    vi.mocked(useGetA2AProxy).mockReturnValue({
+      data: undefined, isLoading: false, isError: false, error: null,
+    } as unknown as ReturnType<typeof useGetA2AProxy>);
+    vi.mocked(useListAgentDeployments).mockReturnValue({
+      data: { dev: { status: "active" } }, isLoading: false,
+    } as unknown as ReturnType<typeof useListAgentDeployments>);
+    securityDisabled();
+    renderPage();
+    expect(screen.getByText(/deployment settings and redeploy/i)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Go to Deployment Settings" })).toBeInTheDocument();
   });
 });

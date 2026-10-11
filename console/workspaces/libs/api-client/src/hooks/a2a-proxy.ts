@@ -42,7 +42,7 @@ export async function invalidateA2AProxy(
   ]);
 }
 
-/** Binds `invalidateA2AProxy` to the app's query client, for callers that do not depend on react-query. */
+/** Binds `invalidateA2AProxy` to the app's query client, for callers without react-query. */
 export function useInvalidateA2AProxy(): (params: A2AProxyPathParams) => Promise<void> {
   const queryClient = useQueryClient();
   return (params) => invalidateA2AProxy(queryClient, params);

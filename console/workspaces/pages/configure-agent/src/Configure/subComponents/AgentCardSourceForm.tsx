@@ -33,6 +33,8 @@ interface AgentCardSourceFormProps {
   inline?: boolean;
   /** Called after a successful save or on cancel. */
   onDone?: () => void;
+  /** Offers gateway routing with the new URL; only once the environment is known to be direct. */
+  offerRouting?: boolean;
 }
 
 const INVALID_HINT = "Enter a public http(s) URL";
@@ -42,13 +44,14 @@ const alreadyReported = () => undefined;
 
 /** Card URL for an external A2A agent in one environment. */
 export function AgentCardSourceForm({
-  params, currentUrl, inline, onDone,
+  params, currentUrl, inline, onDone, offerRouting = false,
 }: AgentCardSourceFormProps) {
   const [url, setUrl] = useState(currentUrl ?? "");
   const { mutateAsync: saveSource, isPending: isSaving } = useSetAgentCardSource();
   const { mutateAsync: saveProxy } = useSetA2AProxy();
   const [proxyDraft, setProxyDraft] = useState(() => draftFromProxy(undefined));
-  const proxyError = inline ? null : upstreamAuthError(proxyDraft);
+  const routes = !inline && offerRouting && proxyDraft.enabled;
+  const proxyError = routes ? upstreamAuthError(proxyDraft) : null;
 
   const trimmed = url.trim();
   const invalid = trimmed !== "" && validateEndpointUrl(trimmed) !== null;
@@ -61,7 +64,7 @@ export function AgentCardSourceForm({
     if (!sourceSaved) return;
     onDone?.();
     // The URL stays saved if routing fails; the environment is then left direct.
-    if (!inline && proxyDraft.enabled) {
+    if (routes) {
       await saveProxy({ params, body: proxyRequestOf(proxyDraft) }).catch(alreadyReported);
     }
   };
@@ -132,15 +135,17 @@ export function AgentCardSourceForm({
           Save
         </Button>
       </Box>
-      <Box sx={{ mt: 1 }}>
-        <A2AProxyFields
-          draft={proxyDraft}
-          onChange={setProxyDraft}
-          hasStoredSecret={false}
-          error={proxyError}
-          disabled={isSaving}
-        />
-      </Box>
+      {offerRouting && (
+        <Box sx={{ mt: 1 }}>
+          <A2AProxyFields
+            draft={proxyDraft}
+            onChange={setProxyDraft}
+            hasStoredSecret={false}
+            error={proxyError}
+            disabled={isSaving}
+          />
+        </Box>
+      )}
     </Box>
   );
 }

@@ -163,7 +163,9 @@ export const SecurityComponent: React.FC = () => {
     ? {
         illustration: <ShieldOff size={48} />,
         title: "Agent security is disabled",
-        description: "Enable API Key Security from the deployment settings and redeploy to manage API keys.",
+        description: isExternalA2A
+          ? "Enable API Key Security in the gateway security settings on the agent's overview to manage API keys."
+          : "Enable API Key Security from the deployment settings and redeploy to manage API keys.",
         action: orgId && projectId && agentId && envId ? (
           <Button
             variant="contained"
