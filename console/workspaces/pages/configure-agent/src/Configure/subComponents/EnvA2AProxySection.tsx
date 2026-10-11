@@ -16,11 +16,10 @@
  * under the License.
  */
 
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { Alert, Box, Button, Chip, Typography } from "@wso2/oxygen-ui";
 import { ShieldCheck, Trash } from "@wso2/oxygen-ui-icons-react";
 import { useDeleteA2AProxy, useRefreshA2AProxy, useSetA2AProxy } from "@agent-management-platform/api-client";
-import { ProxySecurityDrawer } from "@agent-management-platform/deploy";
 import { useConfirmationDialog } from "@agent-management-platform/shared-component";
 import type { A2AProxyResponse, A2AProxyStatus, AgentCardPathParams } from "@agent-management-platform/types";
 import { A2AProxyFields } from "./A2AProxyFields";
@@ -32,6 +31,10 @@ import {
   proxyRequestOf,
   upstreamAuthError,
 } from "./a2aProxyDraft";
+
+const ProxySecurityDrawer = lazy(() =>
+  import("@agent-management-platform/deploy").then((m) => ({ default: m.ProxySecurityDrawer })),
+);
 
 const PROXY_CHIP: Record<A2AProxyStatus, { label: string; color: "warning" | "success" | "error" }> = {
   pending: { label: "Publishing to gateway", color: "warning" },
@@ -135,15 +138,17 @@ export function EnvA2AProxySection({ params, proxy }: EnvA2AProxySectionProps) {
       <Box display="flex" justifyContent="flex-end" sx={{ mt: 1 }}>
         <Button size="small" variant="contained" disabled={!canSave} onClick={save}>Save</Button>
       </Box>
-      {proxy && (
-        <ProxySecurityDrawer
-          open={securityOpen}
-          onClose={() => setSecurityOpen(false)}
-          orgName={params.orgName ?? ""}
-          projName={params.projName ?? ""}
-          agentName={params.agentName ?? ""}
-          environment={params.envId ?? ""}
-        />
+      {proxy && securityOpen && (
+        <Suspense fallback={null}>
+          <ProxySecurityDrawer
+            open
+            onClose={() => setSecurityOpen(false)}
+            orgName={params.orgName ?? ""}
+            projName={params.projName ?? ""}
+            agentName={params.agentName ?? ""}
+            environment={params.envId ?? ""}
+          />
+        </Suspense>
       )}
     </Box>
   );

@@ -112,11 +112,11 @@ describe("EnvA2AProxySection", () => {
     expect(republish).toHaveBeenCalledWith(params);
   });
 
-  it("opens the gateway security settings only while proxied", () => {
+  it("opens the gateway security settings only while proxied", async () => {
     const { rerender } = render(<EnvA2AProxySection params={params} />);
     expect(screen.queryByRole("button", { name: /security settings/i })).not.toBeInTheDocument();
     rerender(<EnvA2AProxySection params={params} proxy={stored} />);
     fireEvent.click(screen.getByRole("button", { name: /security settings/i }));
-    expect(screen.getByText("security drawer")).toBeInTheDocument();
+    expect(await screen.findByText("security drawer")).toBeInTheDocument();
   });
 });
