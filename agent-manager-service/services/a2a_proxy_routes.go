@@ -155,7 +155,7 @@ func a2aPathPrefixUnder(upstream *url.URL, link string) (string, bool) {
 	if rest == "" || rest == "/" {
 		return "", true
 	}
-	if path.Clean(rest) != rest || strings.ContainsAny(rest, "{}") || strings.ContainsFunc(rest, unicode.IsSpace) {
+	if path.Clean(rest) != rest || strings.ContainsAny(rest, "{}?#%") || strings.ContainsFunc(rest, unicode.IsSpace) {
 		return "", false
 	}
 	return rest, true

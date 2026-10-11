@@ -120,6 +120,9 @@ func TestDeriveA2AProxyRoutesLeavesNonCanonicalPathsUnfronted(t *testing.T) {
 		"https://agent.example/team/a2a/{id}",
 		"https://agent.example/team/a2a%2Fjsonrpc",
 		"https://agent.example/team/a2a%20rpc",
+		"https://agent.example/team/a2a%3Frpc",
+		"https://agent.example/team/a2a%23x",
+		"https://agent.example/team/a2a%25x",
 		"https://agent.example/team/rpc?x=1",
 	} {
 		_, transports, err := deriveA2AProxyRoutes(originCardURL, a2aTestCard(t,
