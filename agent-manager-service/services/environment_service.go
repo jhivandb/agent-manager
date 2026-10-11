@@ -100,10 +100,11 @@ type environmentService struct {
 	envThunderURLRepo  repositories.EnvThunderURLRepository
 	encryptionKey      []byte
 	a2aCardRepo        repositories.A2AAgentCardRepository
+	a2aPublisher       *A2APublisher
 }
 
 // NewEnvironmentService creates a new environment service
-func NewEnvironmentService(logger *slog.Logger, gatewayRepo repositories.GatewayRepository, ocClient occlient.OpenChoreoClient, thunderProber thundersvc.Prober, agentConfigService AgentConfigurationService, envThunderRepo repositories.EnvThunderSystemClientRepository, envThunderURLRepo repositories.EnvThunderURLRepository, encryptionKey []byte, a2aCardRepo repositories.A2AAgentCardRepository) EnvironmentService {
+func NewEnvironmentService(logger *slog.Logger, gatewayRepo repositories.GatewayRepository, ocClient occlient.OpenChoreoClient, thunderProber thundersvc.Prober, agentConfigService AgentConfigurationService, envThunderRepo repositories.EnvThunderSystemClientRepository, envThunderURLRepo repositories.EnvThunderURLRepository, encryptionKey []byte, a2aCardRepo repositories.A2AAgentCardRepository, a2aPublisher *A2APublisher) EnvironmentService {
 	return &environmentService{
 		logger:             logger,
 		gatewayRepo:        gatewayRepo,
@@ -114,6 +115,7 @@ func NewEnvironmentService(logger *slog.Logger, gatewayRepo repositories.Gateway
 		envThunderURLRepo:  envThunderURLRepo,
 		encryptionKey:      encryptionKey,
 		a2aCardRepo:        a2aCardRepo,
+		a2aPublisher:       a2aPublisher,
 	}
 }
 
@@ -366,6 +368,15 @@ func (s *environmentService) DeleteEnvironment(ctx context.Context, ouID string,
 	if s.a2aCardRepo != nil {
 		if err := s.a2aCardRepo.DeleteForEnvironment(ctx, ouID, envUUID); err != nil {
 			s.logger.Error("Environment deleted but its A2A agent cards were not removed",
+				"ouID", ouID, "envID", envID, "envUUID", envUUID, "error", err)
+		}
+	}
+
+	// An external agent has no release binding to block the delete, so a proxied environment can
+	// go while its gateway still serves the Agent. Best effort, like the card cleanup above.
+	if s.a2aPublisher != nil {
+		if err := s.a2aPublisher.TeardownEnvironment(ctx, ouID, envUUID); err != nil {
+			s.logger.Error("Environment deleted but its A2A gateway publications were not fully removed",
 				"ouID", ouID, "envID", envID, "envUUID", envUUID, "error", err)
 		}
 	}

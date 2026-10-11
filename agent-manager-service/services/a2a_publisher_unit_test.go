@@ -242,3 +242,49 @@ func TestA2APublisherTeardownEnvAndDropArtifactReportsAFailedDelete(t *testing.T
 
 	assert.ErrorIs(t, err, assert.AnError)
 }
+
+func TestA2APublisherTeardownEnvironmentRemovesEverythingAndTellsTheGateways(t *testing.T) {
+	m := newPublisherMocks(t)
+	envUUID, artifactUUID := uuid.New(), uuid.New()
+	pub := models.A2APublication{
+		OUID: "org-1", ProjectName: "checkout", AgentName: "weather", EnvironmentName: "dev",
+		EnvironmentUUID: envUUID, ArtifactUUID: artifactUUID, Source: models.A2APublicationSourceExternal,
+	}
+	m.pubs.ListForEnvironmentFunc = func(context.Context, string, uuid.UUID) ([]models.A2APublication, error) {
+		return []models.A2APublication{pub}, nil
+	}
+	m.pubs.DeleteForEnvironmentFunc = func(context.Context, string, uuid.UUID) error { return nil }
+	m.proxies.DeleteForEnvironmentFunc = func(context.Context, string, uuid.UUID) error { return nil }
+	m.txDeployments.DeleteForArtifactFunc = func(context.Context, uuid.UUID, string) error { return nil }
+	m.txPubs.DeleteForAgentEnvFunc = func(context.Context, string, string, string, uuid.UUID) error { return nil }
+	m.artifacts.DeleteFunc = func(tx *gorm.DB, _ string) error {
+		assert.Same(t, txSentinel, tx)
+		return nil
+	}
+
+	require.NoError(t, m.publisher().TeardownEnvironment(context.Background(), "org-1", envUUID))
+
+	require.Len(t, m.artifacts.DeleteCalls(), 1, "a deleted environment needs no artifact")
+	assert.Len(t, m.pubs.DeleteForEnvironmentCalls(), 1)
+	assert.Len(t, m.proxies.DeleteForEnvironmentCalls(), 1)
+	require.Len(t, m.hub.published, 1)
+	assert.Equal(t, artifactUUID.String(), deletedAgentID(t, m.hub.published[0]))
+}
+
+// One agent's failure does not keep the environment's other rows alive.
+func TestA2APublisherTeardownEnvironmentStillDropsTheRowsAfterAFailure(t *testing.T) {
+	m := newPublisherMocks(t)
+	m.pubs.ListForEnvironmentFunc = func(context.Context, string, uuid.UUID) ([]models.A2APublication, error) {
+		return []models.A2APublication{{AgentName: "weather", ArtifactUUID: uuid.New()}}, nil
+	}
+	m.txErr = assert.AnError // every per-row transaction fails to commit
+	m.pubs.DeleteForEnvironmentFunc = func(context.Context, string, uuid.UUID) error { return nil }
+	m.proxies.DeleteForEnvironmentFunc = func(context.Context, string, uuid.UUID) error { return nil }
+
+	err := m.publisher().TeardownEnvironment(context.Background(), "org-1", uuid.New())
+
+	assert.ErrorIs(t, err, assert.AnError)
+	assert.Len(t, m.pubs.DeleteForEnvironmentCalls(), 1)
+	assert.Len(t, m.proxies.DeleteForEnvironmentCalls(), 1)
+	assert.Empty(t, m.hub.published, "a teardown that did not commit is not announced")
+}

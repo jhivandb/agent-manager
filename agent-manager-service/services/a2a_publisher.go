@@ -193,6 +193,54 @@ func (p *A2APublisher) DeleteForAgent(ctx context.Context, ouID, projectName, ag
 	return errors.Join(errs...)
 }
 
+// TeardownEnvironment removes every A2A publication, gateway deployment, agent artifact and proxy row
+// of a deleted environment, then tells the gateways. One agent's failure does not stop the rest.
+func (p *A2APublisher) TeardownEnvironment(ctx context.Context, ouID string, envUUID uuid.UUID) error {
+	pubs, err := p.pubRepo.ListForEnvironment(ctx, ouID, envUUID)
+	if err != nil {
+		return fmt.Errorf("failed to list the environment's A2A publications: %w", err)
+	}
+	var errs []error
+	var teardowns []a2aTeardown
+	for _, pub := range pubs {
+		teardown, err := p.teardownDeletedEnv(ctx, pub)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		teardowns = append(teardowns, teardown)
+	}
+	// Rows a failed teardown left, and proxies that never published, go regardless: the environment is gone.
+	if err := p.pubRepo.DeleteForEnvironment(ctx, ouID, envUUID); err != nil {
+		errs = append(errs, fmt.Errorf("failed to delete the environment's A2A publications: %w", err))
+	}
+	if err := p.proxyRepo.DeleteForEnvironment(ctx, ouID, envUUID); err != nil {
+		errs = append(errs, fmt.Errorf("failed to delete the environment's A2A proxies: %w", err))
+	}
+	for _, teardown := range teardowns {
+		p.SendTeardown(ctx, teardown)
+	}
+	return errors.Join(errs...)
+}
+
+// teardownDeletedEnv removes one publication together with its artifact, which a deleted environment no longer needs.
+func (p *A2APublisher) teardownDeletedEnv(ctx context.Context, pub models.A2APublication) (a2aTeardown, error) {
+	key := a2aPublicationKey{
+		OUID: pub.OUID, ProjectName: pub.ProjectName, AgentName: pub.AgentName,
+		EnvironmentName: pub.EnvironmentName, EnvironmentUUID: pub.EnvironmentUUID,
+	}
+	var teardown a2aTeardown
+	err := p.tx(ctx, func(tx *gorm.DB) error {
+		var err error
+		teardown, err = p.TeardownEnvAndDropArtifact(ctx, tx, key, pub.ArtifactUUID)
+		return err
+	})
+	if err != nil {
+		return a2aTeardown{}, fmt.Errorf("agent %s: %w", pub.AgentName, err)
+	}
+	return teardown, nil
+}
+
 func (p *A2APublisher) publications(tx *gorm.DB) repositories.A2APublicationRepository {
 	if tx == nil {
 		return p.pubRepo

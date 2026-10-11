@@ -64,7 +64,7 @@ var envTestKey = []byte("0123456789abcdef0123456789abcdef")
 // newEnvServiceWithThunderRepo/newEnvServiceWithThunderURLRepo instead.
 func newEnvService(repo *repomocks.GatewayRepositoryMock, oc *clientmocks.OpenChoreoClientMock) EnvironmentService {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	return NewEnvironmentService(logger, repo, oc, &clientmocks.ThunderProberMock{}, nil, nil, nil, nil, nil)
+	return NewEnvironmentService(logger, repo, oc, &clientmocks.ThunderProberMock{}, nil, nil, nil, nil, nil, nil)
 }
 
 // newEnvServiceWithThunderRepo wires the service with a configured env-Thunder
@@ -89,7 +89,7 @@ func newEnvServiceWithThunderRepo(repo *repomocks.EnvThunderSystemClientReposito
 		},
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	return NewEnvironmentService(logger, &repomocks.GatewayRepositoryMock{}, &clientmocks.OpenChoreoClientMock{}, &clientmocks.ThunderProberMock{}, nil, repo, urlRepo, envTestKey, nil)
+	return NewEnvironmentService(logger, &repomocks.GatewayRepositoryMock{}, &clientmocks.OpenChoreoClientMock{}, &clientmocks.ThunderProberMock{}, nil, repo, urlRepo, envTestKey, nil, nil)
 }
 
 // newEnvServiceWithThunderURLRepo wires the service with a configured env-Thunder
@@ -103,7 +103,7 @@ func newEnvServiceWithThunderURLRepo(repo *repomocks.EnvThunderURLRepositoryMock
 		}
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	return NewEnvironmentService(logger, &repomocks.GatewayRepositoryMock{}, &clientmocks.OpenChoreoClientMock{}, &clientmocks.ThunderProberMock{}, nil, &repomocks.EnvThunderSystemClientRepositoryMock{}, repo, nil, nil)
+	return NewEnvironmentService(logger, &repomocks.GatewayRepositoryMock{}, &clientmocks.OpenChoreoClientMock{}, &clientmocks.ThunderProberMock{}, nil, &repomocks.EnvThunderSystemClientRepositoryMock{}, repo, nil, nil, nil)
 }
 
 // -----------------------------------------------------------------------------
@@ -690,7 +690,7 @@ func TestEnvironmentService_DeleteEnvironmentDropsA2ACards(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			cards := recordingCardRepo()
 			svc := NewEnvironmentService(discardLogger(), cleanedGatewayRepo(), deletingEnvOC(envUUID, deleteErr),
-				&clientmocks.ThunderProberMock{}, nil, nil, nil, nil, cards)
+				&clientmocks.ThunderProberMock{}, nil, nil, nil, nil, cards, nil)
 
 			require.NoError(t, svc.DeleteEnvironment(context.Background(), org, envID))
 
@@ -706,7 +706,7 @@ func TestEnvironmentService_DeleteEnvironmentDropsA2ACards(t *testing.T) {
 		cards := &repomocks.A2AAgentCardRepositoryMock{}
 		svc := NewEnvironmentService(discardLogger(), cleanedGatewayRepo(),
 			deletingEnvOC(envUUID, errors.New("release bindings still exist")),
-			&clientmocks.ThunderProberMock{}, nil, nil, nil, nil, cards)
+			&clientmocks.ThunderProberMock{}, nil, nil, nil, nil, cards, nil)
 
 		require.Error(t, svc.DeleteEnvironment(context.Background(), org, envID))
 	})
@@ -717,7 +717,7 @@ func TestEnvironmentService_DeleteEnvironmentDropsA2ACards(t *testing.T) {
 			DeleteForEnvironmentFunc: func(context.Context, string, uuid.UUID) error { return errors.New("db down") },
 		}
 		svc := NewEnvironmentService(discardLogger(), gateways, deletingEnvOC(envUUID, nil),
-			&clientmocks.ThunderProberMock{}, nil, nil, nil, nil, cards)
+			&clientmocks.ThunderProberMock{}, nil, nil, nil, nil, cards, nil)
 
 		require.NoError(t, svc.DeleteEnvironment(context.Background(), org, envID))
 		assert.Len(t, gateways.DeleteEnvironmentMappingsByEnvironmentIDCalls(), 1, "mapping cleanup still runs")
@@ -891,7 +891,7 @@ func TestEnvironmentService_ListThunderInstances(t *testing.T) {
 				return &models.EnvThunderURL{ThunderHandle: strPtr(envName + "-handle"), ThunderURL: "http://" + envName + "-handle.amp.localhost:8080"}, nil
 			},
 		}
-		svc := NewEnvironmentService(discardLogger(), &repomocks.GatewayRepositoryMock{}, oc, prober, nil, nil, urlRepo, nil, nil)
+		svc := NewEnvironmentService(discardLogger(), &repomocks.GatewayRepositoryMock{}, oc, prober, nil, nil, urlRepo, nil, nil, nil)
 
 		resp, err := svc.ListThunderInstances(context.Background(), org)
 
@@ -920,7 +920,7 @@ func TestEnvironmentService_ListThunderInstances(t *testing.T) {
 				return nil, gorm.ErrRecordNotFound
 			},
 		}
-		svc := NewEnvironmentService(discardLogger(), &repomocks.GatewayRepositoryMock{}, oc, &clientmocks.ThunderProberMock{}, nil, nil, urlRepo, nil, nil)
+		svc := NewEnvironmentService(discardLogger(), &repomocks.GatewayRepositoryMock{}, oc, &clientmocks.ThunderProberMock{}, nil, nil, urlRepo, nil, nil, nil)
 
 		resp, err := svc.ListThunderInstances(context.Background(), org)
 
@@ -950,7 +950,7 @@ func TestEnvironmentService_ListThunderInstances(t *testing.T) {
 				return nil, boom
 			},
 		}
-		svc := NewEnvironmentService(discardLogger(), &repomocks.GatewayRepositoryMock{}, oc, &clientmocks.ThunderProberMock{}, nil, nil, urlRepo, nil, nil)
+		svc := NewEnvironmentService(discardLogger(), &repomocks.GatewayRepositoryMock{}, oc, &clientmocks.ThunderProberMock{}, nil, nil, urlRepo, nil, nil, nil)
 
 		resp, err := svc.ListThunderInstances(context.Background(), org)
 
@@ -1021,7 +1021,7 @@ func TestEnvironmentService_ListThunderInstances(t *testing.T) {
 				return &models.EnvThunderURL{ThunderHandle: handle, ThunderURL: urls[envName]}, nil
 			},
 		}
-		svc := NewEnvironmentService(discardLogger(), &repomocks.GatewayRepositoryMock{}, oc, prober, nil, nil, urlRepo, nil, nil)
+		svc := NewEnvironmentService(discardLogger(), &repomocks.GatewayRepositoryMock{}, oc, prober, nil, nil, urlRepo, nil, nil, nil)
 
 		resp, err := svc.ListThunderInstances(context.Background(), org)
 
@@ -1070,7 +1070,7 @@ func TestEnvironmentService_ListThunderInstances(t *testing.T) {
 				return nil, gorm.ErrRecordNotFound
 			},
 		}
-		svc := NewEnvironmentService(discardLogger(), &repomocks.GatewayRepositoryMock{}, oc, &clientmocks.ThunderProberMock{}, nil, nil, urlRepo, nil, nil)
+		svc := NewEnvironmentService(discardLogger(), &repomocks.GatewayRepositoryMock{}, oc, &clientmocks.ThunderProberMock{}, nil, nil, urlRepo, nil, nil, nil)
 
 		resp, err := svc.ListThunderInstances(context.Background(), org)
 
@@ -1170,7 +1170,7 @@ func TestEnvironmentService_SetThunderSystemClientSecret(t *testing.T) {
 			UpsertFunc: func(context.Context, *models.EnvThunderSystemClient) error { return nil },
 		}
 		logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-		svc := NewEnvironmentService(logger, &repomocks.GatewayRepositoryMock{}, &clientmocks.OpenChoreoClientMock{}, &clientmocks.ThunderProberMock{}, nil, systemClientRepo, urlRepo, envTestKey, nil)
+		svc := NewEnvironmentService(logger, &repomocks.GatewayRepositoryMock{}, &clientmocks.OpenChoreoClientMock{}, &clientmocks.ThunderProberMock{}, nil, systemClientRepo, urlRepo, envTestKey, nil, nil)
 
 		err := svc.SetThunderSystemClientSecret(context.Background(), "ou-123", "staging", "amp-system-client", "s3cr3t")
 
@@ -1402,7 +1402,7 @@ func TestEnvironmentService_SetThunderURL(t *testing.T) {
 			},
 		}
 		logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-		svc := NewEnvironmentService(logger, &repomocks.GatewayRepositoryMock{}, &clientmocks.OpenChoreoClientMock{}, &clientmocks.ThunderProberMock{}, nil, nil, urlRepo, nil, nil)
+		svc := NewEnvironmentService(logger, &repomocks.GatewayRepositoryMock{}, &clientmocks.OpenChoreoClientMock{}, &clientmocks.ThunderProberMock{}, nil, nil, urlRepo, nil, nil, nil)
 
 		resolved, err := svc.SetThunderURL(context.Background(), "ou-123", "prod", "", "")
 		require.NoError(t, err)
@@ -1926,7 +1926,7 @@ func TestEnvironmentService_GetThunderURL(t *testing.T) {
 			},
 		}
 		logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-		svc := NewEnvironmentService(logger, &repomocks.GatewayRepositoryMock{}, &clientmocks.OpenChoreoClientMock{}, &clientmocks.ThunderProberMock{}, nil, nil, urlRepo, nil, nil)
+		svc := NewEnvironmentService(logger, &repomocks.GatewayRepositoryMock{}, &clientmocks.OpenChoreoClientMock{}, &clientmocks.ThunderProberMock{}, nil, nil, urlRepo, nil, nil, nil)
 
 		_, err := svc.GetThunderURL(context.Background(), "ou-123", "prod")
 		require.Error(t, err)
@@ -2076,4 +2076,38 @@ func TestEnvironmentService_IsThunderHandleAvailable(t *testing.T) {
 		require.Error(t, err)
 		assert.ErrorIs(t, err, boom)
 	})
+}
+
+// An external agent has no release binding to stop the delete, so its gateway Agent must be withdrawn here.
+func TestEnvironmentService_DeleteEnvironmentTearsDownA2APublications(t *testing.T) {
+	const org, envID = "acme", "dev"
+	const envUUID = "44444444-4444-4444-4444-444444444444"
+	m := newPublisherMocks(t)
+	var torndown []uuid.UUID
+	m.pubs.ListForEnvironmentFunc = func(_ context.Context, _ string, env uuid.UUID) ([]models.A2APublication, error) {
+		torndown = append(torndown, env)
+		return []models.A2APublication{}, nil
+	}
+	m.pubs.DeleteForEnvironmentFunc = func(context.Context, string, uuid.UUID) error { return nil }
+	m.proxies.DeleteForEnvironmentFunc = func(context.Context, string, uuid.UUID) error { return nil }
+	svc := NewEnvironmentService(discardLogger(), cleanedGatewayRepo(), deletingEnvOC(envUUID, nil),
+		&clientmocks.ThunderProberMock{}, nil, nil, nil, nil, nil, m.publisher())
+
+	require.NoError(t, svc.DeleteEnvironment(context.Background(), org, envID))
+
+	assert.Equal(t, []uuid.UUID{uuid.MustParse(envUUID)}, torndown)
+	assert.Len(t, m.proxies.DeleteForEnvironmentCalls(), 1)
+}
+
+func TestEnvironmentService_DeleteEnvironmentKeepsA2APublicationsWhenOCRefuses(t *testing.T) {
+	m := newPublisherMocks(t) // ListForEnvironmentFunc is nil: tearing down would panic
+	svc := NewEnvironmentService(discardLogger(), cleanedGatewayRepo(),
+		deletingEnvOC("44444444-4444-4444-4444-444444444444", errors.New("release bindings still exist")),
+		&clientmocks.ThunderProberMock{}, nil, nil, nil, nil, nil, m.publisher())
+
+	require.Error(t, svc.DeleteEnvironment(context.Background(), "acme", "dev"))
+
+	assert.Empty(t, m.pubs.ListForEnvironmentCalls())
+	assert.Empty(t, m.pubs.DeleteForEnvironmentCalls())
+	assert.Empty(t, m.proxies.DeleteForEnvironmentCalls())
 }
