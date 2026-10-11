@@ -5029,7 +5029,7 @@ func (s *agentManagerService) UpdateAgentDeploySettings(ctx context.Context, ouI
 	if err != nil {
 		return translateAgentError(err)
 	}
-	if agent.Type.Type != string(utils.AgentTypeAPI) {
+	if !deploySettingsApplyTo(agent) {
 		return fmt.Errorf("%w: deploy settings only apply to API-type agents (got %q)", utils.ErrInvalidInput, agent.Type.Type)
 	}
 	// Both validates the environment and authorizes the caller against its tier
@@ -5040,6 +5040,12 @@ func (s *agentManagerService) UpdateAgentDeploySettings(ctx context.Context, ouI
 	targetEnv, err := s.requireEnvTier(ctx, ouID, req.EnvironmentName)
 	if err != nil {
 		return err
+	}
+	external := isExternalProvisioned(agent)
+	if external {
+		if err := s.requireProxiedEnvironment(ctx, agent, ouID, projectName, targetEnv); err != nil {
+			return err
+		}
 	}
 
 	// Resolve final settings: precedence is request → existing DB
@@ -5084,32 +5090,18 @@ func (s *agentManagerService) UpdateAgentDeploySettings(ctx context.Context, ouI
 	if artifactErr != nil {
 		return fmt.Errorf("failed to ensure agent env API artifact: %w", artifactErr)
 	}
-	isPythonBuildpack := agent.Build != nil && agent.Build.Buildpack != nil && agent.Build.Buildpack.Language == string(utils.LanguagePython)
-	isBallerinaBuildpack := agent.Build != nil && agent.Build.Buildpack != nil && agent.Build.Buildpack.Language == string(utils.LanguageBallerina)
-	// Resolve the instrumentation version: request override (validated) -> the
-	// env's currently-pinned version. The resolved version is persisted below and
-	// its image is written as a per-env override on the OTEL trait.
-	languageVersion := ""
-	if agent.Build != nil && agent.Build.Buildpack != nil {
-		languageVersion = agent.Build.Buildpack.LanguageVersion
-	}
 	var existingInstrumentationVersion *string
 	if existingConfig != nil {
 		existingInstrumentationVersion = existingConfig.InstrumentationVersion
 	}
-	resolvedInstrumentationVersion, instrumentationImage, resolveErr := s.resolveInstrumentationImageOverride(
-		isPythonBuildpack, languageVersion, req.InstrumentationVersion.Get(), existingInstrumentationVersion,
-	)
-	if resolveErr != nil {
-		return resolveErr
-	}
-	traitEnvConfigs := buildTraitEnvConfigs(agentName, policies, artifact.UUID.String(), resilienceTimeoutSeconds, isPythonBuildpack, isBallerinaBuildpack, tracingCfg.EnableAutoInstrumentation, instrumentationImage, !isA2AAgent)
-
-	// Apply to the release binding (atomic: trait configs + component-type configs + restartedAt in a single update).
-	settingsCTConfigs := buildComponentTypeEnvConfigs(targetEnv)
-	if updateErr := s.ocClient.UpdateReleaseBindingTraitConfigs(ctx, ouID, agentName, req.EnvironmentName, traitEnvConfigs, settingsCTConfigs); updateErr != nil {
-		s.logger.Error("Failed to update release binding deploy settings", "agentName", agentName, "environment", req.EnvironmentName, "error", updateErr)
-		return fmt.Errorf("failed to update deploy settings: %w", updateErr)
+	resolvedInstrumentationVersion := existingInstrumentationVersion
+	// An external agent has no release binding: its settings reach the gateway through the republish below.
+	if !external {
+		resolvedInstrumentationVersion, err = s.applyReleaseBindingSettings(ctx, ouID, agentName, req, agent, targetEnv,
+			policies, artifact.UUID.String(), resilienceTimeoutSeconds, tracingCfg.EnableAutoInstrumentation, existingInstrumentationVersion)
+		if err != nil {
+			return err
+		}
 	}
 
 	var settingsResilienceTimeoutSeconds *int32
@@ -5150,6 +5142,72 @@ func (s *agentManagerService) UpdateAgentDeploySettings(ctx context.Context, ouI
 
 	s.logger.Info("Agent deploy settings updated successfully", "agentName", agentName, "environment", req.EnvironmentName)
 	return nil
+}
+
+// deploySettingsApplyTo is true for API agents and for external A2A agents, whose proxied environments take inbound auth and CORS at the gateway.
+func deploySettingsApplyTo(agent *models.AgentResponse) bool {
+	switch agent.Type.Type {
+	case string(utils.AgentTypeAPI):
+		return true
+	case string(utils.AgentTypeExternalAPI):
+		return utils.IsA2AAgentSubType(agent.Type.SubType)
+	}
+	return false
+}
+
+// requireProxiedEnvironment refuses deploy settings for a direct external environment, where nothing applies them.
+func (s *agentManagerService) requireProxiedEnvironment(
+	ctx context.Context, agent *models.AgentResponse, ouID, projectName string, env *models.EnvironmentResponse,
+) error {
+	envUUID, err := uuid.Parse(env.UUID)
+	if err != nil {
+		return fmt.Errorf("environment %q has an unparseable UUID %q: %w", env.Name, env.UUID, err)
+	}
+	proxied := false
+	if s.a2aPublisher != nil {
+		if proxied, err = s.a2aPublisher.ShouldPublish(ctx, agent, ouID, projectName, envUUID); err != nil {
+			return err
+		}
+	}
+	if !proxied {
+		return fmt.Errorf("%w: deploy settings apply only to environments that route this agent through the gateway",
+			utils.ErrInvalidInput)
+	}
+	return nil
+}
+
+// applyReleaseBindingSettings writes the settings onto the agent's release binding (one atomic
+// update, which rolls the pods) and returns the instrumentation version to persist.
+func (s *agentManagerService) applyReleaseBindingSettings(
+	ctx context.Context, ouID, agentName string, req *spec.UpdateAgentDeploySettingsRequest,
+	agent *models.AgentResponse, targetEnv *models.EnvironmentResponse, policies []map[string]interface{},
+	artifactUUID string, resilienceTimeoutSeconds int32, enableAutoInstrumentation bool, existingInstrumentationVersion *string,
+) (*string, error) {
+	isPythonBuildpack := agent.Build != nil && agent.Build.Buildpack != nil && agent.Build.Buildpack.Language == string(utils.LanguagePython)
+	isBallerinaBuildpack := agent.Build != nil && agent.Build.Buildpack != nil && agent.Build.Buildpack.Language == string(utils.LanguageBallerina)
+	// Resolve the instrumentation version: request override (validated) -> the
+	// env's currently-pinned version. Its image is written as a per-env override on the OTEL trait.
+	languageVersion := ""
+	if agent.Build != nil && agent.Build.Buildpack != nil {
+		languageVersion = agent.Build.Buildpack.LanguageVersion
+	}
+	resolvedInstrumentationVersion, instrumentationImage, err := s.resolveInstrumentationImageOverride(
+		isPythonBuildpack, languageVersion, req.InstrumentationVersion.Get(), existingInstrumentationVersion,
+	)
+	if err != nil {
+		return nil, err
+	}
+	isA2AAgent := utils.IsA2AAgentSubType(agent.Type.SubType)
+	traitEnvConfigs := buildTraitEnvConfigs(agentName, policies, artifactUUID, resilienceTimeoutSeconds,
+		isPythonBuildpack, isBallerinaBuildpack, enableAutoInstrumentation, instrumentationImage, !isA2AAgent)
+
+	// Apply to the release binding (atomic: trait configs + component-type configs + restartedAt in a single update).
+	settingsCTConfigs := buildComponentTypeEnvConfigs(targetEnv)
+	if err := s.ocClient.UpdateReleaseBindingTraitConfigs(ctx, ouID, agentName, req.EnvironmentName, traitEnvConfigs, settingsCTConfigs); err != nil {
+		s.logger.Error("Failed to update release binding deploy settings", "agentName", agentName, "environment", req.EnvironmentName, "error", err)
+		return nil, fmt.Errorf("failed to update deploy settings: %w", err)
+	}
+	return resolvedInstrumentationVersion, nil
 }
 
 // UpdateAgentConfigurations replaces the per-environment env vars and file mounts on the
