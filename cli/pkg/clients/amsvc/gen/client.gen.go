@@ -22336,6 +22336,7 @@ type SetAgentCardSourceResp struct {
 	JSON400      *ErrorResponse
 	JSON403      *ErrorResponse
 	JSON404      *ErrorResponse
+	JSON409      *ErrorResponse
 	JSON500      *ErrorResponse
 }
 
@@ -33958,6 +33959,13 @@ func ParseSetAgentCardSourceResp(rsp *http.Response) (*SetAgentCardSourceResp, e
 			return nil, err
 		}
 		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ErrorResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
 		var dest ErrorResponse
