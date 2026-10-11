@@ -181,8 +181,8 @@ func InitializeAppParams(cfg *config.Config, db *gorm.DB, authProvider client.Au
 	agentIdentityController := controllers.NewAgentIdentityController(envThunderResolver, agentThunderClientRepository, mcpProxyRepository, mcpProxyScopeRepository, mcpProxyService)
 	monitorSchedulerService := services.NewMonitorSchedulerService(openChoreoClient, publisherCredentialProvisioner, logger, monitorExecutor, monitorRepository)
 	agentThunderReconcilerService := services.NewAgentThunderReconcilerService(agentThunderProvisioning, agentIdentityInjectionService, agentThunderClientRepository, logger)
-	a2APublicationReconcilerService := services.NewA2APublicationReconcilerService(a2APublicationRepository, a2AAgentCardRepository, deploymentRepository, gatewayRepository, agentConfigRepository, openChoreoClient, gatewayEventsService, logger)
 	a2ACardFetcher := services.NewA2ACardFetcher()
+	a2APublicationReconcilerService := services.NewA2APublicationReconcilerService(a2APublicationRepository, a2AAgentCardRepository, a2AProxyRepository, deploymentRepository, gatewayRepository, agentConfigRepository, openChoreoClient, a2ACardFetcher, gatewayEventsService, logger)
 	a2ACardReconcilerService := services.NewA2ACardReconcilerService(a2AAgentCardRepository, a2ACardFetcher, openChoreoClient, logger)
 	appParams := &AppParams{
 		AuthMiddleware:                   middleware,
@@ -374,8 +374,8 @@ func InitializeTestAppParamsWithClientMocks(cfg *config.Config, db *gorm.DB, aut
 	agentIdentityController := controllers.NewAgentIdentityController(envThunderResolver, agentThunderClientRepository, mcpProxyRepository, mcpProxyScopeRepository, mcpProxyService)
 	monitorSchedulerService := services.NewMonitorSchedulerService(openChoreoClient, publisherCredentialProvisioner, logger, monitorExecutor, monitorRepository)
 	agentThunderReconcilerService := services.NewAgentThunderReconcilerService(agentThunderProvisioningService, agentIdentityInjectionService, agentThunderClientRepository, logger)
-	a2APublicationReconcilerService := services.NewA2APublicationReconcilerService(a2APublicationRepository, a2AAgentCardRepository, deploymentRepository, gatewayRepository, agentConfigRepository, openChoreoClient, gatewayEventsService, logger)
 	a2ACardFetcher := services.NewA2ACardFetcher()
+	a2APublicationReconcilerService := services.NewA2APublicationReconcilerService(a2APublicationRepository, a2AAgentCardRepository, a2AProxyRepository, deploymentRepository, gatewayRepository, agentConfigRepository, openChoreoClient, a2ACardFetcher, gatewayEventsService, logger)
 	a2ACardReconcilerService := services.NewA2ACardReconcilerService(a2AAgentCardRepository, a2ACardFetcher, openChoreoClient, logger)
 	appParams := &AppParams{
 		AuthMiddleware:                   authMiddleware,

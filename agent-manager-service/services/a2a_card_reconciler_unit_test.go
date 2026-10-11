@@ -266,14 +266,14 @@ func TestCardReconcilerStoresAValidUTF8LastError(t *testing.T) {
 func TestCardReconcilerCapsTheLastErrorLength(t *testing.T) {
 	h := newCardReconcilerHarness("http://gw.example/a")
 	h.fetcher.FetchFunc = func(context.Context, string, bool) (json.RawMessage, error) {
-		return nil, errors.New(strings.Repeat("é", 10*a2aCardLastErrorMaxRunes))
+		return nil, errors.New(strings.Repeat("é", 10*a2aLastErrorMaxRunes))
 	}
 
 	h.svc.fetchOne(context.Background(), pendingCard(models.A2AAgentCardSourcePlatform))
 
 	retries := h.repo.MarkAttemptFailedCalls()
 	require.Len(t, retries, 1)
-	assert.LessOrEqual(t, utf8.RuneCountInString(retries[0].LastErr), a2aCardLastErrorMaxRunes)
+	assert.LessOrEqual(t, utf8.RuneCountInString(retries[0].LastErr), a2aLastErrorMaxRunes)
 	assert.True(t, utf8.ValidString(retries[0].LastErr))
 }
 

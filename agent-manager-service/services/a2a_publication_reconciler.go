@@ -46,6 +46,10 @@ const (
 	// build can legitimately take longer; this budget covers real failures such
 	// as a missing ingress gateway or a broadcast that keeps erroring.
 	a2aPublicationAttemptBudget = 30
+	// a2aPublicationAttemptTimeout bounds one row's OpenChoreo reads, origin card fetch and gateway writes.
+	a2aPublicationAttemptTimeout = 30 * time.Second
+	// a2aPublicationBatchBudget leaves the claim lease a minute to record the last outcome.
+	a2aPublicationBatchBudget = repositories.A2APublicationClaimLease - time.Minute
 )
 
 // errUpstreamNotReady means the binding has not published a ServiceURL yet. It
@@ -66,41 +70,51 @@ type A2APublicationReconcilerService interface {
 type a2aPublicationReconcilerService struct {
 	pubRepo         repositories.A2APublicationRepository
 	cardRepo        repositories.A2AAgentCardRepository
+	proxyRepo       repositories.A2AProxyRepository
 	deploymentRepo  repositories.DeploymentRepository
 	gatewayRepo     repositories.GatewayRepository
 	agentConfigRepo repositories.AgentConfigRepository
 	ocClient        client.OpenChoreoClient
+	fetcher         A2ACardFetcher
 	events          *GatewayEventsService
 	logger          *slog.Logger
 	stopCh          chan struct{}
 	stopOnce        sync.Once
 	// driftCursor is the last published row id the drift scan checked.
-	driftCursor uuid.UUID
+	driftCursor    uuid.UUID
+	attemptTimeout time.Duration
+	batchBudget    time.Duration
 }
 
 // NewA2APublicationReconcilerService creates an A2APublicationReconcilerService.
 func NewA2APublicationReconcilerService(
 	pubRepo repositories.A2APublicationRepository,
 	cardRepo repositories.A2AAgentCardRepository,
+	proxyRepo repositories.A2AProxyRepository,
 	deploymentRepo repositories.DeploymentRepository,
 	gatewayRepo repositories.GatewayRepository,
 	agentConfigRepo repositories.AgentConfigRepository,
 	ocClient client.OpenChoreoClient,
+	fetcher A2ACardFetcher,
 	events *GatewayEventsService,
 	logger *slog.Logger,
 ) A2APublicationReconcilerService {
 	return &a2aPublicationReconcilerService{
 		pubRepo:         pubRepo,
 		cardRepo:        cardRepo,
+		proxyRepo:       proxyRepo,
 		deploymentRepo:  deploymentRepo,
 		gatewayRepo:     gatewayRepo,
 		agentConfigRepo: agentConfigRepo,
 		ocClient:        ocClient,
+		fetcher:         fetcher,
 		events:          events,
 		logger:          logger,
 		stopCh:          make(chan struct{}),
 		stopOnce:        sync.Once{},
 		driftCursor:     uuid.Nil,
+		attemptTimeout:  a2aPublicationAttemptTimeout,
+		batchBudget:     a2aPublicationBatchBudget,
 	}
 }
 
@@ -142,16 +156,27 @@ func (s *a2aPublicationReconcilerService) RunOnce(ctx context.Context) {
 // runCycle publishes the due batch. ClaimDue leases each row, so replicas
 // running concurrently never take the same row.
 func (s *a2aPublicationReconcilerService) runCycle(ctx context.Context) {
-	due, err := s.pubRepo.ClaimDue(ctx, time.Now(), a2aReconcilerBatch)
+	claimedAt := time.Now()
+	due, err := s.pubRepo.ClaimDue(ctx, claimedAt, a2aReconcilerBatch)
 	if err != nil {
 		s.logger.Error("Failed to claim due A2A publications", "error", err)
 		return
 	}
-
-	for _, pub := range due {
-		s.publishOne(ctx, pub)
-	}
+	s.publishBatch(ctx, claimedAt, due)
 	s.checkUpstreamDrift(ctx)
+}
+
+// publishBatch stops before the claim lease runs out, so another replica never re-claims a row mid-publish.
+func (s *a2aPublicationReconcilerService) publishBatch(ctx context.Context, claimedAt time.Time, due []models.A2APublication) {
+	batchCtx, cancel := context.WithDeadline(ctx, claimedAt.Add(s.batchBudget))
+	defer cancel()
+	for i, pub := range due {
+		if batchCtx.Err() != nil {
+			s.logger.Info("A2A publication batch ran out of lease; leaving the rest for a later claim", "remaining", len(due)-i)
+			return
+		}
+		s.publishOne(batchCtx, pub)
+	}
 }
 
 // checkUpstreamDrift requeues published rows whose binding now reports a
@@ -219,15 +244,20 @@ func (s *a2aPublicationReconcilerService) refetchCardOfNewRelease(ctx context.Co
 // publishOne emits one agent-environment pair's Agent resource, or schedules a
 // retry when it cannot yet.
 func (s *a2aPublicationReconcilerService) publishOne(ctx context.Context, pub models.A2APublication) {
-	upstreamURL, err := s.attemptPublish(ctx, pub)
+	attemptCtx, cancel := context.WithTimeout(ctx, s.attemptTimeout)
+	defer cancel()
+	// The outcome must be recorded even when the attempt ran out of time.
+	ctx = context.WithoutCancel(ctx)
+	published, err := s.attemptPublish(attemptCtx, pub)
 	if err != nil {
 		s.recordAttemptFailure(ctx, pub, err)
 		return
 	}
-	err = s.pubRepo.MarkPublished(ctx, pub, upstreamURL)
+	err = s.pubRepo.MarkPublished(ctx, pub, published.upstreamURL)
 	switch {
 	case errors.Is(err, repositories.ErrA2APublicationSuperseded):
 		s.logSuperseded(pub)
+		s.withdrawIfTornDown(ctx, pub, published.gatewayID)
 	case err != nil:
 		s.logger.Error("Published A2A agent but failed to mark the queue row",
 			"agentName", pub.AgentName, "environment", pub.EnvironmentName, "error", err)
@@ -236,8 +266,27 @@ func (s *a2aPublicationReconcilerService) publishOne(ctx context.Context, pub mo
 	}
 }
 
+// withdrawIfTornDown takes back an Agent published after its environment was torn down mid-attempt.
+func (s *a2aPublicationReconcilerService) withdrawIfTornDown(ctx context.Context, pub models.A2APublication, gatewayID string) {
+	_, err := s.pubRepo.Get(ctx, pub.OUID, pub.ProjectName, pub.AgentName, pub.EnvironmentUUID)
+	if !errors.Is(err, repositories.ErrA2APublicationNotFound) {
+		return
+	}
+	s.logger.Info("A2A publication was torn down during the attempt; withdrawing the Agent it published",
+		"agentName", pub.AgentName, "environment", pub.EnvironmentName)
+	if err := s.deploymentRepo.DeleteForArtifact(ctx, pub.ArtifactUUID, pub.OUID); err != nil {
+		s.logger.Error("Failed to delete the deployment of a torn-down A2A publication",
+			"agentName", pub.AgentName, "environment", pub.EnvironmentName, "error", err)
+	}
+	sendA2AAgentDeletion(ctx, s.events, pub.ArtifactUUID, []string{gatewayID}, s.logger)
+}
+
 // enqueueCardFetch queues a fetch of the card the gateway now serves; best effort.
 func (s *a2aPublicationReconcilerService) enqueueCardFetch(ctx context.Context, pub models.A2APublication) {
+	if pub.Source == models.A2APublicationSourceExternal {
+		s.requeueExternalCard(ctx, pub)
+		return
+	}
 	card := &models.A2AAgentCard{
 		OUID:            pub.OUID,
 		ProjectName:     pub.ProjectName,
@@ -247,6 +296,22 @@ func (s *a2aPublicationReconcilerService) enqueueCardFetch(ctx context.Context, 
 		Source:          models.A2AAgentCardSourcePlatform,
 	}
 	if err := s.cardRepo.Enqueue(ctx, card); err != nil {
+		s.logger.Warn("Published A2A agent but failed to queue its card fetch",
+			"agentName", pub.AgentName, "environment", pub.EnvironmentName, "error", err)
+		return
+	}
+	s.dropCardIfAgentGone(ctx, pub)
+}
+
+// requeueExternalCard makes the parked external row due in place; an upsert would rewrite its registered source.
+func (s *a2aPublicationReconcilerService) requeueExternalCard(ctx context.Context, pub models.A2APublication) {
+	err := s.cardRepo.Requeue(ctx, pub.OUID, pub.ProjectName, pub.AgentName, pub.EnvironmentName)
+	switch {
+	case errors.Is(err, repositories.ErrA2AAgentCardNotFound):
+		s.logger.Info("Published A2A agent has no card row any more; skipping its card fetch",
+			"agentName", pub.AgentName, "environment", pub.EnvironmentName)
+		return
+	case err != nil:
 		s.logger.Warn("Published A2A agent but failed to queue its card fetch",
 			"agentName", pub.AgentName, "environment", pub.EnvironmentName, "error", err)
 		return
@@ -278,18 +343,19 @@ func (s *a2aPublicationReconcilerService) logSuperseded(pub models.A2APublicatio
 		"agentName", pub.AgentName, "environment", pub.EnvironmentName)
 }
 
-// recordAttemptFailure waits out a not-ready binding, retries other failures
-// within the budget, and gives up past it.
+// recordAttemptFailure waits out a not-ready binding, fails a row that can never be proxied,
+// retries other failures within the budget, and gives up past it.
 func (s *a2aPublicationReconcilerService) recordAttemptFailure(ctx context.Context, pub models.A2APublication, cause error) {
 	if errors.Is(cause, errUpstreamNotReady) {
 		s.recordWaiting(ctx, pub, cause)
 		return
 	}
-	if pub.AttemptCount+1 >= a2aPublicationAttemptBudget {
-		s.logger.Error("A2A agent never reached its gateway within the attempt budget",
+	lastErr := sanitizeA2ALastError(cause.Error())
+	if errors.Is(cause, errA2ANotProxyable) || pub.AttemptCount+1 >= a2aPublicationAttemptBudget {
+		s.logger.Error("A2A agent cannot reach its gateway; giving up",
 			"agentName", pub.AgentName, "environment", pub.EnvironmentName,
 			"attempts", pub.AttemptCount+1, "error", cause)
-		err := s.pubRepo.MarkFailed(ctx, pub, cause.Error())
+		err := s.pubRepo.MarkFailed(ctx, pub, lastErr)
 		switch {
 		case errors.Is(err, repositories.ErrA2APublicationSuperseded):
 			s.logSuperseded(pub)
@@ -301,7 +367,7 @@ func (s *a2aPublicationReconcilerService) recordAttemptFailure(ctx context.Conte
 	s.logger.Debug("A2A agent not publishable yet, will retry",
 		"agentName", pub.AgentName, "environment", pub.EnvironmentName,
 		"attempt", pub.AttemptCount+1, "reason", cause)
-	err := s.pubRepo.MarkAttemptFailed(ctx, pub, cause.Error(), time.Now().Add(a2aReconcilerRetryIn))
+	err := s.pubRepo.MarkAttemptFailed(ctx, pub, lastErr, time.Now().Add(a2aReconcilerRetryIn))
 	switch {
 	case errors.Is(err, repositories.ErrA2APublicationSuperseded):
 		s.logSuperseded(pub)
@@ -314,7 +380,7 @@ func (s *a2aPublicationReconcilerService) recordAttemptFailure(ctx context.Conte
 func (s *a2aPublicationReconcilerService) recordWaiting(ctx context.Context, pub models.A2APublication, cause error) {
 	s.logger.Debug("A2A agent binding not ready yet, will check again",
 		"agentName", pub.AgentName, "environment", pub.EnvironmentName)
-	err := s.pubRepo.MarkWaiting(ctx, pub, cause.Error(), time.Now().Add(a2aReconcilerRetryIn))
+	err := s.pubRepo.MarkWaiting(ctx, pub, sanitizeA2ALastError(cause.Error()), time.Now().Add(a2aReconcilerRetryIn))
 	switch {
 	case errors.Is(err, repositories.ErrA2APublicationSuperseded):
 		s.logSuperseded(pub)
@@ -323,19 +389,74 @@ func (s *a2aPublicationReconcilerService) recordWaiting(ctx context.Context, pub
 	}
 }
 
-// attemptPublish returns the upstream URL it gave the gateway.
-func (s *a2aPublicationReconcilerService) attemptPublish(ctx context.Context, pub models.A2APublication) (string, error) {
+// resolvedUpstream is where the gateway forwards to; nil transports keep M1's /rpc and /rest.
+type resolvedUpstream struct {
+	url        string
+	transports []A2ATransport
+	auth       *models.UpstreamAuth
+}
+
+// a2aPublishResult is where an attempt published the Agent.
+type a2aPublishResult struct {
+	upstreamURL string
+	gatewayID   string
+}
+
+// resolveUpstream reads a platform agent's release binding, or derives a proxied external agent's from its origin card.
+func (s *a2aPublicationReconcilerService) resolveUpstream(ctx context.Context, pub models.A2APublication) (resolvedUpstream, error) {
+	if pub.Source == models.A2APublicationSourceExternal {
+		return s.resolveExternalUpstream(ctx, pub)
+	}
 	upstreamURL, err := s.ocClient.GetReleaseBindingServiceURL(ctx, pub.OUID, pub.AgentName, pub.EnvironmentName)
 	if err != nil {
-		return "", fmt.Errorf("failed to read release binding service URL: %w", err)
+		return resolvedUpstream{}, fmt.Errorf("failed to read release binding service URL: %w", err)
 	}
 	if upstreamURL == "" {
-		return "", errUpstreamNotReady
+		return resolvedUpstream{}, errUpstreamNotReady
 	}
+	return resolvedUpstream{url: upstreamURL}, nil
+}
 
-	gateway, err := s.resolveGateway(pub)
+// resolveExternalUpstream re-derives the routes from the origin's card at every publish, through the
+// SSRF-guarded client: the URL was checked when saved, but its host may resolve elsewhere since.
+func (s *a2aPublicationReconcilerService) resolveExternalUpstream(ctx context.Context, pub models.A2APublication) (resolvedUpstream, error) {
+	proxy, err := s.proxyRepo.GetByEnvUUID(ctx, pub.OUID, pub.ProjectName, pub.AgentName, pub.EnvironmentUUID)
+	if errors.Is(err, repositories.ErrA2AProxyNotFound) {
+		return resolvedUpstream{}, fmt.Errorf("%w: the environment is no longer proxied", errA2ANotProxyable)
+	}
 	if err != nil {
-		return "", err
+		return resolvedUpstream{}, fmt.Errorf("failed to read the A2A proxy: %w", err)
+	}
+	card, err := s.cardRepo.Get(ctx, pub.OUID, pub.ProjectName, pub.AgentName, pub.EnvironmentName)
+	if errors.Is(err, repositories.ErrA2AAgentCardNotFound) {
+		return resolvedUpstream{}, fmt.Errorf("%w: no card URL is registered for the environment", errA2ANotProxyable)
+	}
+	if err != nil {
+		return resolvedUpstream{}, fmt.Errorf("failed to read the agent card: %w", err)
+	}
+	if _, err := a2aProxyUpstream(card.SourceURL); err != nil {
+		return resolvedUpstream{}, err
+	}
+	body, err := s.fetcher.Fetch(ctx, card.SourceURL, true)
+	if err != nil {
+		return resolvedUpstream{}, fmt.Errorf("failed to fetch the origin agent card: %w", err)
+	}
+	upstreamURL, transports, err := deriveA2AProxyRoutes(card.SourceURL, body)
+	if err != nil {
+		return resolvedUpstream{}, err
+	}
+	return resolvedUpstream{url: upstreamURL, transports: transports, auth: proxy.UpstreamAuth()}, nil
+}
+
+// attemptPublish emits the Agent resource and reports where it went.
+func (s *a2aPublicationReconcilerService) attemptPublish(ctx context.Context, pub models.A2APublication) (a2aPublishResult, error) {
+	upstream, err := s.resolveUpstream(ctx, pub)
+	if err != nil {
+		return a2aPublishResult{}, err
+	}
+	gateway, err := resolveIngressGateway(s.gatewayRepo, pub.OUID, pub.EnvironmentUUID)
+	if err != nil {
+		return a2aPublishResult{}, err
 	}
 
 	// The policy chain is the persisted per-environment config run through the
@@ -343,7 +464,7 @@ func (s *a2aPublicationReconcilerService) attemptPublish(ctx context.Context, pu
 	// client must send. The public card route runs its own list.
 	cfg, err := s.agentConfigRepo.Get(ctx, pub.OUID, pub.ProjectName, pub.AgentName, pub.EnvironmentName)
 	if err != nil {
-		return "", fmt.Errorf("failed to load agent config: %w", err)
+		return a2aPublishResult{}, fmt.Errorf("failed to load agent config: %w", err)
 	}
 	policies := buildPolicies(withA2AVersionHeader(resolveAPIConfig(cfg, nil, nil, nil, nil, false)))
 
@@ -351,12 +472,14 @@ func (s *a2aPublicationReconcilerService) attemptPublish(ctx context.Context, pu
 		ArtifactName: a2aAgentEnvArtifactName(pub.ProjectName, pub.AgentName, pub.EnvironmentUUID.String()),
 		DisplayName:  pub.AgentName,
 		AgentName:    pub.AgentName,
-		UpstreamURL:  upstreamURL,
+		UpstreamURL:  upstream.url,
+		Transports:   upstream.transports,
+		UpstreamAuth: upstream.auth,
 		Policies:     policies,
 		CardPolicies: buildCardPolicies(cfg.EffectiveCardCORS()),
 	})
 	if err != nil {
-		return "", err
+		return a2aPublishResult{}, err
 	}
 
 	deploymentID := uuid.New()
@@ -374,7 +497,7 @@ func (s *a2aPublicationReconcilerService) attemptPublish(ctx context.Context, pu
 	// serves the Agent YAML back out of it when the gateway fetches after the
 	// event, so an event without a row is an event the gateway cannot act on.
 	if err := s.deploymentRepo.CreateWithLimitEnforcement(deployment, maxDeploymentsPerAPI+deploymentLimitBuffer); err != nil {
-		return "", fmt.Errorf("failed to create A2A agent deployment row: %w", err)
+		return a2aPublishResult{}, fmt.Errorf("failed to create A2A agent deployment row: %w", err)
 	}
 
 	event := &models.AgentDeploymentEvent{
@@ -383,36 +506,11 @@ func (s *a2aPublicationReconcilerService) attemptPublish(ctx context.Context, pu
 		PerformedAt:  time.Now().Truncate(time.Millisecond),
 	}
 	if err := s.events.BroadcastAgentDeploymentEvent(gateway.UUID.String(), event); err != nil {
-		return "", fmt.Errorf("failed to broadcast agent deployment event: %w", err)
+		return a2aPublishResult{}, fmt.Errorf("failed to broadcast agent deployment event: %w", err)
 	}
 
 	s.logger.Info("Published A2A agent to gateway",
 		"agentName", pub.AgentName, "environment", pub.EnvironmentName,
-		"artifactID", pub.ArtifactUUID, "gateway", gateway.Name, "upstream", upstreamURL)
-	return upstreamURL, nil
-}
-
-// resolveGateway picks the environment's gateway. An A2A agent is inbound
-// traffic, so it belongs on the environment's INGRESS gateway — the same slot a
-// REST agent's api-configuration trait targets via the apiGatewayName
-// convention — not on an egress gateway, which hosts outbound LLM/MCP artifacts.
-func (s *a2aPublicationReconcilerService) resolveGateway(pub models.A2APublication) (*models.Gateway, error) {
-	envID := pub.EnvironmentUUID.String()
-	gateways, err := s.gatewayRepo.ListWithFilters(repositories.GatewayFilterOptions{
-		OrganizationID:      pub.OUID,
-		FunctionalityTypeIn: models.IngressGatewayRoles,
-		EnvironmentID:       &envID,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to list gateways for environment %s: %w", envID, err)
-	}
-	for _, gw := range gateways {
-		if gw != nil {
-			return gw, nil
-		}
-	}
-	// An environment has at most one ingress gateway, and it is registered by the
-	// bootstrap job, so absence is a timing condition rather than a
-	// misconfiguration — retry.
-	return nil, fmt.Errorf("no ingress gateway is mapped to environment %s yet", envID)
+		"artifactID", pub.ArtifactUUID, "gateway", gateway.Name, "upstream", upstream.url)
+	return a2aPublishResult{upstreamURL: upstream.url, gatewayID: gateway.UUID.String()}, nil
 }
