@@ -325,13 +325,15 @@ The operations below emit a record describing what actually changed, not just th
 | Internal | `gateway:push-manifest`, `api-key:sync` (bulk sync, coalesced per gateway) | Fail-open |
 | Agent config | `agent-config:update` / `:delete` | Fail-open |
 | A2A card source | `agent:set-card-source` / `agent:remove-card-source` | Fail-open |
+| A2A proxy | `agent:set-a2a-proxy` / `agent:remove-a2a-proxy` | Fail-closed |
 | Per-config API keys | `api-key:create` / `:rotate` / `:revoke` (model-config, mcp-config) | Fail-closed |
 | Monitors | `monitor:create` / `:update` / `:delete` / `:start` / `:stop` / `:rerun` | Fail-open |
 | Monitors | `monitor:run-failed` (scheduler, system actor) | Fail-open |
 
-Two of these carry detail worth calling out:
+Three of these carry detail worth calling out:
 
 - **`agent:deploy` and `agent:promote` both record the target environment and `isProduction`.** The route declares only the tier floor whatever the agent actually lands on, so the declared permission cannot tell a sandbox push from a production one — only the record can. Both flags come free: the environment-tier check (`requireEnvTier`) has already resolved the environment by the time the record is opened. `agent:promote` records both ends of the move as well.
+- **`agent:remove-a2a-proxy` is also written when the card source of a proxied environment is removed**, since that discards the stored upstream secret too; the card route's own `agent:remove-card-source` is written alongside it.
 - **`role:grant-permission` records the granted scopes in full.** Scope strings are identifiers, not secrets, and "alice granted SRE deploy-production" is the question the event exists to answer.
 
 ## Action reference
@@ -357,7 +359,9 @@ The registry is the source of truth (`audit/actions.go`, `audit/actions_domain.g
 | `agent:deploy` | deployment | 2 notice | `agentName`, `environment`, `imageId`, `isProduction` |
 | `agent:promote` | deployment | 3 warning | `agentName`, `environment`, `isProduction`, `sourceEnv`, `targetEnv` |
 | `agent:read` | read | 1 info | — |
+| `agent:remove-a2a-proxy` | credential | 4 critical | `agentName`, `upstreamAuthChanged`, `upstreamAuthHeader` |
 | `agent:remove-card-source` | config | 2 notice | `agentName` |
+| `agent:set-a2a-proxy` | credential | 4 critical | `agentName`, `upstreamAuthChanged`, `upstreamAuthHeader` |
 | `agent:set-card-source` | config | 1 info | `agentName`, `sourceUrl` |
 | `api-key:create` | credential | 4 critical | `expiresAt`, `gatewayConnected`, `gatewayCount`, `keyName`, `ownerName`, `ownerType` |
 | `api-key:issue-test` | credential | 2 notice | `expiresAt`, `keyName`, `ownerName`, `ownerType`, `rotated` |

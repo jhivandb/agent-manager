@@ -300,6 +300,9 @@ var actionOverrides = map[string]Action{
 	"POST /orgs/{orgName}/projects/{projName}/agents/{agentName}/environments/{envID}/agent-card/refresh":  "agent:refresh-card",
 	"PUT /orgs/{orgName}/projects/{projName}/agents/{agentName}/environments/{envID}/agent-card/source":    "agent:set-card-source",
 	"DELETE /orgs/{orgName}/projects/{projName}/agents/{agentName}/environments/{envID}/agent-card/source": "agent:remove-card-source",
+	"PUT /orgs/{orgName}/projects/{projName}/agents/{agentName}/environments/{envID}/a2a-proxy":            "agent:set-a2a-proxy",
+	"DELETE /orgs/{orgName}/projects/{projName}/agents/{agentName}/environments/{envID}/a2a-proxy":         "agent:remove-a2a-proxy",
+	"POST /orgs/{orgName}/projects/{projName}/agents/{agentName}/environments/{envID}/a2a-proxy/refresh":   "agent:refresh-a2a-proxy",
 
 	// Agent-kind versions, gated by the coarse kind update/delete permissions.
 	"POST /orgs/{orgName}/agent-kinds/{kindName}/versions":                "agent-kind:add-version",

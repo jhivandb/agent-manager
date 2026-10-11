@@ -8084,6 +8084,166 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: The audit trail is unavailable; nothing was changed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /orgs/{orgName}/projects/{projName}/agents/{agentName}/environments/{envID}/a2a-proxy:
+    parameters: *agentCardPathParams
+    get:
+      tags:
+        - A2A Proxy
+      summary: Get how an external A2A agent is routed through the environment's gateway
+      description: >-
+        Reports the gateway publication of a proxied environment. The upstream secret is never
+        returned; a non-empty upstreamAuthHeader means one is stored.
+      operationId: getA2AProxy
+      responses:
+        "200":
+          description: Proxy state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/A2AProxyResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: The environment is not proxied, or the agent or environment does not exist
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    put:
+      tags:
+        - A2A Proxy
+      summary: Route an external A2A agent through the environment's gateway, or change its upstream auth
+      description: >-
+        Publishes the agent through the environment's ingress gateway, with routes derived from its
+        registered card URL. Omitting upstreamAuth clears the stored credential; upstreamAuth without
+        a value keeps the stored secret; a value replaces it. External A2A agents only.
+      operationId: setA2AProxy
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetA2AProxyRequest"
+      responses:
+        "202":
+          description: Saved; the gateway publication is queued
+        "400":
+          description: Invalid upstream auth, or the agent is not an external A2A agent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Missing the environment tier permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Agent or environment not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: No card URL is registered for the environment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: The audit trail is unavailable; nothing was changed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      tags:
+        - A2A Proxy
+      summary: Stop routing an external A2A agent through the environment's gateway
+      description: >-
+        Removes the agent from the gateway, discards the stored upstream secret and fetches the
+        agent's own card again. The environment's API keys are kept.
+      operationId: deleteA2AProxy
+      responses:
+        "204":
+          description: The environment is direct again
+        "403":
+          description: Missing the environment tier permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: The environment is not proxied, or the agent or environment does not exist
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: The audit trail is unavailable; nothing was changed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /orgs/{orgName}/projects/{projName}/agents/{agentName}/environments/{envID}/a2a-proxy/refresh:
+    parameters: *agentCardPathParams
+    post:
+      tags:
+        - A2A Proxy
+      summary: Re-derive a proxied agent's routes from its card and republish it
+      operationId: refreshA2AProxy
+      responses:
+        "202":
+          description: Republish queued; the card is fetched again once it lands
+        "403":
+          description: Missing the environment tier permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: The environment is not proxied, or the agent or environment does not exist
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /orgs/{orgName}/projects/{projName}/agents/{agentName}/monitors:
     get:
@@ -12044,6 +12204,49 @@ components:
           type: string
           maxLength: 2048
           description: Public http(s) URL of the agent card, normally ending in /.well-known/agent-card.json.
+    A2AProxyResponse:
+      type: object
+      description: How an external A2A agent is published through the environment's ingress gateway.
+      required:
+        - status
+        - lastError
+        - upstreamAuthHeader
+      properties:
+        status:
+          type: string
+          enum: [pending, published, failed]
+          description: The gateway publication's state.
+        lastError:
+          type: string
+          description: Why the last publish attempt failed; empty after a success.
+        upstreamAuthHeader:
+          type: string
+          description: >-
+            The header the gateway adds upstream; empty when none. A non-empty header means a
+            secret is stored. The secret itself is never returned.
+    SetA2AProxyRequest:
+      type: object
+      properties:
+        upstreamAuth:
+          $ref: "#/components/schemas/A2AProxyUpstreamAuth"
+    A2AProxyUpstreamAuth:
+      type: object
+      description: A static header the gateway adds to every call to the agent, card fetch included.
+      required:
+        - header
+      properties:
+        header:
+          type: string
+          maxLength: 255
+          pattern: "^[A-Za-z0-9_-]+$"
+          description: Header name. Host is not allowed.
+        value:
+          type: string
+          minLength: 1
+          writeOnly: true
+          description: >-
+            Header value: at most 8192 bytes, with no quote, line break or "{{". Omit it to keep
+            the stored secret.
     AgentCardCORSConfig:
       type: object
       description: >-

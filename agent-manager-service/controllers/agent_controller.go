@@ -218,6 +218,9 @@ func handleCommonErrors(w http.ResponseWriter, err error, fallbackMsg string) {
 	case errors.Is(err, utils.ErrServiceUnavailable):
 		utils.WriteErrorResponseWithReason(w, http.StatusServiceUnavailable,
 			"Service temporarily unavailable", err.Error(), utils.ErrCodeServiceUnavailable)
+	case errors.Is(err, audit.ErrRecorderUnavailable):
+		// A fail-closed service refused to act unrecorded; nothing was changed.
+		utils.WriteErrorResponse(w, http.StatusServiceUnavailable, "The audit trail is unavailable, so the change was not made")
 
 	default:
 		utils.WriteErrorResponseWithReason(w, http.StatusInternalServerError,

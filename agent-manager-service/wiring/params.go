@@ -61,6 +61,7 @@ type AppParams struct {
 	LLMProxyAPIKeyController         controllers.LLMProxyAPIKeyController
 	AgentAPIKeyController            controllers.AgentAPIKeyController
 	A2AAgentCardController           controllers.A2AAgentCardController
+	A2AProxyController               controllers.A2AProxyController
 	LLMProxyDeploymentController     controllers.LLMProxyDeploymentController
 	MCPProxyController               controllers.MCPProxyController
 	WebSocketController              controllers.WebSocketController
