@@ -12,6 +12,27 @@ import (
 	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
+// Defines values for A2AProxyResponseStatus.
+const (
+	A2AProxyResponseStatusFailed    A2AProxyResponseStatus = "failed"
+	A2AProxyResponseStatusPending   A2AProxyResponseStatus = "pending"
+	A2AProxyResponseStatusPublished A2AProxyResponseStatus = "published"
+)
+
+// Valid indicates whether the value is a known member of the A2AProxyResponseStatus enum.
+func (e A2AProxyResponseStatus) Valid() bool {
+	switch e {
+	case A2AProxyResponseStatusFailed:
+		return true
+	case A2AProxyResponseStatusPending:
+		return true
+	case A2AProxyResponseStatusPublished:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for APIKeySecurityIn.
 const (
 	APIKeySecurityInHeader APIKeySecurityIn = "header"
@@ -884,16 +905,16 @@ func (e LogEntryLogLevel) Valid() bool {
 
 // Defines values for MCPEndpointEnvironmentDeploymentStatus.
 const (
-	MCPEndpointEnvironmentDeploymentStatusDeployed   MCPEndpointEnvironmentDeploymentStatus = "Deployed"
-	MCPEndpointEnvironmentDeploymentStatusUndeployed MCPEndpointEnvironmentDeploymentStatus = "Undeployed"
+	Deployed   MCPEndpointEnvironmentDeploymentStatus = "Deployed"
+	Undeployed MCPEndpointEnvironmentDeploymentStatus = "Undeployed"
 )
 
 // Valid indicates whether the value is a known member of the MCPEndpointEnvironmentDeploymentStatus enum.
 func (e MCPEndpointEnvironmentDeploymentStatus) Valid() bool {
 	switch e {
-	case MCPEndpointEnvironmentDeploymentStatusDeployed:
+	case Deployed:
 		return true
-	case MCPEndpointEnvironmentDeploymentStatusUndeployed:
+	case Undeployed:
 		return true
 	default:
 		return false
@@ -1207,6 +1228,30 @@ func (e GetAgentTraceScoresParamsSortOrder) Valid() bool {
 	default:
 		return false
 	}
+}
+
+// A2AProxyResponse How an external A2A agent is published through the environment's ingress gateway.
+type A2AProxyResponse struct {
+	// LastError Why the last publish attempt failed; empty after a success.
+	LastError string `json:"lastError"`
+
+	// Status The gateway publication's state.
+	Status A2AProxyResponseStatus `json:"status"`
+
+	// UpstreamAuthHeader The header the gateway adds upstream; empty when none. A non-empty header means a secret is stored. The secret itself is never returned.
+	UpstreamAuthHeader string `json:"upstreamAuthHeader"`
+}
+
+// A2AProxyResponseStatus The gateway publication's state.
+type A2AProxyResponseStatus string
+
+// A2AProxyUpstreamAuth A static header the gateway adds to every call to the agent, card fetch included.
+type A2AProxyUpstreamAuth struct {
+	// Header Header name. Host is not allowed.
+	Header string `json:"header"`
+
+	// Value Header value: at most 8192 bytes, with no quote, line break or "{{". Omit it to keep the stored secret.
+	Value *string `json:"value,omitempty"`
 }
 
 // APIKeyInfo Masked, read-only view of a stored API key for listing. The plain key value is never returned; only the masked representation.
@@ -4957,6 +5002,12 @@ type SecuritySummary struct {
 	Enabled *bool `json:"enabled,omitempty"`
 }
 
+// SetA2AProxyRequest defines model for SetA2AProxyRequest.
+type SetA2AProxyRequest struct {
+	// UpstreamAuth A static header the gateway adds to every call to the agent, card fetch included.
+	UpstreamAuth *A2AProxyUpstreamAuth `json:"upstreamAuth,omitempty"`
+}
+
 // SetAgentCardSourceRequest defines model for SetAgentCardSourceRequest.
 type SetAgentCardSourceRequest struct {
 	// Url Public http(s) URL of the agent card, normally ending in /.well-known/agent-card.json.
@@ -6219,6 +6270,9 @@ type DeployAgentJSONRequestBody = DeployAgentRequest
 
 // UpdateAgentDeploymentStateJSONRequestBody defines body for UpdateAgentDeploymentState for application/json ContentType.
 type UpdateAgentDeploymentStateJSONRequestBody = UpdateDeploymentStateRequest
+
+// SetA2AProxyJSONRequestBody defines body for SetA2AProxy for application/json ContentType.
+type SetA2AProxyJSONRequestBody = SetA2AProxyRequest
 
 // SetAgentCardSourceJSONRequestBody defines body for SetAgentCardSource for application/json ContentType.
 type SetAgentCardSourceJSONRequestBody = SetAgentCardSourceRequest
