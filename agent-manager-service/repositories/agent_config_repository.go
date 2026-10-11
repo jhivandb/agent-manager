@@ -37,6 +37,12 @@ type AgentConfigRepository interface {
 	// Upsert creates or updates an agent config for a specific environment
 	Upsert(ctx context.Context, config *models.AgentConfig) error
 
+	// CreateIfAbsent inserts the config unless the environment already has one, which it leaves untouched.
+	CreateIfAbsent(ctx context.Context, config *models.AgentConfig) error
+
+	// WithTx returns the repository bound to tx.
+	WithTx(tx *gorm.DB) AgentConfigRepository
+
 	// Get retrieves agent config for a specific agent and environment
 	Get(ctx context.Context, ouID, projectName, agentName, environmentName string) (*models.AgentConfig, error)
 
@@ -91,6 +97,19 @@ func (r *AgentConfigRepo) Upsert(ctx context.Context, config *models.AgentConfig
 			"updated_at":                  clause.Expr{SQL: "NOW()"},
 		}),
 	}).Create(config).Error
+}
+
+// CreateIfAbsent inserts the config unless the environment already has one.
+func (r *AgentConfigRepo) CreateIfAbsent(ctx context.Context, config *models.AgentConfig) error {
+	return r.db.WithContext(ctx).Select("*").Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "ou_id"}, {Name: "project_name"}, {Name: "agent_name"}, {Name: "environment_name"}},
+		DoNothing: true,
+	}).Create(config).Error
+}
+
+// WithTx returns the repository bound to tx.
+func (r *AgentConfigRepo) WithTx(tx *gorm.DB) AgentConfigRepository {
+	return &AgentConfigRepo{db: tx}
 }
 
 // nullableJSONB writes a nil slice as SQL NULL rather than the JSON literal

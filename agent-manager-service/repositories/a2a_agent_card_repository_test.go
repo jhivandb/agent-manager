@@ -651,3 +651,74 @@ func TestA2AAgentCardDeleteIfUnchanged(t *testing.T) {
 		assert.NoError(t, err)
 	})
 }
+
+// Switching modes parks the row: no card, and not due until the publish requeues it.
+func TestA2AAgentCardClearCardParksTheRow(t *testing.T) {
+	repo := NewA2AAgentCardRepository(db.GetDB())
+	ctx := context.Background()
+	card := newTestCard("park-"+uuid.New().String()[:8], models.A2AAgentCardSourceExternal)
+	card.SourceURL = "https://agent.example/.well-known/agent-card.json"
+	cleanupCard(t, repo, card)
+	require.NoError(t, repo.Enqueue(ctx, card))
+	require.NoError(t, repo.MarkFetched(ctx, dueCardFor(t, repo, card.AgentName), json.RawMessage(sampleCard), "h", card.SourceURL, ""))
+
+	require.NoError(t, repo.ClearCard(ctx, card.OUID, card.ProjectName, card.AgentName, card.EnvironmentUUID))
+
+	row := cardRowOf(t, card)
+	assert.Equal(t, models.A2AAgentCardStatusPending, row.Status)
+	assert.Nil(t, row.Card)
+	assert.Empty(t, row.CardHash)
+	assert.Nil(t, row.FetchedAt)
+	assert.Nil(t, row.NextAttemptAt)
+	assert.Equal(t, 0, row.AttemptCount)
+	assert.Empty(t, row.LastError)
+	assert.Equal(t, card.SourceURL, row.SourceURL, "the registered URL stays")
+
+	due, err := repo.ClaimDue(ctx, time.Now().Add(24*time.Hour), 100)
+	require.NoError(t, err)
+	assert.NotContains(t, claimedNames(due), card.AgentName, "a parked row waits for the publish")
+
+	require.NoError(t, repo.Requeue(ctx, card.OUID, card.ProjectName, card.AgentName, card.EnvironmentName))
+	assert.Equal(t, card.AgentName, dueCardFor(t, repo, card.AgentName).AgentName)
+}
+
+// A fetch that read the row before the switch must not write the old mode's card back.
+func TestA2AAgentCardClearCardSupersedesAnInFlightFetch(t *testing.T) {
+	repo := NewA2AAgentCardRepository(db.GetDB())
+	ctx := context.Background()
+	card := newTestCard("park-race-"+uuid.New().String()[:8], models.A2AAgentCardSourceExternal)
+	card.SourceURL = "https://agent.example/.well-known/agent-card.json"
+	cleanupCard(t, repo, card)
+	require.NoError(t, repo.Enqueue(ctx, card))
+	read := dueCardFor(t, repo, card.AgentName)
+
+	require.NoError(t, repo.ClearCard(ctx, card.OUID, card.ProjectName, card.AgentName, card.EnvironmentUUID))
+
+	require.ErrorIs(t, repo.MarkFetched(ctx, read, json.RawMessage(sampleCard), "h", card.SourceURL, ""), ErrA2AAgentCardSuperseded)
+	assert.Nil(t, cardRowOf(t, card).Card)
+}
+
+func TestA2AAgentCardClearCardNeedsARow(t *testing.T) {
+	repo := NewA2AAgentCardRepository(db.GetDB())
+	err := repo.ClearCard(context.Background(), "ou-none", "checkout", "ghost", uuid.New())
+	assert.ErrorIs(t, err, ErrA2AAgentCardNotFound)
+}
+
+// A proxied card is fetched through the gateway; the registered origin URL must survive that.
+func TestA2AAgentCardMarkFetchedKeepsAnExternalSourceURL(t *testing.T) {
+	repo := NewA2AAgentCardRepository(db.GetDB())
+	ctx := context.Background()
+	card := newTestCard("keep-url-"+uuid.New().String()[:8], models.A2AAgentCardSourceExternal)
+	card.SourceURL = "https://agent.example/.well-known/agent-card.json"
+	cleanupCard(t, repo, card)
+	require.NoError(t, repo.Enqueue(ctx, card))
+
+	gatewayURL := "https://gw.example/agent/.well-known/agent-card.json"
+	require.NoError(t, repo.MarkFetched(ctx, dueCardFor(t, repo, card.AgentName), json.RawMessage(sampleCard), "h", gatewayURL, ""))
+	assert.Equal(t, card.SourceURL, cardRowOf(t, card).SourceURL)
+
+	again := newTestCardLike(card)
+	again.SourceURL = card.SourceURL
+	require.NoError(t, repo.Enqueue(ctx, again))
+	assert.JSONEq(t, sampleCard, string(cardRowOf(t, card).Card), "the same URL is not a change, so the card survives")
+}

@@ -11,6 +11,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/wso2/agent-manager/agent-manager-service/models"
+	"github.com/wso2/agent-manager/agent-manager-service/repositories"
+	"gorm.io/gorm"
 )
 
 // A2AAgentCardRepositoryMock is a mock implementation of repositories.A2AAgentCardRepository.
@@ -21,6 +23,9 @@ import (
 //		mockedA2AAgentCardRepository := &A2AAgentCardRepositoryMock{
 //			ClaimDueFunc: func(ctx context.Context, now time.Time, limit int) ([]models.A2AAgentCard, error) {
 //				panic("mock out the ClaimDue method")
+//			},
+//			ClearCardFunc: func(ctx context.Context, ouID string, projectName string, agentName string, environmentUUID uuid.UUID) error {
+//				panic("mock out the ClearCard method")
 //			},
 //			DeleteForAgentFunc: func(ctx context.Context, ouID string, projectName string, agentName string) error {
 //				panic("mock out the DeleteForAgent method")
@@ -58,6 +63,9 @@ import (
 //			RequeueFunc: func(ctx context.Context, ouID string, projectName string, agentName string, environmentName string) error {
 //				panic("mock out the Requeue method")
 //			},
+//			WithTxFunc: func(tx *gorm.DB) repositories.A2AAgentCardRepository {
+//				panic("mock out the WithTx method")
+//			},
 //		}
 //
 //		// use mockedA2AAgentCardRepository in code that requires repositories.A2AAgentCardRepository
@@ -67,6 +75,9 @@ import (
 type A2AAgentCardRepositoryMock struct {
 	// ClaimDueFunc mocks the ClaimDue method.
 	ClaimDueFunc func(ctx context.Context, now time.Time, limit int) ([]models.A2AAgentCard, error)
+
+	// ClearCardFunc mocks the ClearCard method.
+	ClearCardFunc func(ctx context.Context, ouID string, projectName string, agentName string, environmentUUID uuid.UUID) error
 
 	// DeleteForAgentFunc mocks the DeleteForAgent method.
 	DeleteForAgentFunc func(ctx context.Context, ouID string, projectName string, agentName string) error
@@ -104,6 +115,9 @@ type A2AAgentCardRepositoryMock struct {
 	// RequeueFunc mocks the Requeue method.
 	RequeueFunc func(ctx context.Context, ouID string, projectName string, agentName string, environmentName string) error
 
+	// WithTxFunc mocks the WithTx method.
+	WithTxFunc func(tx *gorm.DB) repositories.A2AAgentCardRepository
+
 	// calls tracks calls to the methods.
 	calls struct {
 		// ClaimDue holds details about calls to the ClaimDue method.
@@ -114,6 +128,19 @@ type A2AAgentCardRepositoryMock struct {
 			Now time.Time
 			// Limit is the limit argument value.
 			Limit int
+		}
+		// ClearCard holds details about calls to the ClearCard method.
+		ClearCard []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// OuID is the ouID argument value.
+			OuID string
+			// ProjectName is the projectName argument value.
+			ProjectName string
+			// AgentName is the agentName argument value.
+			AgentName string
+			// EnvironmentUUID is the environmentUUID argument value.
+			EnvironmentUUID uuid.UUID
 		}
 		// DeleteForAgent holds details about calls to the DeleteForAgent method.
 		DeleteForAgent []struct {
@@ -251,8 +278,14 @@ type A2AAgentCardRepositoryMock struct {
 			// EnvironmentName is the environmentName argument value.
 			EnvironmentName string
 		}
+		// WithTx holds details about calls to the WithTx method.
+		WithTx []struct {
+			// Tx is the tx argument value.
+			Tx *gorm.DB
+		}
 	}
 	lockClaimDue                  sync.RWMutex
+	lockClearCard                 sync.RWMutex
 	lockDeleteForAgent            sync.RWMutex
 	lockDeleteForAgentEnv         sync.RWMutex
 	lockDeleteForEnvironment      sync.RWMutex
@@ -265,6 +298,7 @@ type A2AAgentCardRepositoryMock struct {
 	lockMarkFailed                sync.RWMutex
 	lockMarkFetched               sync.RWMutex
 	lockRequeue                   sync.RWMutex
+	lockWithTx                    sync.RWMutex
 }
 
 // ClaimDue calls ClaimDueFunc.
@@ -304,6 +338,54 @@ func (mock *A2AAgentCardRepositoryMock) ClaimDueCalls() []struct {
 	mock.lockClaimDue.RLock()
 	calls = mock.calls.ClaimDue
 	mock.lockClaimDue.RUnlock()
+	return calls
+}
+
+// ClearCard calls ClearCardFunc.
+func (mock *A2AAgentCardRepositoryMock) ClearCard(ctx context.Context, ouID string, projectName string, agentName string, environmentUUID uuid.UUID) error {
+	if mock.ClearCardFunc == nil {
+		panic("A2AAgentCardRepositoryMock.ClearCardFunc: method is nil but A2AAgentCardRepository.ClearCard was just called")
+	}
+	callInfo := struct {
+		Ctx             context.Context
+		OuID            string
+		ProjectName     string
+		AgentName       string
+		EnvironmentUUID uuid.UUID
+	}{
+		Ctx:             ctx,
+		OuID:            ouID,
+		ProjectName:     projectName,
+		AgentName:       agentName,
+		EnvironmentUUID: environmentUUID,
+	}
+	mock.lockClearCard.Lock()
+	mock.calls.ClearCard = append(mock.calls.ClearCard, callInfo)
+	mock.lockClearCard.Unlock()
+	return mock.ClearCardFunc(ctx, ouID, projectName, agentName, environmentUUID)
+}
+
+// ClearCardCalls gets all the calls that were made to ClearCard.
+// Check the length with:
+//
+//	len(mockedA2AAgentCardRepository.ClearCardCalls())
+func (mock *A2AAgentCardRepositoryMock) ClearCardCalls() []struct {
+	Ctx             context.Context
+	OuID            string
+	ProjectName     string
+	AgentName       string
+	EnvironmentUUID uuid.UUID
+} {
+	var calls []struct {
+		Ctx             context.Context
+		OuID            string
+		ProjectName     string
+		AgentName       string
+		EnvironmentUUID uuid.UUID
+	}
+	mock.lockClearCard.RLock()
+	calls = mock.calls.ClearCard
+	mock.lockClearCard.RUnlock()
 	return calls
 }
 
@@ -840,5 +922,37 @@ func (mock *A2AAgentCardRepositoryMock) RequeueCalls() []struct {
 	mock.lockRequeue.RLock()
 	calls = mock.calls.Requeue
 	mock.lockRequeue.RUnlock()
+	return calls
+}
+
+// WithTx calls WithTxFunc.
+func (mock *A2AAgentCardRepositoryMock) WithTx(tx *gorm.DB) repositories.A2AAgentCardRepository {
+	if mock.WithTxFunc == nil {
+		panic("A2AAgentCardRepositoryMock.WithTxFunc: method is nil but A2AAgentCardRepository.WithTx was just called")
+	}
+	callInfo := struct {
+		Tx *gorm.DB
+	}{
+		Tx: tx,
+	}
+	mock.lockWithTx.Lock()
+	mock.calls.WithTx = append(mock.calls.WithTx, callInfo)
+	mock.lockWithTx.Unlock()
+	return mock.WithTxFunc(tx)
+}
+
+// WithTxCalls gets all the calls that were made to WithTx.
+// Check the length with:
+//
+//	len(mockedA2AAgentCardRepository.WithTxCalls())
+func (mock *A2AAgentCardRepositoryMock) WithTxCalls() []struct {
+	Tx *gorm.DB
+} {
+	var calls []struct {
+		Tx *gorm.DB
+	}
+	mock.lockWithTx.RLock()
+	calls = mock.calls.WithTx
+	mock.lockWithTx.RUnlock()
 	return calls
 }
