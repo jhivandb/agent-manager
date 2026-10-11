@@ -62,10 +62,20 @@ export function EnvA2AProxySection({ params, proxy }: EnvA2AProxySectionProps) {
   const busy = isSaving || isRemoving;
   const canSave = draftChanged(draft, proxy) && !error && !busy;
 
+  // The secret is write-only: once saved it is forgotten here, so the field cannot resubmit it.
+  const submitDraft = () => saveProxy(
+    { params, body: proxyRequestOf(draft, proxy) },
+    {
+      onSuccess: () => setDraft((d) => (
+        { ...d, value: "", secret: d.header.trim() ? "keep" : "replace" }
+      )),
+    },
+  );
+
   const save = () => {
     if (!canSave) return;
     if (draft.enabled && !dropsStoredSecret(draft, proxy)) {
-      saveProxy({ params, body: proxyRequestOf(draft, proxy) });
+      submitDraft();
       return;
     }
     addConfirmation(draft.enabled
@@ -76,7 +86,7 @@ export function EnvA2AProxySection({ params, proxy }: EnvA2AProxySectionProps) {
           confirmButtonText: "Remove value",
           confirmButtonColor: "error",
           confirmButtonIcon: <Trash size={16} />,
-          onConfirm: () => saveProxy({ params, body: proxyRequestOf(draft, proxy) }),
+          onConfirm: submitDraft,
         }
       : {
           analytics: { entity: "a2a-proxy", action: "disable" },

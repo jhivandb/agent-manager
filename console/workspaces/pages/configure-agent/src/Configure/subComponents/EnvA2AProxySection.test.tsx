@@ -16,7 +16,7 @@
  * under the License.
  */
 
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const setProxy = vi.fn();
@@ -47,7 +47,7 @@ describe("EnvA2AProxySection", () => {
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
     fireEvent.click(screen.getByLabelText("Route through gateway"));
     save();
-    expect(setProxy).toHaveBeenCalledWith({ params, body: {} });
+    expect(setProxy).toHaveBeenCalledWith({ params, body: {} }, expect.anything());
   });
 
   it("keeps the stored secret when only the header changes", () => {
@@ -55,7 +55,23 @@ describe("EnvA2AProxySection", () => {
     expect(screen.getByText("A value is stored.")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Upstream header"), { target: { value: "X-New" } });
     save();
-    expect(setProxy).toHaveBeenCalledWith({ params, body: { upstreamAuth: { header: "X-New" } } });
+    expect(setProxy).toHaveBeenCalledWith(
+      { params, body: { upstreamAuth: { header: "X-New" } } }, expect.anything());
+  });
+
+  it("forgets a replaced secret once it is saved under the same header", () => {
+    render(<EnvA2AProxySection params={params} proxy={stored} />);
+    fireEvent.click(screen.getByRole("button", { name: "Replace" }));
+    fireEvent.change(screen.getByLabelText("Header value"), { target: { value: "s3cret" } });
+    save();
+    expect(setProxy).toHaveBeenCalledWith(
+      { params, body: { upstreamAuth: { header: "X-Key", value: "s3cret" } } },
+      expect.objectContaining({ onSuccess: expect.any(Function) }),
+    );
+    act(() => setProxy.mock.calls[0][1].onSuccess());
+    expect(screen.queryByLabelText("Header value")).not.toBeInTheDocument();
+    expect(screen.getByText("A value is stored.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
   });
 
   it("asks before clearing the stored value", () => {
@@ -64,7 +80,7 @@ describe("EnvA2AProxySection", () => {
     save();
     expect(setProxy).not.toHaveBeenCalled();
     addConfirmation.mock.calls[0][0].onConfirm();
-    expect(setProxy).toHaveBeenCalledWith({ params, body: {} });
+    expect(setProxy).toHaveBeenCalledWith({ params, body: {} }, expect.anything());
   });
 
   it("asks before switching to direct", () => {
