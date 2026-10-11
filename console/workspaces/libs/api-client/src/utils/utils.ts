@@ -38,6 +38,15 @@ export const OBS_SERVICE_BASE = '/api';
 export const POLL_INTERVAL = 5000;
 export const SLOW_POLL_INTERVAL = 15000;
 
+/** Re-poll while pending; stop on any other status, or a 404 (which keeps stale data cached). */
+export function pendingRefetchInterval(
+    data: { status?: string } | undefined,
+    error?: unknown,
+): number | false {
+    if ((error as { status?: number } | null)?.status === 404) return false;
+    return data?.status === 'pending' ? POLL_INTERVAL : false;
+}
+
 const DEFAULT_TIMEOUT = 1000;
 
 export interface HttpOptions {

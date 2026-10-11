@@ -30,14 +30,14 @@ import {
   refreshAgentCard,
   setAgentCardSource,
 } from "../apis/agent-card";
-import { POLL_INTERVAL } from "../utils";
+import { pendingRefetchInterval } from "../utils";
 
-const agentCardKey = (p: AgentCardPathParams) =>
+export const agentCardQueryKey = (p: AgentCardPathParams) =>
   ["agent-card", p.orgName, p.projName, p.agentName, p.envId] as const;
 
 /** Drops the cached card so a removed source does not keep showing its old card. */
 export function removeAgentCardFromCache(queryClient: QueryClient, params: AgentCardPathParams) {
-  queryClient.removeQueries({ queryKey: agentCardKey(params) });
+  queryClient.removeQueries({ queryKey: agentCardQueryKey(params) });
 }
 
 /** A 404 means no card source exists for the environment; any card still cached is stale. */
@@ -49,19 +49,25 @@ export function agentCardRefetchInterval(
   data: AgentCardResponse | undefined,
   error?: unknown,
 ): number | false {
-  if (isAgentCardNotFound(error)) return false;
-  return data?.status === "pending" ? POLL_INTERVAL : false;
+  return pendingRefetchInterval(data, error);
 }
 
-/** A 404 (not an A2A agent, or no fetch queued yet) is expected: it errors silently. */
-export function useGetAgentCard(params: AgentCardPathParams, options: { enabled?: boolean } = {}) {
+/**
+ * A 404 (not an A2A agent, or no fetch queued yet) is expected: it errors silently.
+ * poll: false stops the re-poll.
+ */
+export function useGetAgentCard(
+  params: AgentCardPathParams,
+  options: { enabled?: boolean; poll?: boolean } = {},
+) {
   const { getToken } = useAuthHooks();
   return useApiQuery<AgentCardResponse>({
-    queryKey: agentCardKey(params),
+    queryKey: agentCardQueryKey(params),
     queryFn: () => getAgentCard(params, getToken),
     enabled: (options.enabled ?? true) &&
       !!(params.orgName && params.projName && params.agentName && params.envId),
-    refetchInterval: (q) => agentCardRefetchInterval(q.state.data, q.state.error),
+    refetchInterval: (q) =>
+      options.poll === false ? false : agentCardRefetchInterval(q.state.data, q.state.error),
     retry: false,
     silent: true,
   });
@@ -76,7 +82,7 @@ export function useRefreshAgentCard() {
     // In mutationFn, since useApiMutation does not await onSuccess.
     mutationFn: async (params) => {
       await refreshAgentCard(params, getToken);
-      await queryClient.invalidateQueries({ queryKey: agentCardKey(params) });
+      await queryClient.invalidateQueries({ queryKey: agentCardQueryKey(params) });
     },
   });
 }
@@ -90,7 +96,7 @@ export function useSetAgentCardSource() {
     // Stays pending until the new URL is shown, so the editor can't close on the old one.
     mutationFn: async ({ params, body }) => {
       await setAgentCardSource(params, body, getToken);
-      await queryClient.invalidateQueries({ queryKey: agentCardKey(params) });
+      await queryClient.invalidateQueries({ queryKey: agentCardQueryKey(params) });
     },
   });
 }
