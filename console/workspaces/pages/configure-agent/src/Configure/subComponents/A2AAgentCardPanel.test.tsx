@@ -16,33 +16,53 @@
  * under the License.
  */
 
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@agent-management-platform/api-client", () => ({
   isAgentCardNotFound: (error: unknown) => (error as { status?: number } | null)?.status === 404,
   useGetAgentCard: vi.fn(),
+  useGetA2AProxy: vi.fn(),
+  useSetA2AProxy: vi.fn(),
+  useDeleteA2AProxy: vi.fn(),
+  useRefreshA2AProxy: vi.fn(),
   useRefreshAgentCard: vi.fn(),
   useSetAgentCardSource: vi.fn(),
   useDeleteAgentCardSource: vi.fn(),
 }));
 
 import {
+  useDeleteA2AProxy,
   useDeleteAgentCardSource,
+  useGetA2AProxy,
   useGetAgentCard,
+  useRefreshA2AProxy,
   useRefreshAgentCard,
+  useSetA2AProxy,
   useSetAgentCardSource,
 } from "@agent-management-platform/api-client";
 import { A2AAgentCardPanel } from "./A2AAgentCardPanel";
 
 const refresh = vi.fn();
 const setSource = vi.fn();
+const params = { orgName: "org", projName: "proj", agentName: "agent", envId: "dev" };
 
 const mockCard = (value: Partial<ReturnType<typeof useGetAgentCard>>) =>
   vi.mocked(useGetAgentCard).mockReturnValue({
     data: undefined, isLoading: false, isError: false, error: null, ...value,
   } as unknown as ReturnType<typeof useGetAgentCard>);
+
+const notFound = () => Object.assign(new Error("nf"), { status: 404 });
+
+const mockProxy = (value: Partial<ReturnType<typeof useGetA2AProxy>>) =>
+  vi.mocked(useGetA2AProxy).mockReturnValue({
+    data: undefined, isError: false, error: null, ...value,
+  } as unknown as ReturnType<typeof useGetA2AProxy>);
+
+const idleMutation = (hook: unknown) =>
+  vi.mocked(hook as () => unknown).mockReturnValue(
+    { mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false });
 
 const renderPanel = (external = false) =>
   render(
@@ -57,11 +77,16 @@ beforeEach(() => {
     { mutate: refresh, isPending: false } as unknown as
       ReturnType<typeof useRefreshAgentCard>);
   vi.mocked(useSetAgentCardSource).mockReturnValue(
-    { mutate: setSource, isPending: false } as unknown as
+    { mutateAsync: setSource, isPending: false } as unknown as
       ReturnType<typeof useSetAgentCardSource>);
   vi.mocked(useDeleteAgentCardSource).mockReturnValue(
     { mutate: vi.fn(), isPending: false } as unknown as
       ReturnType<typeof useDeleteAgentCardSource>);
+  setSource.mockResolvedValue(undefined);
+  mockProxy({ isError: true, error: notFound() });
+  idleMutation(useSetA2AProxy);
+  idleMutation(useDeleteA2AProxy);
+  idleMutation(useRefreshA2AProxy);
 });
 
 describe("A2AAgentCardPanel", () => {
@@ -107,13 +132,64 @@ describe("A2AAgentCardPanel", () => {
       target: { value: "https://agent.example/.well-known/agent-card.json" },
     });
     fireEvent.click(screen.getByRole("button", { name: /save/i }));
-    expect(setSource).toHaveBeenCalledWith(
-      {
-        params: { orgName: "org", projName: "proj", agentName: "agent", envId: "dev" },
-        body: { url: "https://agent.example/.well-known/agent-card.json" },
-      },
-      { onSuccess: undefined },
-    );
+    expect(setSource).toHaveBeenCalledWith({
+      params, body: { url: "https://agent.example/.well-known/agent-card.json" },
+    });
+  });
+
+  const fillNewUrlAndRoute = () => {
+    mockCard({ isError: true, error: notFound() });
+    renderPanel(true);
+    fireEvent.change(screen.getByPlaceholderText(/agent-card\.json/), {
+      target: { value: "https://agent.example/.well-known/agent-card.json" },
+    });
+    fireEvent.click(screen.getByLabelText("Route through gateway"));
+    fireEvent.click(screen.getByRole("button", { name: /save/i }));
+  };
+
+  it("saves a new URL, then routes it through the gateway", async () => {
+    const setProxy = vi.fn().mockResolvedValue(undefined);
+    vi.mocked(useSetA2AProxy).mockReturnValue(
+      { mutateAsync: setProxy, isPending: false } as unknown as ReturnType<typeof useSetA2AProxy>);
+    fillNewUrlAndRoute();
+    expect(setSource).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(setProxy).toHaveBeenCalledWith({ params, body: {} }));
+  });
+
+  it("does not route a URL that failed to save", async () => {
+    const setProxy = vi.fn().mockResolvedValue(undefined);
+    vi.mocked(useSetA2AProxy).mockReturnValue(
+      { mutateAsync: setProxy, isPending: false } as unknown as ReturnType<typeof useSetA2AProxy>);
+    setSource.mockRejectedValue(new Error("boom"));
+    fillNewUrlAndRoute();
+    await waitFor(() => expect(setSource).toHaveBeenCalledTimes(1));
+    await Promise.resolve();
+    expect(setProxy).not.toHaveBeenCalled();
+  });
+
+  it("does not call the gateway API when routing is left off", async () => {
+    const setProxy = vi.fn().mockResolvedValue(undefined);
+    vi.mocked(useSetA2AProxy).mockReturnValue(
+      { mutateAsync: setProxy, isPending: false } as unknown as ReturnType<typeof useSetA2AProxy>);
+    mockCard({ isError: true, error: notFound() });
+    renderPanel(true);
+    fireEvent.change(screen.getByPlaceholderText(/agent-card\.json/), {
+      target: { value: "https://agent.example/.well-known/agent-card.json" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /save/i }));
+    await waitFor(() => expect(setSource).toHaveBeenCalledTimes(1));
+    await Promise.resolve();
+    expect(setProxy).not.toHaveBeenCalled();
+  });
+
+  it("stops polling a parked card once the gateway publish failed, and says why", () => {
+    mockCard({ data: { source: "external", status: "pending", sourceUrl: "https://agent.example/.well-known/agent-card.json", lastError: "" } });
+    mockProxy({ data: { status: "failed", lastError: "the agent cannot be proxied through the gateway", upstreamAuthHeader: "" } });
+    renderPanel(true);
+    expect(screen.getByText("Gateway publish failed")).toBeInTheDocument();
+    expect(screen.queryByText("Pending")).not.toBeInTheDocument();
+    expect(vi.mocked(useGetAgentCard))
+      .toHaveBeenLastCalledWith(params, { poll: false });
   });
 
   it("offers a refetch when a platform agent has no card fetch queued", () => {

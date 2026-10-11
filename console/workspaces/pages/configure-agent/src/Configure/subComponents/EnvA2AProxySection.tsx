@@ -1,0 +1,123 @@
+/**
+ * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
+ *
+ * WSO2 LLC. licenses this file to you under the Apache License,
+ * Version 2.0 (the "License"); you may not use this file except
+ * in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+import { useEffect, useState } from "react";
+import { Alert, Box, Button, Chip, Typography } from "@wso2/oxygen-ui";
+import { Trash } from "@wso2/oxygen-ui-icons-react";
+import { useDeleteA2AProxy, useRefreshA2AProxy, useSetA2AProxy } from "@agent-management-platform/api-client";
+import { useConfirmationDialog } from "@agent-management-platform/shared-component";
+import type { A2AProxyResponse, A2AProxyStatus, AgentCardPathParams } from "@agent-management-platform/types";
+import { A2AProxyFields } from "./A2AProxyFields";
+import {
+  draftChanged,
+  draftFromProxy,
+  dropsStoredSecret,
+  hasStoredSecret,
+  proxyRequestOf,
+  upstreamAuthError,
+} from "./a2aProxyDraft";
+
+const PROXY_CHIP: Record<A2AProxyStatus, { label: string; color: "warning" | "success" | "error" }> = {
+  pending: { label: "Publishing to gateway", color: "warning" },
+  published: { label: "Routed through gateway", color: "success" },
+  failed: { label: "Gateway publish failed", color: "error" },
+};
+
+interface EnvA2AProxySectionProps {
+  params: AgentCardPathParams;
+  /** Undefined while the environment is direct. */
+  proxy?: A2AProxyResponse;
+}
+
+/** Gateway routing for one environment of an external A2A agent that has a registered card URL. */
+export function EnvA2AProxySection({ params, proxy }: EnvA2AProxySectionProps) {
+  const [draft, setDraft] = useState(() => draftFromProxy(proxy));
+  const { mutate: saveProxy, isPending: isSaving } = useSetA2AProxy();
+  const { mutate: removeProxy, isPending: isRemoving } = useDeleteA2AProxy();
+  const { mutate: republish, isPending: isRepublishing } = useRefreshA2AProxy();
+  const { addConfirmation } = useConfirmationDialog();
+  const proxied = !!proxy;
+  const savedHeader = proxy?.upstreamAuthHeader ?? "";
+
+  // Re-seed when the saved routing changes, not on every status poll, so typing is not overwritten.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => setDraft(draftFromProxy(proxy)), [proxied, savedHeader]);
+
+  const error = upstreamAuthError(draft, proxy);
+  const busy = isSaving || isRemoving;
+  const canSave = draftChanged(draft, proxy) && !error && !busy;
+
+  const save = () => {
+    if (!canSave) return;
+    if (draft.enabled && !dropsStoredSecret(draft, proxy)) {
+      saveProxy({ params, body: proxyRequestOf(draft, proxy) });
+      return;
+    }
+    addConfirmation(draft.enabled
+      ? {
+          analytics: { entity: "a2a-proxy", action: "clear-upstream-secret" },
+          title: "Remove the stored upstream value?",
+          description: "The gateway stops sending the header to the agent, and the value cannot be recovered.",
+          confirmButtonText: "Remove value",
+          confirmButtonColor: "error",
+          confirmButtonIcon: <Trash size={16} />,
+          onConfirm: () => saveProxy({ params, body: proxyRequestOf(draft, proxy) }),
+        }
+      : {
+          analytics: { entity: "a2a-proxy", action: "disable" },
+          title: "Stop routing through the gateway?",
+          description: "Callers need the agent's own address again, gateway API keys and CORS stop applying, and any stored upstream value is removed.",
+          confirmButtonText: "Stop routing",
+          confirmButtonColor: "error",
+          confirmButtonIcon: <Trash size={16} />,
+          onConfirm: () => removeProxy(params),
+        });
+  };
+
+  return (
+    <Box sx={{ mb: 2 }}>
+      <Box display="flex" alignItems="center" gap={1} sx={{ mb: 1 }}>
+        <Typography variant="overline" color="text.secondary">Gateway routing</Typography>
+        {proxy && (
+          <Chip size="small" variant="outlined" label={PROXY_CHIP[proxy.status].label} color={PROXY_CHIP[proxy.status].color} />
+        )}
+      </Box>
+      {proxy?.status === "failed" && (
+        <Alert
+          severity="error"
+          sx={{ mb: 1 }}
+          action={
+            <Button size="small" color="inherit" disabled={isRepublishing} onClick={() => republish(params)}>Retry</Button>
+          }
+        >
+          {proxy.lastError || "The gateway publish failed."}
+        </Alert>
+      )}
+      <A2AProxyFields
+        draft={draft}
+        onChange={setDraft}
+        hasStoredSecret={hasStoredSecret(proxy)}
+        error={error}
+        disabled={busy}
+      />
+      <Box display="flex" justifyContent="flex-end" sx={{ mt: 1 }}>
+        <Button size="small" variant="contained" disabled={!canSave} onClick={save}>Save</Button>
+      </Box>
+    </Box>
+  );
+}
