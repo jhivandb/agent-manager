@@ -53,6 +53,8 @@ type cardReconcilerHarness struct {
 	repo     *repomocks.A2AAgentCardRepositoryMock
 	fetcher  *fakeA2ACardFetcher
 	ocClient *clientmocks.OpenChoreoClientMock
+	proxies  *repomocks.A2AProxyRepositoryMock
+	gateways *repomocks.GatewayRepositoryMock
 }
 
 // newCardReconcilerHarness wires a reconciler whose fetch succeeds with validTestCard
@@ -75,9 +77,19 @@ func newCardReconcilerHarness(endpointURL string) *cardReconcilerHarness {
 			return client.ReleaseBindingRollout{ReleaseName: "trip-planner-r1", ExternalURL: endpointURL, Serving: true, Deployed: true}, nil
 		},
 	}
+	proxies := &repomocks.A2AProxyRepositoryMock{
+		GetByEnvUUIDFunc: func(context.Context, string, string, string, uuid.UUID) (*models.A2AProxy, error) {
+			return nil, repositories.ErrA2AProxyNotFound
+		},
+	}
+	gateways := &repomocks.GatewayRepositoryMock{
+		ListWithFiltersFunc: func(repositories.GatewayFilterOptions) ([]*models.Gateway, error) {
+			return []*models.Gateway{{UUID: uuid.New(), Vhost: "https://gw.example/"}}, nil
+		},
+	}
 	return &cardReconcilerHarness{
-		repo: repo, fetcher: fetcher, ocClient: oc,
-		svc: NewA2ACardReconcilerService(repo, fetcher, oc, testLogger()).(*a2aCardReconcilerService),
+		repo: repo, fetcher: fetcher, ocClient: oc, proxies: proxies, gateways: gateways,
+		svc: NewA2ACardReconcilerService(repo, proxies, gateways, fetcher, oc, testLogger()).(*a2aCardReconcilerService),
 	}
 }
 
@@ -455,4 +467,64 @@ func TestCardReconcilerKeepsAnUndeployedRowReenqueuedMeanwhile(t *testing.T) {
 
 	assert.Empty(t, h.repo.MarkAttemptFailedCalls())
 	assert.Empty(t, h.repo.MarkFailedCalls())
+}
+
+// Only the gateway's copy of a proxied card advertises gateway URLs.
+func TestCardReconcilerFetchesAProxiedCardThroughTheGateway(t *testing.T) {
+	h := newCardReconcilerHarness("")
+	h.ocClient.GetReleaseBindingRolloutFunc = nil // external rows never ask OpenChoreo
+	var lookedUp uuid.UUID
+	h.proxies.GetByEnvUUIDFunc = func(_ context.Context, _, _, _ string, envUUID uuid.UUID) (*models.A2AProxy, error) {
+		lookedUp = envUUID
+		return &models.A2AProxy{}, nil
+	}
+	var asked repositories.GatewayFilterOptions
+	h.gateways.ListWithFiltersFunc = func(opts repositories.GatewayFilterOptions) ([]*models.Gateway, error) {
+		asked = opts
+		return []*models.Gateway{{UUID: uuid.New(), Vhost: "https://gw.example/"}}, nil
+	}
+	row := pendingCard(models.A2AAgentCardSourceExternal)
+	row.EnvironmentUUID = uuid.New()
+	row.SourceURL = "https://agent.example/.well-known/agent-card.json"
+
+	h.svc.fetchOne(context.Background(), row)
+
+	require.Len(t, h.fetcher.calls, 1)
+	assert.Equal(t, fakeFetchCall{URL: "https://gw.example/trip-planner/.well-known/agent-card.json", Guarded: false},
+		h.fetcher.calls[0], "a platform-derived URL, loopback in local setups")
+	assert.Equal(t, row.EnvironmentUUID, lookedUp)
+	require.NotNil(t, asked.EnvironmentID)
+	assert.Equal(t, row.EnvironmentUUID.String(), *asked.EnvironmentID)
+	assert.Equal(t, models.IngressGatewayRoles, asked.FunctionalityTypeIn)
+	require.Len(t, h.repo.MarkFetchedCalls(), 1)
+}
+
+func TestCardReconcilerRetriesWhenTheProxyLookupFails(t *testing.T) {
+	h := newCardReconcilerHarness("")
+	h.proxies.GetByEnvUUIDFunc = func(context.Context, string, string, string, uuid.UUID) (*models.A2AProxy, error) {
+		return nil, assert.AnError
+	}
+	row := pendingCard(models.A2AAgentCardSourceExternal)
+	row.SourceURL = "https://agent.example/.well-known/agent-card.json"
+
+	h.svc.fetchOne(context.Background(), row)
+
+	assert.Empty(t, h.fetcher.calls, "a failed lookup must not fall back to the origin")
+	require.Len(t, h.repo.MarkAttemptFailedCalls(), 1)
+}
+
+func TestCardReconcilerRetriesUntilTheIngressGatewayIsMapped(t *testing.T) {
+	h := newCardReconcilerHarness("")
+	h.proxies.GetByEnvUUIDFunc = func(context.Context, string, string, string, uuid.UUID) (*models.A2AProxy, error) {
+		return &models.A2AProxy{}, nil
+	}
+	h.gateways.ListWithFiltersFunc = func(repositories.GatewayFilterOptions) ([]*models.Gateway, error) {
+		return []*models.Gateway{}, nil
+	}
+
+	h.svc.fetchOne(context.Background(), pendingCard(models.A2AAgentCardSourceExternal))
+
+	failed := h.repo.MarkAttemptFailedCalls()
+	require.Len(t, failed, 1)
+	assert.Contains(t, failed[0].LastErr, "no ingress gateway")
 }

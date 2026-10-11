@@ -66,12 +66,14 @@ type A2ACardReconcilerService interface {
 }
 
 type a2aCardReconcilerService struct {
-	cardRepo repositories.A2AAgentCardRepository
-	fetcher  A2ACardFetcher
-	ocClient client.OpenChoreoClient
-	logger   *slog.Logger
-	stopCh   chan struct{}
-	stopOnce sync.Once
+	cardRepo    repositories.A2AAgentCardRepository
+	proxyRepo   repositories.A2AProxyRepository
+	gatewayRepo repositories.GatewayRepository
+	fetcher     A2ACardFetcher
+	ocClient    client.OpenChoreoClient
+	logger      *slog.Logger
+	stopCh      chan struct{}
+	stopOnce    sync.Once
 
 	attemptTimeout time.Duration
 	batchBudget    time.Duration
@@ -80,17 +82,21 @@ type a2aCardReconcilerService struct {
 // NewA2ACardReconcilerService creates an A2ACardReconcilerService.
 func NewA2ACardReconcilerService(
 	cardRepo repositories.A2AAgentCardRepository,
+	proxyRepo repositories.A2AProxyRepository,
+	gatewayRepo repositories.GatewayRepository,
 	fetcher A2ACardFetcher,
 	ocClient client.OpenChoreoClient,
 	logger *slog.Logger,
 ) A2ACardReconcilerService {
 	return &a2aCardReconcilerService{
-		cardRepo: cardRepo,
-		fetcher:  fetcher,
-		ocClient: ocClient,
-		logger:   logger,
-		stopCh:   make(chan struct{}),
-		stopOnce: sync.Once{},
+		cardRepo:    cardRepo,
+		proxyRepo:   proxyRepo,
+		gatewayRepo: gatewayRepo,
+		fetcher:     fetcher,
+		ocClient:    ocClient,
+		logger:      logger,
+		stopCh:      make(chan struct{}),
+		stopOnce:    sync.Once{},
 
 		attemptTimeout: a2aCardAttemptTimeout,
 		batchBudget:    a2aCardBatchBudget,
@@ -198,13 +204,43 @@ type a2aCardFetch struct {
 func (s *a2aCardReconcilerService) attemptFetch(ctx context.Context, row models.A2AAgentCard) (a2aCardFetch, error) {
 	switch row.Source {
 	case models.A2AAgentCardSourceExternal:
-		body, err := s.fetcher.Fetch(ctx, row.SourceURL, true)
-		return a2aCardFetch{url: row.SourceURL, body: body}, err
+		return s.fetchExternalCard(ctx, row)
 	case models.A2AAgentCardSourcePlatform:
 		return s.fetchPlatformCard(ctx, row)
 	default:
 		return a2aCardFetch{}, fmt.Errorf("unknown agent card source %q", row.Source)
 	}
+}
+
+// fetchExternalCard fetches through the gateway while the environment is proxied, since only the gateway's copy advertises gateway URLs; otherwise from the registered URL, SSRF-guarded.
+func (s *a2aCardReconcilerService) fetchExternalCard(ctx context.Context, row models.A2AAgentCard) (a2aCardFetch, error) {
+	_, err := s.proxyRepo.GetByEnvUUID(ctx, row.OUID, row.ProjectName, row.AgentName, row.EnvironmentUUID)
+	switch {
+	case errors.Is(err, repositories.ErrA2AProxyNotFound):
+		return s.fetchRegisteredCard(ctx, row)
+	case err != nil:
+		return a2aCardFetch{}, fmt.Errorf("failed to read the A2A proxy: %w", err)
+	}
+	return s.fetchCardThroughGateway(ctx, row)
+}
+
+func (s *a2aCardReconcilerService) fetchRegisteredCard(ctx context.Context, row models.A2AAgentCard) (a2aCardFetch, error) {
+	body, err := s.fetcher.Fetch(ctx, row.SourceURL, true)
+	return a2aCardFetch{url: row.SourceURL, body: body}, err
+}
+
+// fetchCardThroughGateway uses the plain client: the URL is platform-derived and resolves to loopback in local setups.
+func (s *a2aCardReconcilerService) fetchCardThroughGateway(ctx context.Context, row models.A2AAgentCard) (a2aCardFetch, error) {
+	gateway, err := resolveIngressGateway(s.gatewayRepo, row.OUID, row.EnvironmentUUID)
+	if err != nil {
+		return a2aCardFetch{}, err
+	}
+	url := strings.TrimRight(buildPublicProxyURL(gateway, nil), "/") + "/" + row.AgentName + a2aAgentCardPath
+	body, err := s.fetcher.Fetch(ctx, url, false)
+	if err != nil {
+		return a2aCardFetch{url: url}, fmt.Errorf("%s: %w", url, err)
+	}
+	return a2aCardFetch{url: url, body: body}, nil
 }
 
 // fetchPlatformCard waits out a rollout first, since until it finishes the old release can still answer.
