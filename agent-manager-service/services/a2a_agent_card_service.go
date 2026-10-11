@@ -47,18 +47,20 @@ type A2AAgentCardService interface {
 }
 
 type a2aAgentCardService struct {
-	ocClient client.OpenChoreoClient
-	cardRepo repositories.A2AAgentCardRepository
-	logger   *slog.Logger
+	ocClient   client.OpenChoreoClient
+	cardRepo   repositories.A2AAgentCardRepository
+	proxyHooks A2AProxyHooks
+	logger     *slog.Logger
 }
 
 // NewA2AAgentCardService creates an A2AAgentCardService.
 func NewA2AAgentCardService(
 	ocClient client.OpenChoreoClient,
 	cardRepo repositories.A2AAgentCardRepository,
+	proxyHooks A2AProxyHooks,
 	logger *slog.Logger,
 ) A2AAgentCardService {
-	return &a2aAgentCardService{ocClient: ocClient, cardRepo: cardRepo, logger: logger}
+	return &a2aAgentCardService{ocClient: ocClient, cardRepo: cardRepo, proxyHooks: proxyHooks, logger: logger}
 }
 
 func (s *a2aAgentCardService) GetA2AAgentCard(
@@ -95,6 +97,14 @@ func (s *a2aAgentCardService) RefreshA2AAgentCard(
 			return err
 		}
 		return s.enqueue(ctx, agent, ouID, projectName, env, models.A2AAgentCardSourcePlatform, "")
+	}
+	proxied, err := s.isProxied(ctx, agent, ouID, projectName, env)
+	if err != nil {
+		return err
+	}
+	if proxied {
+		// A requeue would un-park the card before the gateway has the republished Agent.
+		return s.proxyHooks.OnCardRefresh(ctx, agent, ouID, projectName, env)
 	}
 	// Update-only, so a concurrent remove can't be undone by an upsert.
 	if err := s.cardRepo.Requeue(ctx, ouID, projectName, agentName, envName); err != nil {
@@ -133,7 +143,7 @@ func (s *a2aAgentCardService) SetA2ACardSource(
 	if err := validateCardSourceURL(ctx, sourceURL); err != nil {
 		return err
 	}
-	err = s.enqueue(ctx, agent, ouID, projectName, env, models.A2AAgentCardSourceExternal, sourceURL)
+	err = s.storeSource(ctx, agent, ouID, projectName, env, sourceURL)
 	recordCardSourceChange(ctx, audit.ActionAgentSetCardSource, agent, ouID, projectName, envName, err,
 		audit.Detail("sourceUrl", sourceURL))
 	return err
@@ -146,13 +156,11 @@ func (s *a2aAgentCardService) DeleteA2ACardSource(
 	if err != nil {
 		return err
 	}
-	if _, err := requireEnvironmentTier(ctx, s.ocClient, s.logger, ouID, envName); err != nil {
+	env, err := requireEnvironmentTier(ctx, s.ocClient, s.logger, ouID, envName)
+	if err != nil {
 		return err
 	}
-	err = s.cardRepo.DeleteForAgentEnv(ctx, ouID, projectName, agentName, envName)
-	if err != nil {
-		err = fmt.Errorf("failed to delete agent card: %w", err)
-	}
+	err = s.removeSource(ctx, agent, ouID, projectName, env)
 	recordCardSourceChange(ctx, audit.ActionAgentRemoveCardSource, agent, ouID, projectName, envName, err)
 	return err
 }
@@ -171,6 +179,52 @@ func recordCardSourceChange(
 		audit.Result(result),
 	}, extra...)
 	audit.Record(ctx, action, opts...)
+}
+
+// isProxied reports whether the environment routes the agent through its gateway.
+func (s *a2aAgentCardService) isProxied(
+	ctx context.Context, agent *models.AgentResponse, ouID, projectName string, env *models.EnvironmentResponse,
+) (bool, error) {
+	envUUID, err := uuid.Parse(env.UUID)
+	if err != nil {
+		return false, fmt.Errorf("invalid UUID for environment %s: %w", env.Name, err)
+	}
+	return s.proxyHooks.IsProxied(ctx, ouID, projectName, agent.Name, envUUID)
+}
+
+// storeSource writes the URL directly, or on a proxied environment lets the proxy write, park and republish in one transaction.
+func (s *a2aAgentCardService) storeSource(
+	ctx context.Context, agent *models.AgentResponse, ouID, projectName string, env *models.EnvironmentResponse, sourceURL string,
+) error {
+	proxied, err := s.isProxied(ctx, agent, ouID, projectName, env)
+	if err != nil {
+		return err
+	}
+	if proxied {
+		return s.proxyHooks.OnCardSourceChanged(ctx, agent, ouID, projectName, env, sourceURL)
+	}
+	return s.enqueue(ctx, agent, ouID, projectName, env, models.A2AAgentCardSourceExternal, sourceURL)
+}
+
+// removeSource deletes the card row; on a proxied environment the proxy also switches to direct, in one transaction.
+func (s *a2aAgentCardService) removeSource(
+	ctx context.Context, agent *models.AgentResponse, ouID, projectName string, env *models.EnvironmentResponse,
+) error {
+	proxied, err := s.isProxied(ctx, agent, ouID, projectName, env)
+	if err != nil {
+		return err
+	}
+	if proxied {
+		err := s.proxyHooks.OnCardSourceRemoved(ctx, agent, ouID, projectName, env)
+		if !errors.Is(err, utils.ErrEnvironmentNotProxied) {
+			return err
+		}
+		// The proxy was removed meanwhile; only the card row is left to delete.
+	}
+	if err := s.cardRepo.DeleteForAgentEnv(ctx, ouID, projectName, agent.Name, env.Name); err != nil {
+		return fmt.Errorf("failed to delete agent card: %w", err)
+	}
+	return nil
 }
 
 func (s *a2aAgentCardService) enqueue(

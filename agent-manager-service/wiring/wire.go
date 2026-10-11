@@ -88,6 +88,8 @@ var serviceProviderSet = wire.NewSet(
 	services.NewA2AAgentCardService,
 	ProvideTxRunner,
 	services.NewA2APublisher,
+	services.NewA2AProxyService,
+	ProvideA2AProxyHooks,
 	services.NewEvaluatorManagerService,
 	services.NewEnvironmentService,
 	services.NewPlatformGatewayService,
@@ -495,6 +497,11 @@ func ProvideA2AAgentCardRepository(db *gorm.DB) repositories.A2AAgentCardReposit
 
 func ProvideA2AProxyRepository(db *gorm.DB) repositories.A2AProxyRepository {
 	return repositories.NewA2AProxyRepository(db)
+}
+
+// ProvideA2AProxyHooks gives the card service the proxy hooks only, not the whole proxy service.
+func ProvideA2AProxyHooks(svc services.A2AProxyService) services.A2AProxyHooks {
+	return svc
 }
 
 // ProvideTxRunner opens database transactions for the services that hold no *gorm.DB.
