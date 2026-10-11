@@ -17,6 +17,7 @@
 package services
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -738,6 +739,28 @@ func TestReconcilerLeavesAReEnqueuedRowForTheNextTick(t *testing.T) {
 	h.svc.publishOne(context.Background(), pub)
 
 	assert.Len(t, h.hub.published, 1)
+}
+
+func TestReconcilerLogsWhenItCannotTellIfASupersededRowWasTornDown(t *testing.T) {
+	h := newA2AReconcilerHarness("")
+	pub := pendingPublication()
+	h.withExternalOrigin(&pub)
+	var logs bytes.Buffer
+	h.svc.logger = slog.New(slog.NewTextHandler(&logs, nil))
+	h.pubRepo.MarkPublishedFunc = func(context.Context, models.A2APublication, string) error {
+		return repositories.ErrA2APublicationSuperseded
+	}
+	h.pubRepo.GetFunc = func(context.Context, string, string, string, uuid.UUID) (*models.A2APublication, error) {
+		return nil, errors.New("connection reset")
+	}
+	// DeleteForArtifactFunc is nil: withdrawing would panic.
+
+	h.svc.publishOne(context.Background(), pub)
+
+	assert.Contains(t, logs.String(), "level=ERROR")
+	assert.Contains(t, logs.String(), pub.ArtifactUUID.String())
+	assert.Contains(t, logs.String(), "connection reset")
+	assert.Len(t, h.hub.published, 1, "nothing is withdrawn")
 }
 
 func TestReconcilerSkipsTheCardTriggerWhenTheExternalRowIsGone(t *testing.T) {

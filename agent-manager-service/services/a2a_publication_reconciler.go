@@ -269,7 +269,12 @@ func (s *a2aPublicationReconcilerService) publishOne(ctx context.Context, pub mo
 // withdrawIfTornDown takes back an Agent published after its environment was torn down mid-attempt.
 func (s *a2aPublicationReconcilerService) withdrawIfTornDown(ctx context.Context, pub models.A2APublication, gatewayID string) {
 	_, err := s.pubRepo.Get(ctx, pub.OUID, pub.ProjectName, pub.AgentName, pub.EnvironmentUUID)
-	if !errors.Is(err, repositories.ErrA2APublicationNotFound) {
+	switch {
+	case err == nil:
+		return
+	case !errors.Is(err, repositories.ErrA2APublicationNotFound):
+		s.logger.Error("Failed to check whether a superseded A2A publication was torn down; its Agent may stay served",
+			"agentName", pub.AgentName, "environment", pub.EnvironmentName, "artifactID", pub.ArtifactUUID, "error", err)
 		return
 	}
 	s.logger.Info("A2A publication was torn down during the attempt; withdrawing the Agent it published",
@@ -343,8 +348,7 @@ func (s *a2aPublicationReconcilerService) logSuperseded(pub models.A2APublicatio
 		"agentName", pub.AgentName, "environment", pub.EnvironmentName)
 }
 
-// recordAttemptFailure waits out a not-ready binding, fails a row that can never be proxied,
-// retries other failures within the budget, and gives up past it.
+// recordAttemptFailure waits out a not-ready binding, fails an unproxyable row at once, and retries the rest within the budget.
 func (s *a2aPublicationReconcilerService) recordAttemptFailure(ctx context.Context, pub models.A2APublication, cause error) {
 	if errors.Is(cause, errUpstreamNotReady) {
 		s.recordWaiting(ctx, pub, cause)
@@ -417,8 +421,7 @@ func (s *a2aPublicationReconcilerService) resolveUpstream(ctx context.Context, p
 	return resolvedUpstream{url: upstreamURL}, nil
 }
 
-// resolveExternalUpstream re-derives the routes from the origin's card at every publish, through the
-// SSRF-guarded client: the URL was checked when saved, but its host may resolve elsewhere since.
+// resolveExternalUpstream re-derives the routes from the origin card at every publish, fetched SSRF-guarded as its host may resolve elsewhere now.
 func (s *a2aPublicationReconcilerService) resolveExternalUpstream(ctx context.Context, pub models.A2APublication) (resolvedUpstream, error) {
 	proxy, err := s.proxyRepo.GetByEnvUUID(ctx, pub.OUID, pub.ProjectName, pub.AgentName, pub.EnvironmentUUID)
 	if errors.Is(err, repositories.ErrA2AProxyNotFound) {
