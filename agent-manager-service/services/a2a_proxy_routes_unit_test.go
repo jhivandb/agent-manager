@@ -77,7 +77,7 @@ func TestDeriveA2AProxyRoutesRejectsACardURLTheGatewayCannotFetch(t *testing.T) 
 	}
 }
 
-// Review Focus 5: the a2a-sdk default serves both bindings at the root.
+// The a2a-sdk default serves both bindings at the root.
 func TestDeriveA2AProxyRoutesFrontsBothBindingsAtTheRoot(t *testing.T) {
 	_, transports, err := deriveA2AProxyRoutes("https://agent.example/.well-known/agent-card.json", a2aTestCard(t,
 		a2aIface("JSONRPC", "https://agent.example/"),
@@ -112,7 +112,7 @@ func TestDeriveA2AProxyRoutesLeavesABindingUnfronted(t *testing.T) {
 	}
 }
 
-// Review Focus 2: the gateway rejects these as pathPrefix and would fail the whole Agent.
+// The gateway rejects these as pathPrefix and would fail the whole Agent.
 func TestDeriveA2AProxyRoutesLeavesNonCanonicalPathsUnfronted(t *testing.T) {
 	for _, link := range []string{
 		"https://agent.example/team/a2a/jsonrpc/",
@@ -156,7 +156,7 @@ func TestDeriveA2AProxyRoutesNeedsOneFrontedBinding(t *testing.T) {
 	assert.Contains(t, err.Error(), "HTTP+JSON is not offered")
 }
 
-// Review Focus 3: the gateway's card rewrite fails the whole card on such an entry.
+// The gateway's card rewrite fails the whole card on such an entry.
 func TestDeriveA2AProxyRoutesRequiresABindingOnEveryInterface(t *testing.T) {
 	_, _, err := deriveA2AProxyRoutes(originCardURL, a2aTestCard(t,
 		a2aIface("JSONRPC", "https://agent.example/team/rpc"),

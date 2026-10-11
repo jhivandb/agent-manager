@@ -114,6 +114,8 @@ func writeAgentCardError(w http.ResponseWriter, r *http.Request, err error, fall
 		errors.Is(err, utils.ErrAgentCardSourceNotExternal),
 		errors.Is(err, utils.ErrInvalidURL):
 		utils.WriteErrorResponse(w, http.StatusBadRequest, err.Error())
+	case errors.Is(err, utils.ErrA2AProxyOriginChangeNeedsAuthReset):
+		utils.WriteErrorResponse(w, http.StatusConflict, utils.ErrA2AProxyOriginChangeNeedsAuthReset.Error())
 	default:
 		handleCommonErrors(w, err, fallback)
 	}

@@ -145,11 +145,8 @@ func a2aPathPrefixUnder(upstream *url.URL, link string) (string, bool) {
 	if err != nil || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.RawPath != "" {
 		return "", false
 	}
-	sameOrigin := strings.EqualFold(u.Scheme, upstream.Scheme) &&
-		strings.EqualFold(u.Hostname(), upstream.Hostname()) &&
-		effectivePort(u) == effectivePort(upstream)
 	rest, under := strings.CutPrefix(u.Path, upstream.Path)
-	if !sameOrigin || !under || (rest != "" && !strings.HasPrefix(rest, "/")) {
+	if !isSameOrigin(u, upstream) || !under || (rest != "" && !strings.HasPrefix(rest, "/")) {
 		return "", false
 	}
 	if rest == "" || rest == "/" {
@@ -159,6 +156,13 @@ func a2aPathPrefixUnder(upstream *url.URL, link string) (string, bool) {
 		return "", false
 	}
 	return rest, true
+}
+
+// isSameOrigin compares scheme, host and port, defaulting the port by scheme.
+func isSameOrigin(a, b *url.URL) bool {
+	return strings.EqualFold(a.Scheme, b.Scheme) &&
+		strings.EqualFold(a.Hostname(), b.Hostname()) &&
+		effectivePort(a) == effectivePort(b)
 }
 
 func effectivePort(u *url.URL) string {

@@ -43,7 +43,8 @@ const proxyTestEnvUUID = "55555555-5555-5555-5555-555555555555"
 var proxyTestKey = bytes.Repeat([]byte{7}, 32)
 
 // proxyHarness serves an external A2A agent whose dev environment has a registered card URL and is
-// still direct. Writes are wired only on the tx-bound mocks, and only by acceptsWrites.
+// still direct. Writes are wired only on the tx-bound mocks, and only by acceptsWrites; tx-bound reads
+// delegate to the plain mocks.
 type proxyHarness struct {
 	*publisherMocks
 	svc                *a2aProxyService
@@ -69,6 +70,12 @@ func newProxyHarness(t *testing.T) *proxyHarness {
 	}
 	m.proxies.GetByEnvUUIDFunc = func(context.Context, string, string, string, uuid.UUID) (*models.A2AProxy, error) {
 		return nil, repositories.ErrA2AProxyNotFound
+	}
+	h.txProxies.GetByEnvUUIDFunc = func(ctx context.Context, ouID, projectName, agentName string, envUUID uuid.UUID) (*models.A2AProxy, error) {
+		return m.proxies.GetByEnvUUIDFunc(ctx, ouID, projectName, agentName, envUUID)
+	}
+	h.txCards.GetFunc = func(ctx context.Context, ouID, projectName, agentName, envName string) (*models.A2AAgentCard, error) {
+		return h.cards.GetFunc(ctx, ouID, projectName, agentName, envName)
 	}
 	m.artifacts.GetByHandleFunc = func(string, string) (*models.Artifact, error) {
 		return &models.Artifact{UUID: h.artifactUUID, Kind: models.KindAgent}, nil
@@ -266,6 +273,8 @@ func TestValidateA2AUpstreamAuth(t *testing.T) {
 		nil,
 		{Header: "X-Upstream_Key-1"},
 		{Header: "X-Key", Value: value(strings.Repeat("a", 8192))},
+		{Header: "Authorization", Value: value("Bearer t")},
+		{Header: "X-Proxy-Key", Value: value("v")},
 	} {
 		assert.NoError(t, validateA2AUpstreamAuth(auth))
 	}
@@ -273,13 +282,22 @@ func TestValidateA2AUpstreamAuth(t *testing.T) {
 		"a header with a space":  {Header: "X Key", Value: value("v")},
 		"an empty header":        {Header: "", Value: value("v")},
 		"Host":                   {Header: "host", Value: value("v")},
+		"Content-Length":         {Header: "content-length", Value: value("v")},
+		"Transfer-Encoding":      {Header: "Transfer-Encoding", Value: value("v")},
+		"Connection":             {Header: "CONNECTION", Value: value("v")},
+		"Upgrade":                {Header: "Upgrade", Value: value("v")},
+		"TE":                     {Header: "te", Value: value("v")},
+		"Keep-Alive":             {Header: "Keep-Alive", Value: value("v")},
+		"Trailer":                {Header: "Trailer", Value: value("v")},
+		"a Proxy-* header":       {Header: "proxy-authorization", Value: value("v")},
+		"a header alone":         {Header: "Proxy-Connection"},
 		"a 256-character header": {Header: strings.Repeat("h", 256), Value: value("v")},
 		"an empty value":         {Header: "X-Key", Value: value("")},
 		"8194 bytes":             {Header: "X-Key", Value: value(strings.Repeat("é", 4097))},
 		"a single quote":         {Header: "X-Key", Value: value("it's")},
 		"a carriage return":      {Header: "X-Key", Value: value("a\rb")},
 		"a line feed":            {Header: "X-Key", Value: value("a\nb")},
-		// Review Focus 4: the gateway renders {{ }} with secret and env functions.
+		// The gateway renders {{ }} with secret and env functions.
 		"template syntax": {Header: "X-Key", Value: value(`{{ secret "openai" }}`)},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -441,6 +459,7 @@ func TestSetA2AProxyDropsItsWritesWhenTheAgentIsDeletedMeanwhile(t *testing.T) {
 }
 
 // The URL write, the parking and the republish are one transaction: the row is never due in between.
+// With no stored secret the URL may move to another origin.
 func TestOnCardSourceChangedStoresTheURLParksTheCardAndRepublishes(t *testing.T) {
 	h := newProxyHarness(t)
 	h.acceptsWrites()
@@ -458,6 +477,58 @@ func TestOnCardSourceChangedStoresTheURLParksTheCardAndRepublishes(t *testing.T)
 	assert.Len(t, h.txPubs.EnqueueCalls(), 1)
 	assert.Empty(t, h.txCards.RequeueCalls())
 	assert.Equal(t, 1, h.transactions)
+}
+
+// The stored secret is sent to whatever the card URL names, so it may not follow the URL to another origin.
+func TestOnCardSourceChangedRefusesToMoveAStoredSecretToAnotherOrigin(t *testing.T) {
+	for name, newURL := range map[string]string{
+		"another host":   "https://attacker.example/.well-known/agent-card.json",
+		"another scheme": "http://agent.example/.well-known/agent-card.json",
+		"another port":   "https://agent.example:8443/.well-known/agent-card.json",
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newProxyHarness(t)
+			h.proxied("X-Key", "c2VjcmV0")
+
+			err := h.svc.OnCardSourceChanged(context.Background(), externalA2AAgent(), "org-1", "checkout", devEnv(), newURL)
+
+			require.ErrorIs(t, err, utils.ErrA2AProxyOriginChangeNeedsAuthReset)
+			assert.Len(t, h.txProxies.GetByEnvUUIDCalls(), 1, "the proxy is read inside the transaction")
+			assert.Len(t, h.txCards.GetCalls(), 1, "the registered URL is read inside the transaction")
+			assert.Empty(t, h.txCards.EnqueueCalls())
+			assert.Empty(t, h.txCards.ClearCardCalls())
+			assert.Empty(t, h.txPubs.EnqueueCalls())
+			assert.Empty(t, h.artifacts.CreateCalls())
+		})
+	}
+}
+
+func TestOnCardSourceChangedRefusesWhenNoRegisteredURLVouchesForTheSecret(t *testing.T) {
+	h := newProxyHarness(t)
+	h.proxied("X-Key", "c2VjcmV0")
+	h.cards.GetFunc = func(context.Context, string, string, string, string) (*models.A2AAgentCard, error) {
+		return nil, repositories.ErrA2AAgentCardNotFound
+	}
+
+	err := h.svc.OnCardSourceChanged(context.Background(), externalA2AAgent(), "org-1", "checkout", devEnv(),
+		"https://agent.example/.well-known/agent-card.json")
+
+	require.ErrorIs(t, err, utils.ErrA2AProxyOriginChangeNeedsAuthReset)
+	assert.Empty(t, h.txCards.EnqueueCalls())
+}
+
+func TestOnCardSourceChangedKeepsTheSecretOnTheSameOrigin(t *testing.T) {
+	h := newProxyHarness(t)
+	h.acceptsWrites()
+	h.proxied("X-Key", "c2VjcmV0")
+	newURL := "https://AGENT.example:443/v2/.well-known/agent-card.json"
+
+	require.NoError(t, h.svc.OnCardSourceChanged(context.Background(), externalA2AAgent(), "org-1", "checkout", devEnv(), newURL))
+
+	written := h.txCards.EnqueueCalls()
+	require.Len(t, written, 1)
+	assert.Equal(t, newURL, written[0].Card.SourceURL)
+	assert.Len(t, h.txPubs.EnqueueCalls(), 1)
 }
 
 func TestOnCardSourceRemovedTearsDownAndDeletesTheCard(t *testing.T) {

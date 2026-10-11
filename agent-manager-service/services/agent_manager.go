@@ -2842,7 +2842,7 @@ func (s *agentManagerService) clearInheritedA2AState(ctx context.Context, ouID, 
 	}
 	if s.a2aPublisher != nil {
 		if err := s.a2aPublisher.DeleteForAgent(ctx, ouID, projectName, agentName); err != nil {
-			return fmt.Errorf("failed to clear leftover A2A publication rows: %w", err)
+			return fmt.Errorf("failed to clear leftover A2A publication and proxy rows: %w", err)
 		}
 	}
 	return nil

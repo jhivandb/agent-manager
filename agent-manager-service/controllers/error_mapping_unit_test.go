@@ -60,4 +60,8 @@ func TestHandleCommonErrors_AuditRecorderUnavailable_Is503(t *testing.T) {
 	handleCommonErrors(rr, fmt.Errorf("wrapped: %w", audit.ErrRecorderUnavailable), "Failed to remove the card source")
 
 	assert.Equal(t, http.StatusServiceUnavailable, rr.Code)
+	var body spec.ErrorResponse
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &body))
+	assert.Equal(t, utils.ErrCodeServiceUnavailable, body.Code)
+	assert.Nil(t, body.Reason, "the sink's error stays in the log")
 }

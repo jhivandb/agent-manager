@@ -22,7 +22,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/google/uuid"
@@ -245,6 +247,9 @@ func (s *a2aProxyService) OnCardSourceChanged(
 	}
 	err = s.tx(ctx, func(tx *gorm.DB) error {
 		// One transaction: a row left due between the write and the parking would be fetched via the old origin.
+		if err := s.requireSecretStaysOnOrigin(ctx, tx, t, sourceURL); err != nil {
+			return err
+		}
 		cards := s.cardRepo.WithTx(tx)
 		if err := cards.Enqueue(ctx, t.cardRow(sourceURL)); err != nil {
 			return fmt.Errorf("failed to store the agent card URL: %w", err)
@@ -335,6 +340,32 @@ func (s *a2aProxyService) requireCardSource(ctx context.Context, t a2aProxyTarge
 		return fmt.Errorf("failed to read the agent card: %w", err)
 	case card.Source != models.A2AAgentCardSourceExternal || card.SourceURL == "":
 		return utils.ErrA2AProxyNeedsCardSource
+	}
+	return nil
+}
+
+// requireSecretStaysOnOrigin refuses a card URL on another origin while a stored secret would be sent there.
+func (s *a2aProxyService) requireSecretStaysOnOrigin(ctx context.Context, tx *gorm.DB, t a2aProxyTarget, sourceURL string) error {
+	proxy, err := s.proxyRepo.WithTx(tx).GetByEnvUUID(ctx, t.key.OUID, t.key.ProjectName, t.key.AgentName, t.key.EnvironmentUUID)
+	switch {
+	case errors.Is(err, repositories.ErrA2AProxyNotFound):
+		return nil
+	case err != nil:
+		return fmt.Errorf("failed to read the A2A proxy: %w", err)
+	case proxy.UpstreamAuthSecret == "":
+		return nil
+	}
+	card, err := s.cardRepo.WithTx(tx).Get(ctx, t.key.OUID, t.key.ProjectName, t.key.AgentName, t.key.EnvironmentName)
+	switch {
+	case errors.Is(err, repositories.ErrA2AAgentCardNotFound):
+		return utils.ErrA2AProxyOriginChangeNeedsAuthReset
+	case err != nil:
+		return fmt.Errorf("failed to read the agent card: %w", err)
+	}
+	registered, regErr := url.Parse(card.SourceURL)
+	next, nextErr := url.Parse(sourceURL)
+	if regErr != nil || nextErr != nil || !isSameOrigin(registered, next) {
+		return utils.ErrA2AProxyOriginChangeNeedsAuthReset
 	}
 	return nil
 }
@@ -584,8 +615,8 @@ func validateA2AUpstreamAuth(auth *models.A2AProxyAuthUpdate) error {
 		return fmt.Errorf("%w: header may contain only letters, digits, '-' and '_'", utils.ErrInvalidUpstreamAuth)
 	case len(auth.Header) > a2aUpstreamHeaderMaxLen:
 		return fmt.Errorf("%w: header must be at most %d characters", utils.ErrInvalidUpstreamAuth, a2aUpstreamHeaderMaxLen)
-	case strings.EqualFold(auth.Header, "Host"):
-		return fmt.Errorf("%w: the Host header cannot be set upstream", utils.ErrInvalidUpstreamAuth)
+	case isReservedUpstreamHeader(auth.Header):
+		return fmt.Errorf("%w: the %s header cannot be set upstream", utils.ErrInvalidUpstreamAuth, auth.Header)
 	}
 	if auth.Value == nil {
 		return nil
@@ -602,6 +633,16 @@ func validateA2AUpstreamAuth(auth *models.A2AProxyAuthUpdate) error {
 		return fmt.Errorf("%w: value must not contain '{{'", utils.ErrInvalidUpstreamAuth)
 	}
 	return nil
+}
+
+// a2aReservedUpstreamHeaders (lowercase) frame or route the request, so the gateway must own them.
+var a2aReservedUpstreamHeaders = []string{
+	"host", "content-length", "transfer-encoding", "connection", "upgrade", "te", "keep-alive", "trailer",
+}
+
+func isReservedUpstreamHeader(header string) bool {
+	name := strings.ToLower(header)
+	return strings.HasPrefix(name, "proxy-") || slices.Contains(a2aReservedUpstreamHeaders, name)
 }
 
 func encryptA2AUpstreamSecret(value string, key []byte) (string, error) {

@@ -700,7 +700,7 @@ func TestReconcilerRetriesWhileTheOriginIsUnreachable(t *testing.T) {
 	assert.Empty(t, h.pubRepo.MarkFailedCalls())
 }
 
-// Review Focus 1: a switch to direct committed while this attempt was publishing.
+// A switch to direct committed while this attempt was publishing.
 func TestReconcilerWithdrawsAnAgentTornDownMidPublish(t *testing.T) {
 	h := newA2AReconcilerHarness("")
 	pub := pendingPublication()

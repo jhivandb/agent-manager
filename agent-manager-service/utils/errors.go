@@ -129,6 +129,9 @@ var (
 	ErrInvalidInput                   = errors.New("invalid input")
 	ErrImmutableFieldChange           = errors.New("cannot change immutable field")
 	ErrScopeNotFound                  = errors.New("scope not found")
+	// ErrA2AProxyOriginChangeNeedsAuthReset keeps a stored upstream secret from following the card URL to another origin. Maps to 409.
+	ErrA2AProxyOriginChangeNeedsAuthReset = errors.New(
+		"the stored upstream credential would be sent to the new card URL's origin; clear the upstream auth before moving the card to another origin, then enter it again")
 
 	// HTTP errors
 	ErrBadRequest   = errors.New("bad request")

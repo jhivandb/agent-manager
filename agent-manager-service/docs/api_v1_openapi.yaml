@@ -8045,6 +8045,14 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: >-
+            The environment is routed through the gateway with a stored upstream credential, and the
+            new URL is on another origin (scheme, host or port). Clear the upstream auth first.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "500":
           description: Internal server error
           content:

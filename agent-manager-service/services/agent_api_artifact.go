@@ -57,7 +57,11 @@ func ensureAgentEnvAPIArtifact(
 		Kind:    models.KindAgent,
 		OUID:    ouID,
 	}
-	if err := artifactRepo.Create(db, artifact); err != nil {
+	// A savepoint inside a caller's transaction, so losing the insert race does not abort it.
+	err = db.Transaction(func(tx *gorm.DB) error {
+		return artifactRepo.Create(tx, artifact)
+	})
+	if err != nil {
 		existing, getErr := artifactRepo.GetByHandle(handle, ouID)
 		if getErr == nil {
 			return existing, nil
