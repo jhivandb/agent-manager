@@ -12,7 +12,7 @@ HTTP → RequestLogger → CORS → mux ┬→ /health                          
                                    └→ JWTAuth → /mcp, /mcp/ → mcp/tools/ → controllers/ (same as above, no HTTP hop)
 ```
 
-`RequestLogger` and `CORS` wrap the whole server. `JWTAuth` wraps both the `apiMux` mounted at `/api/v1/*` and the `am-obs-mcp` streamable-HTTP MCP server mounted at `/mcp` and `/mcp/` — both on the root mux (`app/app.go`). `/health` and the well-known route are registered on the bare mux and are **unauthenticated**. Unlike `/api/v1/logs`, `/api/v1/build-logs` and `/api/v1/metrics`, `/mcp` is **not** wrapped by `middleware.RejectPublisherAudience` — publisher-audience tokens may call it.
+`RequestLogger` and `CORS` wrap the whole server. `JWTAuth` wraps both the `apiMux` mounted at `/api/v1/*` and the `am-obs-mcp` streamable-HTTP MCP server mounted at `/mcp` and `/mcp/` — both on the root mux (`app/app.go`). `/health` and the well-known route are registered on the bare mux and are **unauthenticated**. Unlike `/api/v1/logs`, `/api/v1/build-logs`, `/api/v1/monitor-run-logs` and `/api/v1/metrics`, `/mcp` is **not** wrapped by `middleware.RejectPublisherAudience` — publisher-audience tokens may call it.
 
 - **`handlers/`** — parse/validate the request, extract path params, call the controller, write the response. Client-facing errors are generic (`"Failed to retrieve …"`); real detail is logged server-side.
 - **`controllers/`** — orchestration + enrichment. Fetches trace overviews, then fans out to fetch span details and aggregates input/output/token usage.
