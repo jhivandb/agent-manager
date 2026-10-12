@@ -27,7 +27,7 @@ import (
 )
 
 // Verifies that every tool described by allToolSpecs is actually registered
-// on a fully-wired MCP server, and that there are exactly seven of them.
+// on a fully-wired MCP server, and that there are exactly eight of them.
 func TestToolRegistration(t *testing.T) {
 	clientSession, _ := setupTestServer(t)
 
