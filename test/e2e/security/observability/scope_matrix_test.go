@@ -28,10 +28,10 @@ import (
 // SEC-OBS-001 — the observer's data routes each require their own scope.
 //
 // Unlike the agent-manager-service matrix, this one is a full cross-product:
-// every route is driven with all four observability scopes. The diagonal must
-// pass and every off-diagonal cell must 403. That matters because these four
+// every route is driven with all five observability scopes. The diagonal must
+// pass and every off-diagonal cell must 403. That matters because these five
 // scopes are handed out unevenly by the predefined roles — AI Lead gets
-// trace-read and metric-read but NOT log-read or build-log-read, so
+// trace-read, monitor-log-read and metric-read but NOT log-read or build-log-read, so
 // trace-read leaking access to logs would be a real privilege gain.
 //
 // Requests are side-effect free: these are all read-only endpoints, driven
@@ -66,6 +66,12 @@ func obsRoutes(org string) []obsRoute {
 			"/api/v1/build-logs",
 			map[string]string{"organization": org, "buildId": "e2e-test-sec-absent"},
 			scopeBuildLogRead,
+		},
+		{
+			"monitor run logs",
+			"/api/v1/monitor-run-logs",
+			map[string]string{"organization": org, "runName": "e2e-test-sec-absent"},
+			scopeMonitorLogRead,
 		},
 		{"metrics", "/api/v1/metrics", orgQuery, scopeMetricRead},
 	}
