@@ -37,7 +37,7 @@ func TestToolRegistration(t *testing.T) {
 		t.Fatalf("ListTools failed: %v", err)
 	}
 
-	if got, want := len(toolsResult.Tools), 7; got != want {
+	if got, want := len(toolsResult.Tools), 8; got != want {
 		t.Errorf("registered tool count: got %d, want %d", got, want)
 	}
 
