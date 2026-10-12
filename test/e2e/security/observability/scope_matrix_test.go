@@ -31,12 +31,14 @@ import (
 // every route is driven with all five observability scopes. The diagonal must
 // pass and every off-diagonal cell must 403. That matters because these five
 // scopes are handed out unevenly by the predefined roles — AI Lead gets
-// trace-read, monitor-log-read and metric-read but NOT log-read or build-log-read, so
-// trace-read leaking access to logs would be a real privilege gain.
+// trace-read, monitor-log-read and metric-read but NOT log-read or
+// build-log-read, so trace-read leaking access to logs would be a real
+// privilege gain.
 //
-// Requests are side-effect free: these are all read-only endpoints, driven
-// with an absent trace id and no time range, so they resolve to a 4xx from the
-// handler rather than returning data.
+// Requests are side-effect free: these are all read-only endpoints. Most are
+// driven with an absent id and no time range, so the handler answers with a 4xx
+// rather than data; monitor-run-logs has no such guard, so a permitted call
+// there runs a real (still read-only) 30-day upstream query.
 
 // absentTraceID is a syntactically plausible trace id that will not exist.
 const absentTraceID = "00000000000000000000000000000000"

@@ -67,8 +67,8 @@ func GetMonitorRunLogs(g Gomega, client *framework.AMPClient, params *GetMonitor
 	q.Set("organization", params.OrgName)
 	q.Set("runName", params.RunName)
 	if params.StartedAt != nil && params.CompletedAt != nil {
-		q.Set("startTime", params.StartedAt.UTC().Format(time.RFC3339))
-		q.Set("endTime", params.CompletedAt.UTC().Format(time.RFC3339))
+		q.Set("startTime", params.StartedAt.UTC().Format(time.RFC3339Nano))
+		q.Set("endTime", params.CompletedAt.UTC().Format(time.RFC3339Nano))
 	}
 
 	logsURL := fmt.Sprintf("%s/api/v1/monitor-run-logs?%s", client.Cfg().ObserverBaseURL, q.Encode())
