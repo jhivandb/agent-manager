@@ -76,6 +76,21 @@ describe("MonitorRunDrawer log range", () => {
     );
   });
 
+  it("clamps the end bound to startedAt+1h when completedAt is later", () => {
+    const run = { ...baseRun, completedAt: "2026-04-01T12:30:00Z" };
+    render(<MonitorRunDrawer run={run} {...props} />);
+
+    expect(useMonitorRunLogs).toHaveBeenCalledWith(
+      {
+        organization: "acme",
+        runName: "quality-monitor-abc12345",
+        startTime: "2026-04-01T10:00:00Z",
+        endTime: "2026-04-01T11:00:00.000Z",
+      },
+      "success",
+    );
+  });
+
   it("sends a fixed startedAt+1h range for an in-flight run", () => {
     const run = { ...baseRun, completedAt: undefined, status: "running" as const };
     render(<MonitorRunDrawer run={run} {...props} />);

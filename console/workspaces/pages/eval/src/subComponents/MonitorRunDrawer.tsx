@@ -72,6 +72,14 @@ export interface MonitorRunDrawerProps {
   durationLabel: string;
 }
 
+const ONE_HOUR_MS = 60 * 60 * 1000;
+
+const startedAtPlusOneHour = (startedAt: string) =>
+  new Date(Date.parse(startedAt) + ONE_HOUR_MS).toISOString();
+
+const earlierOf = (completedAt: string | undefined, bound: string) =>
+  completedAt && Date.parse(completedAt) <= Date.parse(bound) ? completedAt : bound;
+
 export function MonitorRunDrawer({
   run,
   orgName,
@@ -80,14 +88,11 @@ export function MonitorRunDrawer({
   traceWindowLabel,
   durationLabel,
 }: MonitorRunDrawerProps) {
-  // Runs are force-completed after 45m and the observer only rejects a future
-  // start, so an in-flight run gets a fixed startedAt+1h end bound (never "now").
+  // Runs are force-completed after 45m, so startedAt+1h bounds any real run (never "now").
   const logRange = run.startedAt
     ? {
         startTime: run.startedAt,
-        endTime:
-          run.completedAt ??
-          new Date(Date.parse(run.startedAt) + 60 * 60 * 1000).toISOString(),
+        endTime: earlierOf(run.completedAt, startedAtPlusOneHour(run.startedAt)),
       }
     : undefined;
 
