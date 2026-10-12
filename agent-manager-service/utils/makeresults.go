@@ -829,6 +829,7 @@ func ConvertToMonitorRunResponse(run *models.MonitorRunResponse) spec.MonitorRun
 
 	response := spec.MonitorRunResponse{
 		Id:           run.ID,
+		RunName:      run.RunName,
 		Evaluators:   convertModelsEvaluatorsToSpec(run.Evaluators),
 		TraceStart:   run.TraceStart,
 		TraceEnd:     run.TraceEnd,

@@ -4359,6 +4359,9 @@ type MonitorRunResponse struct {
 	// MonitorName Name of the monitor
 	MonitorName *string `json:"monitorName,omitempty"`
 
+	// RunName Name of the underlying workflow run, used to query run logs from the observer
+	RunName string `json:"runName"`
+
 	// Scores Evaluator score summaries (included when includeScores=true)
 	Scores *[]EvaluatorScoreSummary `json:"scores,omitempty"`
 

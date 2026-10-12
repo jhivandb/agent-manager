@@ -13564,6 +13564,7 @@ components:
       type: object
       required:
         - id
+        - runName
         - evaluators
         - traceStart
         - traceEnd
@@ -13573,6 +13574,10 @@ components:
           type: string
           description: Unique identifier for the run
           example: "660e8400-e29b-41d4-a716-446655440001"
+        runName:
+          type: string
+          description: Name of the underlying workflow run, used to query run logs from the observer
+          example: "customer-support-quality-660e8400"
         monitorName:
           type: string
           description: Name of the monitor
