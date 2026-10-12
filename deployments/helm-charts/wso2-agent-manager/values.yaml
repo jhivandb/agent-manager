@@ -160,8 +160,6 @@ agentManagerService:
       bufferSize: 4096
       batchSize: 200
       flushIntervalMs: 1000
-    # In-cluster URL the agent-manager-service uses to query trace data server-side.
-    amObserverURL: "http://amp-observer.openchoreo-observability-plane.svc.cluster.local:9098"
     # Externally reachable observer URL returned to out-of-cluster clients
     # (e.g. the CLI) via /api/v1/config. No internal fallback: unset means
     # clients surface "observer not configured".

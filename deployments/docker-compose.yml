@@ -71,7 +71,6 @@ services:
       # Optional: External Service URLs (add when needed)
       # - OPENCHOREO_API_URL=http://host.docker.internal:8000
       # - OPENSEARCH_URL=http://host.docker.internal:9200
-      - AM_OBSERVER_URL=http://host.docker.internal:9098
       # Externally reachable observer URL returned to the CLI via /api/v1/config.
       # No internal fallback: unset means clients surface "observer not configured".
       - AM_OBSERVER_PUBLIC_URL=http://localhost:9098

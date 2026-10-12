@@ -858,30 +858,6 @@ func (e LLMProviderResponseStatus) Valid() bool {
 	}
 }
 
-// Defines values for LogEntryLogLevel.
-const (
-	LogEntryLogLevelDEBUG LogEntryLogLevel = "DEBUG"
-	LogEntryLogLevelERROR LogEntryLogLevel = "ERROR"
-	LogEntryLogLevelINFO  LogEntryLogLevel = "INFO"
-	LogEntryLogLevelWARN  LogEntryLogLevel = "WARN"
-)
-
-// Valid indicates whether the value is a known member of the LogEntryLogLevel enum.
-func (e LogEntryLogLevel) Valid() bool {
-	switch e {
-	case LogEntryLogLevelDEBUG:
-		return true
-	case LogEntryLogLevelERROR:
-		return true
-	case LogEntryLogLevelINFO:
-		return true
-	case LogEntryLogLevelWARN:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for MCPEndpointEnvironmentDeploymentStatus.
 const (
 	MCPEndpointEnvironmentDeploymentStatusDeployed   MCPEndpointEnvironmentDeploymentStatus = "Deployed"
@@ -1109,22 +1085,22 @@ func (e ListCatalogResourcesParamsKind) Valid() bool {
 
 // Defines values for ListGatewaysParamsStatus.
 const (
-	ACTIVE       ListGatewaysParamsStatus = "ACTIVE"
-	ERROR        ListGatewaysParamsStatus = "ERROR"
-	INACTIVE     ListGatewaysParamsStatus = "INACTIVE"
-	PROVISIONING ListGatewaysParamsStatus = "PROVISIONING"
+	ListGatewaysParamsStatusACTIVE       ListGatewaysParamsStatus = "ACTIVE"
+	ListGatewaysParamsStatusERROR        ListGatewaysParamsStatus = "ERROR"
+	ListGatewaysParamsStatusINACTIVE     ListGatewaysParamsStatus = "INACTIVE"
+	ListGatewaysParamsStatusPROVISIONING ListGatewaysParamsStatus = "PROVISIONING"
 )
 
 // Valid indicates whether the value is a known member of the ListGatewaysParamsStatus enum.
 func (e ListGatewaysParamsStatus) Valid() bool {
 	switch e {
-	case ACTIVE:
+	case ListGatewaysParamsStatusACTIVE:
 		return true
-	case ERROR:
+	case ListGatewaysParamsStatusERROR:
 		return true
-	case INACTIVE:
+	case ListGatewaysParamsStatusINACTIVE:
 		return true
-	case PROVISIONING:
+	case ListGatewaysParamsStatusPROVISIONING:
 		return true
 	default:
 		return false
@@ -3941,23 +3917,6 @@ type ListCommitsResponse struct {
 
 	// Offset Number of results skipped
 	Offset int `json:"offset"`
-}
-
-// LogEntry defines model for LogEntry.
-type LogEntry struct {
-	Log       string           `json:"log"`
-	LogLevel  LogEntryLogLevel `json:"logLevel"`
-	Timestamp time.Time        `json:"timestamp"`
-}
-
-// LogEntryLogLevel defines model for LogEntry.LogLevel.
-type LogEntryLogLevel string
-
-// LogsResponse defines model for LogsResponse.
-type LogsResponse struct {
-	Logs       []LogEntry `json:"logs"`
-	TookMs     float32    `json:"tookMs"`
-	TotalCount int        `json:"totalCount"`
 }
 
 // MCPConfigRequest defines model for MCPConfigRequest.
