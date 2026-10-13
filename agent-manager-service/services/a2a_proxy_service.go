@@ -49,13 +49,14 @@ var a2aUpstreamHeaderPattern = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
 // A2AProxyHooks is what the card service needs from the proxy service on a proxied environment.
 type A2AProxyHooks interface {
-	IsProxied(ctx context.Context, ouID, projectName, agentName string, environmentUUID uuid.UUID) (bool, error)
-	// OnCardSourceChanged stores the new URL, parks the card and republishes from it, in one transaction.
-	OnCardSourceChanged(ctx context.Context, agent *models.AgentResponse, ouID, projectName string, env *models.EnvironmentResponse, sourceURL string) error
-	// OnCardSourceRemoved switches the environment to direct and deletes its card row.
-	OnCardSourceRemoved(ctx context.Context, agent *models.AgentResponse, ouID, projectName string, env *models.EnvironmentResponse) error
-	// OnCardRefresh republishes; the card fetch follows the publish.
-	OnCardRefresh(ctx context.Context, agent *models.AgentResponse, ouID, projectName string, env *models.EnvironmentResponse) error
+	// Each decides direct vs proxied under the environment's transition lock.
+
+	// StoreCardSource stores the URL; on a proxied environment it also parks the card and republishes.
+	StoreCardSource(ctx context.Context, agent *models.AgentResponse, ouID, projectName string, env *models.EnvironmentResponse, sourceURL string) error
+	// RemoveCardSource deletes the card row; on a proxied environment it also switches to direct.
+	RemoveCardSource(ctx context.Context, agent *models.AgentResponse, ouID, projectName string, env *models.EnvironmentResponse) error
+	// RefreshCardSource requeues the card fetch; on a proxied environment it republishes, and the fetch follows.
+	RefreshCardSource(ctx context.Context, agent *models.AgentResponse, ouID, projectName string, env *models.EnvironmentResponse) error
 }
 
 // A2AProxyService publishes external A2A agents through their environment's ingress gateway.
@@ -170,23 +171,23 @@ func (s *a2aProxyService) SetA2AProxy(
 	if err != nil {
 		return err
 	}
-	if err := s.requireCardSource(ctx, t); err != nil {
-		return err
-	}
-	existing, err := s.proxyOf(ctx, t)
-	if err != nil && !errors.Is(err, utils.ErrEnvironmentNotProxied) {
-		return err
-	}
-	proxy, authChanged, err := s.proxyRow(t, existing, auth)
-	if err != nil {
-		return err
-	}
-	// A PUT can set, replace or clear the credential the gateway sends upstream, so it is refused unrecorded.
-	attempt, err := s.beginAudit(ctx, audit.ActionAgentSetA2AProxy, t, proxy.UpstreamAuthHeader, authChanged)
-	if err != nil {
-		return err
-	}
+	var attempt *audit.Attempt
 	err = s.tx(ctx, func(tx *gorm.DB) error {
+		existing, err := s.lockedProxy(ctx, tx, t)
+		if err != nil {
+			return err
+		}
+		if err := s.requireCardSource(ctx, tx, t); err != nil {
+			return err
+		}
+		proxy, authChanged, err := s.proxyRow(t, existing, auth)
+		if err != nil {
+			return err
+		}
+		// A PUT can set, replace or clear the credential the gateway sends upstream, so it is refused unrecorded.
+		if attempt, err = s.beginAudit(ctx, audit.ActionAgentSetA2AProxy, t, proxy.UpstreamAuthHeader, authChanged); err != nil {
+			return err
+		}
 		if err := s.proxyRepo.WithTx(tx).Upsert(ctx, proxy); err != nil {
 			return fmt.Errorf("failed to save the A2A proxy: %w", err)
 		}
@@ -209,11 +210,7 @@ func (s *a2aProxyService) DeleteA2AProxy(ctx context.Context, ouID, projectName,
 	if err != nil {
 		return err
 	}
-	existing, err := s.proxyOf(ctx, t)
-	if err != nil {
-		return err
-	}
-	return s.removeProxy(ctx, t, existing, requeueDirectCardFetch)
+	return s.removeProxy(ctx, t, requeueDirectCardFetch, nil)
 }
 
 func (s *a2aProxyService) RefreshA2AProxy(ctx context.Context, ouID, projectName, agentName, envName string) error {
@@ -221,24 +218,10 @@ func (s *a2aProxyService) RefreshA2AProxy(ctx context.Context, ouID, projectName
 	if err != nil {
 		return err
 	}
-	if _, err := s.proxyOf(ctx, t); err != nil {
-		return err
-	}
-	return s.republish(ctx, t)
+	return s.republish(ctx, t, nil)
 }
 
-func (s *a2aProxyService) IsProxied(ctx context.Context, ouID, projectName, agentName string, environmentUUID uuid.UUID) (bool, error) {
-	_, err := s.proxyRepo.GetByEnvUUID(ctx, ouID, projectName, agentName, environmentUUID)
-	switch {
-	case errors.Is(err, repositories.ErrA2AProxyNotFound):
-		return false, nil
-	case err != nil:
-		return false, fmt.Errorf("failed to read the A2A proxy: %w", err)
-	}
-	return true, nil
-}
-
-func (s *a2aProxyService) OnCardSourceChanged(
+func (s *a2aProxyService) StoreCardSource(
 	ctx context.Context, agent *models.AgentResponse, ouID, projectName string, env *models.EnvironmentResponse, sourceURL string,
 ) error {
 	t, err := newA2AProxyTarget(agent, ouID, projectName, env)
@@ -246,16 +229,28 @@ func (s *a2aProxyService) OnCardSourceChanged(
 		return err
 	}
 	err = s.tx(ctx, func(tx *gorm.DB) error {
-		// One transaction: a row left due between the write and the parking would be fetched via the old origin.
-		if err := s.requireSecretStaysOnOrigin(ctx, tx, t, sourceURL); err != nil {
+		// Decided under the lock, so a concurrent switch to proxied cannot miss the origin check.
+		proxy, err := s.lockedProxy(ctx, tx, t)
+		if err != nil {
 			return err
+		}
+		if proxy != nil {
+			if err := requireProxyableCardURL(sourceURL); err != nil {
+				return err
+			}
+			if err := s.requireSecretStaysOnOrigin(ctx, tx, t, proxy, sourceURL); err != nil {
+				return err
+			}
 		}
 		cards := s.cardRepo.WithTx(tx)
 		if err := cards.Enqueue(ctx, t.cardRow(sourceURL)); err != nil {
 			return fmt.Errorf("failed to store the agent card URL: %w", err)
 		}
+		if proxy == nil {
+			return nil
+		}
 		// The new URL's card is shown only once the gateway fronts the new origin.
-		err := cards.ClearCard(ctx, t.key.OUID, t.key.ProjectName, t.key.AgentName, t.key.EnvironmentUUID)
+		err = cards.ClearCard(ctx, t.key.OUID, t.key.ProjectName, t.key.AgentName, t.key.EnvironmentUUID)
 		if err != nil {
 			return fmt.Errorf("failed to park the agent card: %w", err)
 		}
@@ -267,28 +262,24 @@ func (s *a2aProxyService) OnCardSourceChanged(
 	return s.dropIfAgentGone(ctx, t)
 }
 
-func (s *a2aProxyService) OnCardSourceRemoved(
+func (s *a2aProxyService) RemoveCardSource(
 	ctx context.Context, agent *models.AgentResponse, ouID, projectName string, env *models.EnvironmentResponse,
 ) error {
 	t, err := newA2AProxyTarget(agent, ouID, projectName, env)
 	if err != nil {
 		return err
 	}
-	existing, err := s.proxyOf(ctx, t)
-	if err != nil {
-		return err
-	}
-	return s.removeProxy(ctx, t, existing, deleteCardRow)
+	return s.removeProxy(ctx, t, deleteCardRow, deleteCardRow)
 }
 
-func (s *a2aProxyService) OnCardRefresh(
+func (s *a2aProxyService) RefreshCardSource(
 	ctx context.Context, agent *models.AgentResponse, ouID, projectName string, env *models.EnvironmentResponse,
 ) error {
 	t, err := newA2AProxyTarget(agent, ouID, projectName, env)
 	if err != nil {
 		return err
 	}
-	return s.republish(ctx, t)
+	return s.republish(ctx, t, requeueCardFetch)
 }
 
 // target resolves an external A2A agent and an environment the caller may act on.
@@ -318,11 +309,15 @@ func (s *a2aProxyService) agent(ctx context.Context, ouID, projectName, agentNam
 	return agent, nil
 }
 
-// proxyOf is the environment's proxy row, or utils.ErrEnvironmentNotProxied while it is direct.
-func (s *a2aProxyService) proxyOf(ctx context.Context, t a2aProxyTarget) (*models.A2AProxy, error) {
-	proxy, err := s.proxyRepo.GetByEnvUUID(ctx, t.key.OUID, t.key.ProjectName, t.key.AgentName, t.key.EnvironmentUUID)
+// lockedProxy takes the environment's transition lock and reads its proxy row under it; nil while direct.
+func (s *a2aProxyService) lockedProxy(ctx context.Context, tx *gorm.DB, t a2aProxyTarget) (*models.A2AProxy, error) {
+	proxies := s.proxyRepo.WithTx(tx)
+	if err := proxies.LockAgentEnv(ctx, t.key.OUID, t.key.ProjectName, t.key.AgentName, t.key.EnvironmentUUID); err != nil {
+		return nil, fmt.Errorf("failed to lock the A2A proxy: %w", err)
+	}
+	proxy, err := proxies.GetByEnvUUID(ctx, t.key.OUID, t.key.ProjectName, t.key.AgentName, t.key.EnvironmentUUID)
 	if errors.Is(err, repositories.ErrA2AProxyNotFound) {
-		return nil, utils.ErrEnvironmentNotProxied
+		return nil, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to read the A2A proxy: %w", err)
@@ -331,8 +326,8 @@ func (s *a2aProxyService) proxyOf(ctx context.Context, t a2aProxyTarget) (*model
 }
 
 // requireCardSource is the 409 for an environment with no registered card URL to proxy.
-func (s *a2aProxyService) requireCardSource(ctx context.Context, t a2aProxyTarget) error {
-	card, err := s.cardRepo.Get(ctx, t.key.OUID, t.key.ProjectName, t.key.AgentName, t.key.EnvironmentName)
+func (s *a2aProxyService) requireCardSource(ctx context.Context, tx *gorm.DB, t a2aProxyTarget) error {
+	card, err := s.cardRepo.WithTx(tx).Get(ctx, t.key.OUID, t.key.ProjectName, t.key.AgentName, t.key.EnvironmentName)
 	switch {
 	case errors.Is(err, repositories.ErrA2AAgentCardNotFound):
 		return utils.ErrA2AProxyNeedsCardSource
@@ -341,18 +336,14 @@ func (s *a2aProxyService) requireCardSource(ctx context.Context, t a2aProxyTarge
 	case card.Source != models.A2AAgentCardSourceExternal || card.SourceURL == "":
 		return utils.ErrA2AProxyNeedsCardSource
 	}
-	return nil
+	return requireProxyableCardURL(card.SourceURL)
 }
 
 // requireSecretStaysOnOrigin refuses a card URL on another origin while a stored secret would be sent there.
-func (s *a2aProxyService) requireSecretStaysOnOrigin(ctx context.Context, tx *gorm.DB, t a2aProxyTarget, sourceURL string) error {
-	proxy, err := s.proxyRepo.WithTx(tx).GetByEnvUUID(ctx, t.key.OUID, t.key.ProjectName, t.key.AgentName, t.key.EnvironmentUUID)
-	switch {
-	case errors.Is(err, repositories.ErrA2AProxyNotFound):
-		return nil
-	case err != nil:
-		return fmt.Errorf("failed to read the A2A proxy: %w", err)
-	case proxy.UpstreamAuthSecret == "":
+func (s *a2aProxyService) requireSecretStaysOnOrigin(
+	ctx context.Context, tx *gorm.DB, t a2aProxyTarget, proxy *models.A2AProxy, sourceURL string,
+) error {
+	if proxy.UpstreamAuthSecret == "" {
 		return nil
 	}
 	card, err := s.cardRepo.WithTx(tx).Get(ctx, t.key.OUID, t.key.ProjectName, t.key.AgentName, t.key.EnvironmentName)
@@ -421,8 +412,16 @@ func (s *a2aProxyService) enqueuePublication(ctx context.Context, tx *gorm.DB, t
 }
 
 // republish re-derives the routes from the origin card on the next publish; the card fetch follows it.
-func (s *a2aProxyService) republish(ctx context.Context, t a2aProxyTarget) error {
+// A direct environment gets ifDirect, or utils.ErrEnvironmentNotProxied when it is nil.
+func (s *a2aProxyService) republish(ctx context.Context, t a2aProxyTarget, ifDirect a2aCardStep) error {
 	err := s.tx(ctx, func(tx *gorm.DB) error {
+		proxy, err := s.lockedProxy(ctx, tx, t)
+		if err != nil {
+			return err
+		}
+		if proxy == nil {
+			return onDirect(ctx, tx, s.cardRepo, t, ifDirect)
+		}
 		return s.enqueuePublication(ctx, tx, t)
 	})
 	if err != nil {
@@ -449,6 +448,26 @@ func requeueDirectCardFetch(ctx context.Context, cards repositories.A2AAgentCard
 	return nil
 }
 
+// requeueCardFetch makes the direct card row due in place; an upsert could recreate a removed row.
+func requeueCardFetch(ctx context.Context, cards repositories.A2AAgentCardRepository, key a2aPublicationKey) error {
+	err := cards.Requeue(ctx, key.OUID, key.ProjectName, key.AgentName, key.EnvironmentName)
+	if errors.Is(err, repositories.ErrA2AAgentCardNotFound) {
+		return utils.ErrAgentCardNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("failed to queue agent card fetch: %w", err)
+	}
+	return nil
+}
+
+// onDirect applies step to a direct environment's card row, or refuses with utils.ErrEnvironmentNotProxied.
+func onDirect(ctx context.Context, tx *gorm.DB, cards repositories.A2AAgentCardRepository, t a2aProxyTarget, step a2aCardStep) error {
+	if step == nil {
+		return utils.ErrEnvironmentNotProxied
+	}
+	return step(ctx, cards.WithTx(tx), t.key)
+}
+
 // deleteCardRow drops the card row together with its removed source.
 func deleteCardRow(ctx context.Context, cards repositories.A2AAgentCardRepository, key a2aPublicationKey) error {
 	if err := cards.DeleteForAgentEnv(ctx, key.OUID, key.ProjectName, key.AgentName, key.EnvironmentName); err != nil {
@@ -458,12 +477,25 @@ func deleteCardRow(ctx context.Context, cards repositories.A2AAgentCardRepositor
 }
 
 // removeProxy switches the environment to direct; it discards the stored secret, so it is refused unrecorded.
-func (s *a2aProxyService) removeProxy(ctx context.Context, t a2aProxyTarget, existing *models.A2AProxy, cardStep a2aCardStep) error {
-	attempt, err := s.beginAudit(ctx, audit.ActionAgentRemoveA2AProxy, t, existing.UpstreamAuthHeader, existing.UpstreamAuthSecret != "")
-	if err != nil {
+// A direct environment gets ifDirect, or utils.ErrEnvironmentNotProxied when it is nil.
+func (s *a2aProxyService) removeProxy(ctx context.Context, t a2aProxyTarget, cardStep, ifDirect a2aCardStep) error {
+	var attempt *audit.Attempt
+	var teardown a2aTeardown
+	err := s.tx(ctx, func(tx *gorm.DB) error {
+		existing, err := s.lockedProxy(ctx, tx, t)
+		if err != nil {
+			return err
+		}
+		if existing == nil {
+			return onDirect(ctx, tx, s.cardRepo, t, ifDirect)
+		}
+		attempt, err = s.beginAudit(ctx, audit.ActionAgentRemoveA2AProxy, t, existing.UpstreamAuthHeader, existing.UpstreamAuthSecret != "")
+		if err != nil {
+			return err
+		}
+		teardown, err = s.switchToDirect(ctx, tx, t, cardStep)
 		return err
-	}
-	teardown, err := s.switchToDirect(ctx, t, cardStep)
+	})
 	attempt.Complete(ctx, err)
 	if err != nil {
 		return err
@@ -472,28 +504,21 @@ func (s *a2aProxyService) removeProxy(ctx context.Context, t a2aProxyTarget, exi
 	return nil
 }
 
-// switchToDirect tears down the publication (keeping the artifact), deletes the proxy row and applies cardStep in one transaction.
-func (s *a2aProxyService) switchToDirect(ctx context.Context, t a2aProxyTarget, cardStep a2aCardStep) (a2aTeardown, error) {
+// switchToDirect tears down the publication (keeping the artifact), deletes the proxy row and applies cardStep.
+func (s *a2aProxyService) switchToDirect(ctx context.Context, tx *gorm.DB, t a2aProxyTarget, cardStep a2aCardStep) (a2aTeardown, error) {
 	artifactUUID, err := s.artifactUUID(t)
 	if err != nil {
 		return a2aTeardown{}, err
 	}
-	var teardown a2aTeardown
-	err = s.tx(ctx, func(tx *gorm.DB) error {
-		var err error
-		if teardown, err = s.publisher.TeardownEnv(ctx, tx, t.key, artifactUUID); err != nil {
-			return err
-		}
-		err = s.proxyRepo.WithTx(tx).Delete(ctx, t.key.OUID, t.key.ProjectName, t.key.AgentName, t.key.EnvironmentUUID)
-		if errors.Is(err, repositories.ErrA2AProxyNotFound) {
-			return utils.ErrEnvironmentNotProxied
-		}
-		if err != nil {
-			return fmt.Errorf("failed to delete the A2A proxy: %w", err)
-		}
-		return cardStep(ctx, s.cardRepo.WithTx(tx), t.key)
-	})
-	return teardown, err
+	teardown, err := s.publisher.TeardownEnv(ctx, tx, t.key, artifactUUID)
+	if err != nil {
+		return a2aTeardown{}, err
+	}
+	err = s.proxyRepo.WithTx(tx).Delete(ctx, t.key.OUID, t.key.ProjectName, t.key.AgentName, t.key.EnvironmentUUID)
+	if err != nil {
+		return a2aTeardown{}, fmt.Errorf("failed to delete the A2A proxy: %w", err)
+	}
+	return teardown, cardStep(ctx, s.cardRepo.WithTx(tx), t.key)
 }
 
 // artifactUUID is the environment's agent artifact, or uuid.Nil when it has none.
@@ -530,13 +555,15 @@ func (s *a2aProxyService) dropIfAgentGone(ctx context.Context, t a2aProxyTarget)
 
 // forget removes the proxy row, its publication, the card row and the environment's artifact, whose deployments cascade.
 func (s *a2aProxyService) forget(ctx context.Context, t a2aProxyTarget) (a2aTeardown, error) {
-	artifactUUID, err := s.artifactUUID(t)
-	if err != nil {
-		return a2aTeardown{}, err
-	}
 	var teardown a2aTeardown
-	err = s.tx(ctx, func(tx *gorm.DB) error {
-		var err error
+	err := s.tx(ctx, func(tx *gorm.DB) error {
+		if _, err := s.lockedProxy(ctx, tx, t); err != nil {
+			return err
+		}
+		artifactUUID, err := s.artifactUUID(t)
+		if err != nil {
+			return err
+		}
 		if teardown, err = s.publisher.TeardownEnvAndDropArtifact(ctx, tx, t.key, artifactUUID); err != nil {
 			return err
 		}
@@ -544,7 +571,7 @@ func (s *a2aProxyService) forget(ctx context.Context, t a2aProxyTarget) (a2aTear
 		if err != nil && !errors.Is(err, repositories.ErrA2AProxyNotFound) {
 			return fmt.Errorf("failed to delete the A2A proxy: %w", err)
 		}
-		// OnCardSourceChanged writes the card row, so this service clears it as well.
+		// StoreCardSource writes the card row, so this service clears it as well.
 		err = s.cardRepo.WithTx(tx).DeleteForAgentEnv(ctx, t.key.OUID, t.key.ProjectName, t.key.AgentName, t.key.EnvironmentName)
 		if err != nil {
 			return fmt.Errorf("failed to delete the agent card: %w", err)

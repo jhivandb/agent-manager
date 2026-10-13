@@ -283,7 +283,8 @@ func (s *a2aPublicationReconcilerService) withdrawIfTornDown(ctx context.Context
 		s.logger.Error("Failed to delete the deployment of a torn-down A2A publication",
 			"agentName", pub.AgentName, "environment", pub.EnvironmentName, "error", err)
 	}
-	sendA2AAgentDeletion(ctx, s.events, pub.ArtifactUUID, []string{gatewayID}, s.logger)
+	// Undeploy: a switch to direct keeps the artifact, and with it the keys a switch back reuses.
+	sendA2AAgentWithdrawal(ctx, s.events, pub.ArtifactUUID, []string{gatewayID}, true, s.logger)
 }
 
 // enqueueCardFetch queues a fetch of the card the gateway now serves; best effort.
@@ -322,6 +323,16 @@ func (s *a2aPublicationReconcilerService) requeueExternalCard(ctx context.Contex
 		return
 	}
 	s.dropCardIfAgentGone(ctx, pub)
+}
+
+// releaseParkedCard reports a publish that will not happen on the card parked for it, instead of leaving it pending.
+func (s *a2aPublicationReconcilerService) releaseParkedCard(ctx context.Context, pub models.A2APublication, lastErr string) {
+	err := s.cardRepo.FailParked(ctx, pub.OUID, pub.ProjectName, pub.AgentName, pub.EnvironmentUUID,
+		sanitizeA2ALastError("the gateway could not publish the agent: "+lastErr))
+	if err != nil {
+		s.logger.Warn("Failed to report the gateway failure on the parked agent card",
+			"agentName", pub.AgentName, "environment", pub.EnvironmentName, "error", err)
+	}
 }
 
 // dropCardIfAgentGone removes a card row written after a racing DeleteAgent, even if the name was reused.
@@ -365,6 +376,8 @@ func (s *a2aPublicationReconcilerService) recordAttemptFailure(ctx context.Conte
 			s.logSuperseded(pub)
 		case err != nil:
 			s.logger.Error("Failed to mark A2A publication failed", "error", err)
+		case pub.Source == models.A2APublicationSourceExternal:
+			s.releaseParkedCard(ctx, pub, lastErr)
 		}
 		return
 	}

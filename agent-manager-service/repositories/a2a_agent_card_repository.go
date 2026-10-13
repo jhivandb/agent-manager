@@ -52,6 +52,8 @@ type A2AAgentCardRepository interface {
 
 	// ClearCard drops the stored card and parks the row (pending, never due) until Requeue; ErrA2AAgentCardNotFound when absent.
 	ClearCard(ctx context.Context, ouID, projectName, agentName string, environmentUUID uuid.UUID) error
+	// FailParked marks a row ClearCard parked as failed with lastErr; any other row is left alone.
+	FailParked(ctx context.Context, ouID, projectName, agentName string, environmentUUID uuid.UUID, lastErr string) error
 
 	// ClaimDue leases up to limit pending rows whose next_attempt_at has passed; NULL is never due.
 	ClaimDue(ctx context.Context, now time.Time, limit int) ([]models.A2AAgentCard, error)
@@ -198,6 +200,19 @@ func (r *a2aAgentCardRepository) ClearCard(ctx context.Context, ouID, projectNam
 		return ErrA2AAgentCardNotFound
 	}
 	return nil
+}
+
+func (r *a2aAgentCardRepository) FailParked(
+	ctx context.Context, ouID, projectName, agentName string, environmentUUID uuid.UUID, lastErr string,
+) error {
+	return r.db.WithContext(ctx).Model(&models.A2AAgentCard{}).
+		Where("ou_id = ? AND project_name = ? AND agent_name = ? AND environment_uuid = ? AND status = ? AND next_attempt_at IS NULL",
+			ouID, projectName, agentName, environmentUUID, models.A2AAgentCardStatusPending).
+		Updates(map[string]interface{}{
+			"status":     models.A2AAgentCardStatusFailed,
+			"last_error": lastErr,
+			"updated_at": time.Now().Truncate(time.Microsecond),
+		}).Error
 }
 
 func (r *a2aAgentCardRepository) ClaimDue(ctx context.Context, now time.Time, limit int) ([]models.A2AAgentCard, error) {

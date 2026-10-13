@@ -155,3 +155,31 @@ func TestA2AProxyWithTxRollsBack(t *testing.T) {
 	_, err = repo.GetByEnvUUID(ctx, proxy.OUID, proxy.ProjectName, proxy.AgentName, proxy.EnvironmentUUID)
 	assert.ErrorIs(t, err, ErrA2AProxyNotFound)
 }
+
+// The lock holds a second transaction on the same environment until the first ends, and only that one.
+func TestA2AProxyLockAgentEnvSerialisesOneEnvironment(t *testing.T) {
+	repo := NewA2AProxyRepository(db.GetDB())
+	ctx := context.Background()
+	ouID, envUUID := "ou-"+uuid.New().String()[:8], uuid.New()
+
+	holder := db.GetDB().Begin()
+	require.NoError(t, holder.Error)
+	defer holder.Rollback()
+	require.NoError(t, repo.WithTx(holder).LockAgentEnv(ctx, ouID, "checkout", "weather", envUUID))
+
+	tryLock := func(agentName string, envUUID uuid.UUID) bool {
+		var acquired bool
+		err := db.GetDB().Transaction(func(tx *gorm.DB) error {
+			key := a2aProxyLockKey(ouID, "checkout", agentName, envUUID)
+			return tx.Raw("SELECT pg_try_advisory_xact_lock(?, hashtext(?))", a2aProxyLockNamespace, key).Scan(&acquired).Error
+		})
+		require.NoError(t, err)
+		return acquired
+	}
+	assert.False(t, tryLock("weather", envUUID), "the same environment waits")
+	assert.True(t, tryLock("weather", uuid.New()), "another environment does not")
+	assert.True(t, tryLock("weather-2", envUUID), "nor another agent")
+
+	require.NoError(t, holder.Rollback().Error)
+	assert.True(t, tryLock("weather", envUUID), "the lock ends with the transaction")
+}

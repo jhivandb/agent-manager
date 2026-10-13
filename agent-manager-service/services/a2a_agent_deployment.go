@@ -22,6 +22,7 @@ import (
 	"log/slog"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"gopkg.in/yaml.v3"
@@ -294,26 +295,37 @@ func collectA2AAgentDeletionTargets(
 	return targets
 }
 
-// sendA2AAgentDeletion tells each gateway to drop the artifact's Agent.
+// sendA2AAgentWithdrawal tells each gateway to stop serving the artifact's Agent: undeployed when
+// keepKeys, so a later publish reuses its API keys, else deleted together with them.
 //
-// Best effort and detached from request cancellation: the agent is already
-// deleted, so a returning handler must not strand a gateway still holding it.
-func sendA2AAgentDeletion(
+// Best effort and detached from request cancellation: the change has committed, so a returning
+// handler must not strand a gateway still serving the Agent.
+func sendA2AAgentWithdrawal(
 	ctx context.Context,
 	events *GatewayEventsService,
 	artifactUUID uuid.UUID,
 	gatewayIDs []string,
+	keepKeys bool,
 	logger *slog.Logger,
 ) {
 	if events == nil || artifactUUID == uuid.Nil {
 		return
 	}
 	ctx = context.WithoutCancel(ctx)
-	event := &models.AgentDeletionEvent{AgentID: artifactUUID.String()}
+	agentID := artifactUUID.String()
+	broadcast := func(gatewayID string) error {
+		return events.BroadcastAgentDeletionEvent(ctx, gatewayID, &models.AgentDeletionEvent{AgentID: agentID})
+	}
+	if keepKeys {
+		event := &models.AgentUndeploymentEvent{AgentID: agentID, PerformedAt: time.Now().Truncate(time.Millisecond)}
+		broadcast = func(gatewayID string) error {
+			return events.BroadcastAgentUndeploymentEvent(ctx, gatewayID, event)
+		}
+	}
 	for _, gatewayID := range gatewayIDs {
-		if err := events.BroadcastAgentDeletionEvent(ctx, gatewayID, event); err != nil {
-			logger.Warn("Failed to broadcast A2A agent deletion event",
-				"artifactID", artifactUUID, "gatewayID", gatewayID, "error", err)
+		if err := broadcast(gatewayID); err != nil {
+			logger.Warn("Failed to withdraw the A2A agent from a gateway",
+				"artifactID", artifactUUID, "gatewayID", gatewayID, "keepKeys", keepKeys, "error", err)
 		}
 	}
 }

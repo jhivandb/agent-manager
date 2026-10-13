@@ -24,6 +24,8 @@ import (
 	"path"
 	"strings"
 	"unicode"
+
+	"github.com/wso2/agent-manager/agent-manager-service/utils"
 )
 
 // errA2ANotProxyable means the card cannot be fronted by the gateway; retrying cannot help.
@@ -71,21 +73,37 @@ func deriveA2AProxyRoutes(cardURL string, card json.RawMessage) (upstreamURL str
 	return upstream.String(), transports, nil
 }
 
+// requireProxyableCardURL is the 400 for a card URL the gateway could never front.
+func requireProxyableCardURL(cardURL string) error {
+	if _, reason := cardURLUpstream(cardURL); reason != "" {
+		return fmt.Errorf("%w: %s", utils.ErrA2ACardURLNotProxyable, reason)
+	}
+	return nil
+}
+
 // a2aProxyUpstream strips the well-known suffix; the gateway fetches the card from upstream plus that suffix.
 func a2aProxyUpstream(cardURL string) (*url.URL, error) {
+	upstream, reason := cardURLUpstream(cardURL)
+	if reason != "" {
+		return nil, fmt.Errorf("%w: %s", errA2ANotProxyable, reason)
+	}
+	return upstream, nil
+}
+
+// cardURLUpstream is a2aProxyUpstream reporting why it cannot, so each caller wraps its own sentinel.
+func cardURLUpstream(cardURL string) (*url.URL, string) {
 	u, err := url.Parse(cardURL)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil {
-		return nil, fmt.Errorf("%w: the card URL must be a plain http(s) URL", errA2ANotProxyable)
+		return nil, "the card URL must be a plain http(s) URL"
 	}
 	if u.RawQuery != "" || u.Fragment != "" || !strings.HasSuffix(u.Path, a2aAgentCardPath) {
-		return nil, fmt.Errorf("%w: the card URL must end in %s with no query, as the gateway fetches the card there",
-			errA2ANotProxyable, a2aAgentCardPath)
+		return nil, fmt.Sprintf("the card URL must end in %s with no query, as the gateway fetches the card there", a2aAgentCardPath)
 	}
 	base := strings.TrimSuffix(u.Path, a2aAgentCardPath)
 	if base != "" && (strings.HasSuffix(base, "/") || path.Clean(base) != base || u.RawPath != "") {
-		return nil, fmt.Errorf("%w: the card URL's path is not canonical", errA2ANotProxyable)
+		return nil, "the card URL's path is not canonical"
 	}
-	return &url.URL{Scheme: u.Scheme, Host: u.Host, Path: base}, nil
+	return &url.URL{Scheme: u.Scheme, Host: u.Host, Path: base}, ""
 }
 
 // a2aCardInterfaces reads supportedInterfaces with exact key names, as the gateway's rewrite does.

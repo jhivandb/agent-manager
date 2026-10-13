@@ -109,7 +109,8 @@ func writeA2AProxyError(w http.ResponseWriter, r *http.Request, err error, fallb
 		utils.WriteErrorResponse(w, http.StatusConflict, err.Error())
 	case errors.Is(err, utils.ErrAgentNotA2A),
 		errors.Is(err, utils.ErrA2AProxyAgentNotExternal),
-		errors.Is(err, utils.ErrInvalidUpstreamAuth):
+		errors.Is(err, utils.ErrInvalidUpstreamAuth),
+		errors.Is(err, utils.ErrA2ACardURLNotProxyable):
 		utils.WriteErrorResponse(w, http.StatusBadRequest, err.Error())
 	default:
 		handleCommonErrors(w, err, fallback)

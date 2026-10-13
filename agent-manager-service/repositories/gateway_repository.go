@@ -578,9 +578,17 @@ func (r *GatewayRepo) ListIdentityProvidersByOrg(ouID string) ([]IdentityProvide
 	return results, err
 }
 
-// gatewayEnvLockNamespace scopes this change's advisory locks so they cannot collide
-// with any other pg_advisory_xact_lock user in the process.
-const gatewayEnvLockNamespace = 4711
+// Advisory lock namespaces, one per pg_advisory_xact_lock user, so their keys cannot collide.
+const (
+	gatewayEnvLockNamespace = 4711
+	a2aProxyLockNamespace   = 4712
+)
+
+// advisoryXactLock takes a transaction-scoped advisory lock on key within namespace, released on
+// commit or rollback. hashtext maps the key to the int4 the two-key lock form takes.
+func advisoryXactLock(tx *gorm.DB, namespace int, key string) error {
+	return tx.Exec("SELECT pg_advisory_xact_lock(?, hashtext(?))", namespace, key).Error
+}
 
 // Transaction runs fn inside a database transaction.
 func (r *GatewayRepo) Transaction(fn func(tx *gorm.DB) error) error {
@@ -589,11 +597,8 @@ func (r *GatewayRepo) Transaction(fn func(tx *gorm.DB) error) error {
 
 // AcquireEnvironmentLock takes a transaction-scoped advisory lock keyed on the
 // environment UUID, serialising concurrent ingress-cap checks for that environment.
-// Released automatically on commit or rollback. hashtext maps the UUID text to the
-// int4 the two-key advisory lock form takes.
 func (r *GatewayRepo) AcquireEnvironmentLock(tx *gorm.DB, environmentID string) error {
-	return tx.Exec("SELECT pg_advisory_xact_lock(?, hashtext(?))",
-		gatewayEnvLockNamespace, environmentID).Error
+	return advisoryXactLock(tx, gatewayEnvLockNamespace, environmentID)
 }
 
 // CreateTx inserts a gateway inside an existing transaction. Mirrors Create,

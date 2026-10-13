@@ -722,3 +722,28 @@ func TestA2AAgentCardMarkFetchedKeepsAnExternalSourceURL(t *testing.T) {
 	require.NoError(t, repo.Enqueue(ctx, again))
 	assert.JSONEq(t, sampleCard, string(cardRowOf(t, card).Card), "the same URL is not a change, so the card survives")
 }
+
+// Only a row ClearCard parked is failed; a due or fetched row keeps showing what it showed.
+func TestA2AAgentCardFailParkedTouchesOnlyAParkedRow(t *testing.T) {
+	repo := NewA2AAgentCardRepository(db.GetDB())
+	ctx := context.Background()
+	parked := newTestCard("fail-parked-"+uuid.New().String()[:8], models.A2AAgentCardSourceExternal)
+	due := newTestCard("fail-due-"+uuid.New().String()[:8], models.A2AAgentCardSourceExternal)
+	for _, card := range []*models.A2AAgentCard{parked, due} {
+		cleanupCard(t, repo, card)
+		require.NoError(t, repo.Enqueue(ctx, card))
+	}
+	require.NoError(t, repo.ClearCard(ctx, parked.OUID, parked.ProjectName, parked.AgentName, parked.EnvironmentUUID))
+
+	for _, card := range []*models.A2AAgentCard{parked, due} {
+		require.NoError(t, repo.FailParked(ctx, card.OUID, card.ProjectName, card.AgentName, card.EnvironmentUUID, "gateway said no"))
+	}
+
+	failed := cardRowOf(t, parked)
+	assert.Equal(t, models.A2AAgentCardStatusFailed, failed.Status)
+	assert.Equal(t, "gateway said no", failed.LastError)
+	untouched := cardRowOf(t, due)
+	assert.Equal(t, models.A2AAgentCardStatusPending, untouched.Status)
+	assert.Empty(t, untouched.LastError)
+	assert.NotNil(t, untouched.NextAttemptAt)
+}

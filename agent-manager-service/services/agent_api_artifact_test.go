@@ -84,3 +84,31 @@ func TestEnsureAgentEnvAPIArtifactReturnsTheWinnerOutsideATransaction(t *testing
 	require.NoError(t, err)
 	assert.Equal(t, winner.UUID, got.UUID)
 }
+
+// An agent's prefix must not match a longer agent name, or a name its LIKE wildcards would.
+func TestListByHandlePrefixFindsOnlyThatAgentsArtifacts(t *testing.T) {
+	artifacts := repositories.NewArtifactRepo(db.GetDB())
+	ouID := "ou-" + uuid.New().String()[:8]
+	create := func(agentName string) *models.Artifact {
+		envID := uuid.New().String()
+		a := &models.Artifact{
+			UUID: uuid.New(), Handle: agentEnvAPIArtifactHandle("checkout", agentName, envID),
+			Name: agentName + "-" + envID[:8], Version: "v1.0", Kind: models.KindAgent, OUID: ouID,
+		}
+		require.NoError(t, artifacts.Create(db.GetDB(), a))
+		t.Cleanup(func() { _ = artifacts.Delete(db.GetDB(), a.UUID.String()) })
+		return a
+	}
+	dev, qa := create("we_ther"), create("we_ther")
+	create("we_ther-2")
+	create("weather")
+
+	got, err := artifacts.ListByHandlePrefix(models.KindAgent, agentAPIArtifactHandlePrefix("checkout", "we_ther"), ouID)
+
+	require.NoError(t, err)
+	gotUUIDs := make([]uuid.UUID, 0, len(got))
+	for _, a := range got {
+		gotUUIDs = append(gotUUIDs, a.UUID)
+	}
+	assert.ElementsMatch(t, []uuid.UUID{dev.UUID, qa.UUID}, gotUUIDs)
+}

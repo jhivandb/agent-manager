@@ -96,24 +96,10 @@ func (s *a2aAgentCardService) RefreshA2AAgentCard(
 		if err := s.requireDeployed(ctx, ouID, agent.Name, envName); err != nil {
 			return err
 		}
-		return s.enqueue(ctx, agent, ouID, projectName, env, models.A2AAgentCardSourcePlatform, "")
+		return s.enqueuePlatform(ctx, agent, ouID, projectName, env)
 	}
-	proxied, err := s.isProxied(ctx, agent, ouID, projectName, env)
-	if err != nil {
-		return err
-	}
-	if proxied {
-		// A requeue would un-park the card before the gateway has the republished Agent.
-		return s.proxyHooks.OnCardRefresh(ctx, agent, ouID, projectName, env)
-	}
-	// Update-only, so a concurrent remove can't be undone by an upsert.
-	if err := s.cardRepo.Requeue(ctx, ouID, projectName, agentName, envName); err != nil {
-		if errors.Is(err, repositories.ErrA2AAgentCardNotFound) {
-			return utils.ErrAgentCardNotFound
-		}
-		return fmt.Errorf("failed to queue agent card fetch: %w", err)
-	}
-	return s.dropIfAgentGone(ctx, agent, ouID, projectName, envName)
+	// A plain requeue would un-park a proxied card before the gateway has the republished Agent.
+	return s.proxyHooks.RefreshCardSource(ctx, agent, ouID, projectName, env)
 }
 
 // requireDeployed refuses a platform fetch the card worker could only wait out and fail.
@@ -143,7 +129,7 @@ func (s *a2aAgentCardService) SetA2ACardSource(
 	if err := validateCardSourceURL(ctx, sourceURL); err != nil {
 		return err
 	}
-	err = s.storeSource(ctx, agent, ouID, projectName, env, sourceURL)
+	err = s.proxyHooks.StoreCardSource(ctx, agent, ouID, projectName, env, sourceURL)
 	recordCardSourceChange(ctx, audit.ActionAgentSetCardSource, agent, ouID, projectName, envName, err,
 		audit.Detail("sourceUrl", sourceURL))
 	return err
@@ -160,7 +146,7 @@ func (s *a2aAgentCardService) DeleteA2ACardSource(
 	if err != nil {
 		return err
 	}
-	err = s.removeSource(ctx, agent, ouID, projectName, env)
+	err = s.proxyHooks.RemoveCardSource(ctx, agent, ouID, projectName, env)
 	recordCardSourceChange(ctx, audit.ActionAgentRemoveCardSource, agent, ouID, projectName, envName, err)
 	return err
 }
@@ -181,55 +167,9 @@ func recordCardSourceChange(
 	audit.Record(ctx, action, opts...)
 }
 
-// isProxied reports whether the environment routes the agent through its gateway.
-func (s *a2aAgentCardService) isProxied(
+// enqueuePlatform queues a fetch of a platform agent's card; external sources go through the proxy hooks.
+func (s *a2aAgentCardService) enqueuePlatform(
 	ctx context.Context, agent *models.AgentResponse, ouID, projectName string, env *models.EnvironmentResponse,
-) (bool, error) {
-	envUUID, err := uuid.Parse(env.UUID)
-	if err != nil {
-		return false, fmt.Errorf("invalid UUID for environment %s: %w", env.Name, err)
-	}
-	return s.proxyHooks.IsProxied(ctx, ouID, projectName, agent.Name, envUUID)
-}
-
-// storeSource writes the URL directly, or on a proxied environment lets the proxy write, park and republish in one transaction.
-func (s *a2aAgentCardService) storeSource(
-	ctx context.Context, agent *models.AgentResponse, ouID, projectName string, env *models.EnvironmentResponse, sourceURL string,
-) error {
-	proxied, err := s.isProxied(ctx, agent, ouID, projectName, env)
-	if err != nil {
-		return err
-	}
-	if proxied {
-		return s.proxyHooks.OnCardSourceChanged(ctx, agent, ouID, projectName, env, sourceURL)
-	}
-	return s.enqueue(ctx, agent, ouID, projectName, env, models.A2AAgentCardSourceExternal, sourceURL)
-}
-
-// removeSource deletes the card row; on a proxied environment the proxy also switches to direct, in one transaction.
-func (s *a2aAgentCardService) removeSource(
-	ctx context.Context, agent *models.AgentResponse, ouID, projectName string, env *models.EnvironmentResponse,
-) error {
-	proxied, err := s.isProxied(ctx, agent, ouID, projectName, env)
-	if err != nil {
-		return err
-	}
-	if proxied {
-		err := s.proxyHooks.OnCardSourceRemoved(ctx, agent, ouID, projectName, env)
-		if !errors.Is(err, utils.ErrEnvironmentNotProxied) {
-			return err
-		}
-		// The proxy was removed meanwhile; only the card row is left to delete.
-	}
-	if err := s.cardRepo.DeleteForAgentEnv(ctx, ouID, projectName, agent.Name, env.Name); err != nil {
-		return fmt.Errorf("failed to delete agent card: %w", err)
-	}
-	return nil
-}
-
-func (s *a2aAgentCardService) enqueue(
-	ctx context.Context, agent *models.AgentResponse, ouID, projectName string, env *models.EnvironmentResponse,
-	source models.A2AAgentCardSource, sourceURL string,
 ) error {
 	envUUID, err := uuid.Parse(env.UUID)
 	if err != nil {
@@ -241,8 +181,7 @@ func (s *a2aAgentCardService) enqueue(
 		AgentName:       agent.Name,
 		EnvironmentName: env.Name,
 		EnvironmentUUID: envUUID,
-		Source:          source,
-		SourceURL:       sourceURL,
+		Source:          models.A2AAgentCardSourcePlatform,
 	}
 	if err := s.cardRepo.Enqueue(ctx, card); err != nil {
 		return fmt.Errorf("failed to queue agent card fetch: %w", err)

@@ -34,6 +34,9 @@ import (
 //			GetByUUIDFunc: func(artifactUUID string, orgUUID string) (*models.Artifact, error) {
 //				panic("mock out the GetByUUID method")
 //			},
+//			ListByHandlePrefixFunc: func(kind string, handlePrefix string, orgUUID string) ([]*models.Artifact, error) {
+//				panic("mock out the ListByHandlePrefix method")
+//			},
 //			UpdateFunc: func(tx *gorm.DB, artifact *models.Artifact) error {
 //				panic("mock out the Update method")
 //			},
@@ -64,6 +67,9 @@ type ArtifactRepositoryMock struct {
 
 	// GetByUUIDFunc mocks the GetByUUID method.
 	GetByUUIDFunc func(artifactUUID string, orgUUID string) (*models.Artifact, error)
+
+	// ListByHandlePrefixFunc mocks the ListByHandlePrefix method.
+	ListByHandlePrefixFunc func(kind string, handlePrefix string, orgUUID string) ([]*models.Artifact, error)
 
 	// UpdateFunc mocks the Update method.
 	UpdateFunc func(tx *gorm.DB, artifact *models.Artifact) error
@@ -117,6 +123,15 @@ type ArtifactRepositoryMock struct {
 			// OrgUUID is the orgUUID argument value.
 			OrgUUID string
 		}
+		// ListByHandlePrefix holds details about calls to the ListByHandlePrefix method.
+		ListByHandlePrefix []struct {
+			// Kind is the kind argument value.
+			Kind string
+			// HandlePrefix is the handlePrefix argument value.
+			HandlePrefix string
+			// OrgUUID is the orgUUID argument value.
+			OrgUUID string
+		}
 		// Update holds details about calls to the Update method.
 		Update []struct {
 			// Tx is the tx argument value.
@@ -142,6 +157,7 @@ type ArtifactRepositoryMock struct {
 	lockExists              sync.RWMutex
 	lockGetByHandle         sync.RWMutex
 	lockGetByUUID           sync.RWMutex
+	lockListByHandlePrefix  sync.RWMutex
 	lockUpdate              sync.RWMutex
 	lockUpdateCatalogStatus sync.RWMutex
 }
@@ -363,6 +379,46 @@ func (mock *ArtifactRepositoryMock) GetByUUIDCalls() []struct {
 	mock.lockGetByUUID.RLock()
 	calls = mock.calls.GetByUUID
 	mock.lockGetByUUID.RUnlock()
+	return calls
+}
+
+// ListByHandlePrefix calls ListByHandlePrefixFunc.
+func (mock *ArtifactRepositoryMock) ListByHandlePrefix(kind string, handlePrefix string, orgUUID string) ([]*models.Artifact, error) {
+	if mock.ListByHandlePrefixFunc == nil {
+		panic("ArtifactRepositoryMock.ListByHandlePrefixFunc: method is nil but ArtifactRepository.ListByHandlePrefix was just called")
+	}
+	callInfo := struct {
+		Kind         string
+		HandlePrefix string
+		OrgUUID      string
+	}{
+		Kind:         kind,
+		HandlePrefix: handlePrefix,
+		OrgUUID:      orgUUID,
+	}
+	mock.lockListByHandlePrefix.Lock()
+	mock.calls.ListByHandlePrefix = append(mock.calls.ListByHandlePrefix, callInfo)
+	mock.lockListByHandlePrefix.Unlock()
+	return mock.ListByHandlePrefixFunc(kind, handlePrefix, orgUUID)
+}
+
+// ListByHandlePrefixCalls gets all the calls that were made to ListByHandlePrefix.
+// Check the length with:
+//
+//	len(mockedArtifactRepository.ListByHandlePrefixCalls())
+func (mock *ArtifactRepositoryMock) ListByHandlePrefixCalls() []struct {
+	Kind         string
+	HandlePrefix string
+	OrgUUID      string
+} {
+	var calls []struct {
+		Kind         string
+		HandlePrefix string
+		OrgUUID      string
+	}
+	mock.lockListByHandlePrefix.RLock()
+	calls = mock.calls.ListByHandlePrefix
+	mock.lockListByHandlePrefix.RUnlock()
 	return calls
 }
 

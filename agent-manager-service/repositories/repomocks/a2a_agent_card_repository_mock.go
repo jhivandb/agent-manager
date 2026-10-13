@@ -45,6 +45,9 @@ import (
 //			EnqueueFunc: func(ctx context.Context, card *models.A2AAgentCard) error {
 //				panic("mock out the Enqueue method")
 //			},
+//			FailParkedFunc: func(ctx context.Context, ouID string, projectName string, agentName string, environmentUUID uuid.UUID, lastErr string) error {
+//				panic("mock out the FailParked method")
+//			},
 //			GetFunc: func(ctx context.Context, ouID string, projectName string, agentName string, environmentName string) (*models.A2AAgentCard, error) {
 //				panic("mock out the Get method")
 //			},
@@ -96,6 +99,9 @@ type A2AAgentCardRepositoryMock struct {
 
 	// EnqueueFunc mocks the Enqueue method.
 	EnqueueFunc func(ctx context.Context, card *models.A2AAgentCard) error
+
+	// FailParkedFunc mocks the FailParked method.
+	FailParkedFunc func(ctx context.Context, ouID string, projectName string, agentName string, environmentUUID uuid.UUID, lastErr string) error
 
 	// GetFunc mocks the Get method.
 	GetFunc func(ctx context.Context, ouID string, projectName string, agentName string, environmentName string) (*models.A2AAgentCard, error)
@@ -202,6 +208,21 @@ type A2AAgentCardRepositoryMock struct {
 			// Card is the card argument value.
 			Card *models.A2AAgentCard
 		}
+		// FailParked holds details about calls to the FailParked method.
+		FailParked []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// OuID is the ouID argument value.
+			OuID string
+			// ProjectName is the projectName argument value.
+			ProjectName string
+			// AgentName is the agentName argument value.
+			AgentName string
+			// EnvironmentUUID is the environmentUUID argument value.
+			EnvironmentUUID uuid.UUID
+			// LastErr is the lastErr argument value.
+			LastErr string
+		}
 		// Get holds details about calls to the Get method.
 		Get []struct {
 			// Ctx is the ctx argument value.
@@ -292,6 +313,7 @@ type A2AAgentCardRepositoryMock struct {
 	lockDeleteIfUnchanged         sync.RWMutex
 	lockDeletePlatformForAgentEnv sync.RWMutex
 	lockEnqueue                   sync.RWMutex
+	lockFailParked                sync.RWMutex
 	lockGet                       sync.RWMutex
 	lockListForAgent              sync.RWMutex
 	lockMarkAttemptFailed         sync.RWMutex
@@ -638,6 +660,58 @@ func (mock *A2AAgentCardRepositoryMock) EnqueueCalls() []struct {
 	mock.lockEnqueue.RLock()
 	calls = mock.calls.Enqueue
 	mock.lockEnqueue.RUnlock()
+	return calls
+}
+
+// FailParked calls FailParkedFunc.
+func (mock *A2AAgentCardRepositoryMock) FailParked(ctx context.Context, ouID string, projectName string, agentName string, environmentUUID uuid.UUID, lastErr string) error {
+	if mock.FailParkedFunc == nil {
+		panic("A2AAgentCardRepositoryMock.FailParkedFunc: method is nil but A2AAgentCardRepository.FailParked was just called")
+	}
+	callInfo := struct {
+		Ctx             context.Context
+		OuID            string
+		ProjectName     string
+		AgentName       string
+		EnvironmentUUID uuid.UUID
+		LastErr         string
+	}{
+		Ctx:             ctx,
+		OuID:            ouID,
+		ProjectName:     projectName,
+		AgentName:       agentName,
+		EnvironmentUUID: environmentUUID,
+		LastErr:         lastErr,
+	}
+	mock.lockFailParked.Lock()
+	mock.calls.FailParked = append(mock.calls.FailParked, callInfo)
+	mock.lockFailParked.Unlock()
+	return mock.FailParkedFunc(ctx, ouID, projectName, agentName, environmentUUID, lastErr)
+}
+
+// FailParkedCalls gets all the calls that were made to FailParked.
+// Check the length with:
+//
+//	len(mockedA2AAgentCardRepository.FailParkedCalls())
+func (mock *A2AAgentCardRepositoryMock) FailParkedCalls() []struct {
+	Ctx             context.Context
+	OuID            string
+	ProjectName     string
+	AgentName       string
+	EnvironmentUUID uuid.UUID
+	LastErr         string
+} {
+	var calls []struct {
+		Ctx             context.Context
+		OuID            string
+		ProjectName     string
+		AgentName       string
+		EnvironmentUUID uuid.UUID
+		LastErr         string
+	}
+	mock.lockFailParked.RLock()
+	calls = mock.calls.FailParked
+	mock.lockFailParked.RUnlock()
 	return calls
 }
 

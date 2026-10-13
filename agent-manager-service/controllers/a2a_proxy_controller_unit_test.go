@@ -111,6 +111,7 @@ func TestA2AProxyErrorsMapToStatusCodes(t *testing.T) {
 	for sentinel, code := range map[error]int{
 		utils.ErrEnvironmentNotProxied:    http.StatusNotFound,
 		utils.ErrA2AProxyNeedsCardSource:  http.StatusConflict,
+		utils.ErrA2ACardURLNotProxyable:   http.StatusBadRequest,
 		utils.ErrInvalidUpstreamAuth:      http.StatusBadRequest,
 		utils.ErrA2AProxyAgentNotExternal: http.StatusBadRequest,
 		utils.ErrAgentNotA2A:              http.StatusBadRequest,

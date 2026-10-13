@@ -2878,9 +2878,10 @@ func (s *agentManagerService) deleteAgentAPIArtifact(ctx context.Context, ouID, 
 		}
 	}
 
-	pipeline, err := s.ocClient.GetProjectDeploymentPipeline(ctx, ouID, projectName)
+	// Listed by handle, not by pipeline: routing can put an artifact in any org environment.
+	artifacts, err := s.artifactRepo.ListByHandlePrefix(models.KindAgent, agentAPIArtifactHandlePrefix(projectName, agentName), ouID)
 	if err != nil {
-		s.logger.Warn("Failed to get deployment pipeline for agent API artifact cleanup", "agentName", agentName, "error", err)
+		s.logger.Error("Failed to list agent API artifacts for cleanup; deleting the agent again retries it", "agentName", agentName, "error", err)
 		return
 	}
 
@@ -2889,32 +2890,16 @@ func (s *agentManagerService) deleteAgentAPIArtifact(ctx context.Context, ouID, 
 		gatewayIDs []string
 	}
 	var deleted []deletedArtifact
-	for environmentName := range allPipelineEnvironmentNames(pipeline.PromotionPaths) {
-		// The terminal promotion path carries a " " placeholder target.
-		if strings.TrimSpace(environmentName) == "" {
-			continue
-		}
-		environment, envErr := s.ocClient.GetEnvironment(ctx, ouID, environmentName)
-		if envErr != nil {
-			s.logger.Warn("Failed to get environment for agent API artifact cleanup", "agentName", agentName, "environment", environmentName, "error", envErr)
-			continue
-		}
-		artifact, getErr := s.artifactRepo.GetByHandle(agentEnvAPIArtifactHandle(projectName, agentName, environment.UUID), ouID)
-		if getErr != nil {
-			if !errors.Is(getErr, utils.ErrArtifactNotFound) {
-				s.logger.Warn("Failed to look up agent API artifact for cleanup", "agentName", agentName, "environment", environmentName, "error", getErr)
-			}
-			continue
-		}
+	for _, artifact := range artifacts {
 		gatewayIDs := collectA2AAgentDeletionTargets(s.deploymentRepo, s.gatewayRepo, artifact.UUID, ouID, isA2AAgent, s.logger)
 		if delErr := s.artifactRepo.Delete(s.db, artifact.UUID.String()); delErr != nil {
-			s.logger.Warn("Failed to delete agent API artifact record", "agentName", agentName, "environment", environmentName, "environmentUUID", environment.UUID, "error", delErr)
+			s.logger.Warn("Failed to delete agent API artifact record", "agentName", agentName, "handle", artifact.Handle, "error", delErr)
 		}
 		deleted = append(deleted, deletedArtifact{uuid: artifact.UUID, gatewayIDs: gatewayIDs})
 	}
 
 	for _, d := range deleted {
-		sendA2AAgentDeletion(ctx, s.gatewayEventsService, d.uuid, d.gatewayIDs, s.logger)
+		sendA2AAgentWithdrawal(ctx, s.gatewayEventsService, d.uuid, d.gatewayIDs, false, s.logger)
 	}
 }
 

@@ -8028,7 +8028,10 @@ paths:
         "202":
           description: Source saved and fetch queued
         "400":
-          description: Invalid URL, or the agent is not an external A2A agent
+          description: >-
+            Invalid URL, the agent is not an external A2A agent, or the environment routes the agent
+            through its gateway and the gateway cannot fetch the card from this URL (it must end in
+            /.well-known/agent-card.json with no query)
           content:
             application/json:
               schema:
@@ -8153,7 +8156,9 @@ paths:
         "202":
           description: Saved; the gateway publication is queued
         "400":
-          description: Invalid upstream auth, or the agent is not an external A2A agent
+          description: >-
+            Invalid upstream auth, the agent is not an external A2A agent, or the gateway cannot fetch
+            the card from the registered URL (it must end in /.well-known/agent-card.json with no query)
           content:
             application/json:
               schema:
@@ -8199,6 +8204,12 @@ paths:
       responses:
         "204":
           description: The environment is direct again
+        "400":
+          description: The agent is not an external A2A agent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "403":
           description: Missing the environment tier permission
           content:
@@ -8234,6 +8245,12 @@ paths:
       responses:
         "202":
           description: Republish queued; the card is fetched again once it lands
+        "400":
+          description: The agent is not an external A2A agent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "403":
           description: Missing the environment tier permission
           content:

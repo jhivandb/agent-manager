@@ -96,6 +96,7 @@ var (
 	ErrEnvironmentNotProxied         = errors.New("the environment does not route this agent through its gateway")
 	ErrA2AProxyAgentNotExternal      = errors.New("only external A2A agents can be routed through the gateway")
 	ErrA2AProxyNeedsCardSource       = errors.New("register the agent's card URL for this environment before routing it through the gateway")
+	ErrA2ACardURLNotProxyable        = errors.New("the card URL cannot be routed through the gateway")
 	ErrInvalidUpstreamAuth           = errors.New("invalid upstream auth")
 	ErrTraitNotFound                 = errors.New("trait not found")
 	ErrOrganizationNotFound          = errors.New("organization not found")

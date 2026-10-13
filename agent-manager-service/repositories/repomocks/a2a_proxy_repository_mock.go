@@ -34,6 +34,9 @@ import (
 //			GetByEnvUUIDFunc: func(ctx context.Context, ouID string, projectName string, agentName string, environmentUUID uuid.UUID) (*models.A2AProxy, error) {
 //				panic("mock out the GetByEnvUUID method")
 //			},
+//			LockAgentEnvFunc: func(ctx context.Context, ouID string, projectName string, agentName string, environmentUUID uuid.UUID) error {
+//				panic("mock out the LockAgentEnv method")
+//			},
 //			UpsertFunc: func(ctx context.Context, proxy *models.A2AProxy) error {
 //				panic("mock out the Upsert method")
 //			},
@@ -61,6 +64,9 @@ type A2AProxyRepositoryMock struct {
 
 	// GetByEnvUUIDFunc mocks the GetByEnvUUID method.
 	GetByEnvUUIDFunc func(ctx context.Context, ouID string, projectName string, agentName string, environmentUUID uuid.UUID) (*models.A2AProxy, error)
+
+	// LockAgentEnvFunc mocks the LockAgentEnv method.
+	LockAgentEnvFunc func(ctx context.Context, ouID string, projectName string, agentName string, environmentUUID uuid.UUID) error
 
 	// UpsertFunc mocks the Upsert method.
 	UpsertFunc func(ctx context.Context, proxy *models.A2AProxy) error
@@ -129,6 +135,19 @@ type A2AProxyRepositoryMock struct {
 			// EnvironmentUUID is the environmentUUID argument value.
 			EnvironmentUUID uuid.UUID
 		}
+		// LockAgentEnv holds details about calls to the LockAgentEnv method.
+		LockAgentEnv []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// OuID is the ouID argument value.
+			OuID string
+			// ProjectName is the projectName argument value.
+			ProjectName string
+			// AgentName is the agentName argument value.
+			AgentName string
+			// EnvironmentUUID is the environmentUUID argument value.
+			EnvironmentUUID uuid.UUID
+		}
 		// Upsert holds details about calls to the Upsert method.
 		Upsert []struct {
 			// Ctx is the ctx argument value.
@@ -147,6 +166,7 @@ type A2AProxyRepositoryMock struct {
 	lockDeleteForEnvironment sync.RWMutex
 	lockGet                  sync.RWMutex
 	lockGetByEnvUUID         sync.RWMutex
+	lockLockAgentEnv         sync.RWMutex
 	lockUpsert               sync.RWMutex
 	lockWithTx               sync.RWMutex
 }
@@ -376,6 +396,54 @@ func (mock *A2AProxyRepositoryMock) GetByEnvUUIDCalls() []struct {
 	mock.lockGetByEnvUUID.RLock()
 	calls = mock.calls.GetByEnvUUID
 	mock.lockGetByEnvUUID.RUnlock()
+	return calls
+}
+
+// LockAgentEnv calls LockAgentEnvFunc.
+func (mock *A2AProxyRepositoryMock) LockAgentEnv(ctx context.Context, ouID string, projectName string, agentName string, environmentUUID uuid.UUID) error {
+	if mock.LockAgentEnvFunc == nil {
+		panic("A2AProxyRepositoryMock.LockAgentEnvFunc: method is nil but A2AProxyRepository.LockAgentEnv was just called")
+	}
+	callInfo := struct {
+		Ctx             context.Context
+		OuID            string
+		ProjectName     string
+		AgentName       string
+		EnvironmentUUID uuid.UUID
+	}{
+		Ctx:             ctx,
+		OuID:            ouID,
+		ProjectName:     projectName,
+		AgentName:       agentName,
+		EnvironmentUUID: environmentUUID,
+	}
+	mock.lockLockAgentEnv.Lock()
+	mock.calls.LockAgentEnv = append(mock.calls.LockAgentEnv, callInfo)
+	mock.lockLockAgentEnv.Unlock()
+	return mock.LockAgentEnvFunc(ctx, ouID, projectName, agentName, environmentUUID)
+}
+
+// LockAgentEnvCalls gets all the calls that were made to LockAgentEnv.
+// Check the length with:
+//
+//	len(mockedA2AProxyRepository.LockAgentEnvCalls())
+func (mock *A2AProxyRepositoryMock) LockAgentEnvCalls() []struct {
+	Ctx             context.Context
+	OuID            string
+	ProjectName     string
+	AgentName       string
+	EnvironmentUUID uuid.UUID
+} {
+	var calls []struct {
+		Ctx             context.Context
+		OuID            string
+		ProjectName     string
+		AgentName       string
+		EnvironmentUUID uuid.UUID
+	}
+	mock.lockLockAgentEnv.RLock()
+	calls = mock.calls.LockAgentEnv
+	mock.lockLockAgentEnv.RUnlock()
 	return calls
 }
 

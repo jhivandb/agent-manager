@@ -28,7 +28,11 @@ import (
 )
 
 func agentEnvAPIArtifactHandle(projectName, agentName, environmentID string) string {
-	return fmt.Sprintf("%s/%s/%s", projectName, agentName, environmentID)
+	return agentAPIArtifactHandlePrefix(projectName, agentName) + environmentID
+}
+
+func agentAPIArtifactHandlePrefix(projectName, agentName string) string {
+	return fmt.Sprintf("%s/%s/", projectName, agentName)
 }
 
 func ensureAgentEnvAPIArtifact(

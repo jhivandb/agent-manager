@@ -621,6 +621,7 @@ func (h *a2aReconcilerHarness) withExternalOrigin(pub *models.A2APublication) {
 	}
 	h.cardRepo.EnqueueFunc = nil // an upsert would rewrite the registered source
 	h.cardRepo.RequeueFunc = func(context.Context, string, string, string, string) error { return nil }
+	h.cardRepo.FailParkedFunc = func(context.Context, string, string, string, uuid.UUID, string) error { return nil }
 	h.fetcher.FetchFunc = func(context.Context, string, bool) (json.RawMessage, error) {
 		return json.RawMessage(originTestCard), nil
 	}
@@ -670,6 +671,11 @@ func TestReconcilerFailsAnUnproxyableExternalRowAtOnce(t *testing.T) {
 	assert.Empty(t, h.pubRepo.MarkAttemptFailedCalls())
 	assert.Empty(t, h.fetcher.calls, "a URL the gateway cannot fetch from is rejected before any network call")
 	assert.Empty(t, h.deploymentRepo.CreateWithLimitEnforcementCalls())
+	cardFailed := h.cardRepo.FailParkedCalls()
+	require.Len(t, cardFailed, 1, "the parked card says why it will not arrive instead of staying pending")
+	assert.Contains(t, cardFailed[0].LastErr, "/.well-known/agent-card.json")
+	assert.Equal(t, pub.EnvironmentUUID, cardFailed[0].EnvironmentUUID)
+	assert.Empty(t, h.cardRepo.RequeueCalls())
 }
 
 func TestReconcilerFailsAnExternalRowWhoseProxyIsGone(t *testing.T) {
@@ -719,7 +725,7 @@ func TestReconcilerWithdrawsAnAgentTornDownMidPublish(t *testing.T) {
 	require.Len(t, deleted, 1)
 	assert.Equal(t, pub.ArtifactUUID, deleted[0].ArtifactUUID)
 	require.Len(t, h.hub.published, 2, "the deploy event, then its withdrawal")
-	assert.Equal(t, pub.ArtifactUUID.String(), deletedAgentID(t, h.hub.published[1]))
+	assert.Equal(t, pub.ArtifactUUID.String(), undeployedAgentID(t, h.hub.published[1]), "the artifact and its keys may still be wanted")
 	assert.Empty(t, h.cardRepo.RequeueCalls())
 }
 

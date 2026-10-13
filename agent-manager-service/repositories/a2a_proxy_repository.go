@@ -19,6 +19,7 @@ package repositories
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -37,6 +38,10 @@ var ErrA2AProxyNotFound = errors.New("a2a proxy not found")
 type A2AProxyRepository interface {
 	// WithTx returns the repository bound to tx, so its writes commit or roll back with the caller's.
 	WithTx(tx *gorm.DB) A2AProxyRepository
+
+	// LockAgentEnv serialises the environment's proxy transitions until the transaction ends; call it
+	// first, on WithTx, so every transition takes its row locks in the same order.
+	LockAgentEnv(ctx context.Context, ouID, projectName, agentName string, environmentUUID uuid.UUID) error
 
 	// Get looks the row up by the environment name in the URL path.
 	Get(ctx context.Context, ouID, projectName, agentName, environmentName string) (*models.A2AProxy, error)
@@ -65,6 +70,14 @@ func NewA2AProxyRepository(db *gorm.DB) A2AProxyRepository {
 
 func (r *a2aProxyRepository) WithTx(tx *gorm.DB) A2AProxyRepository {
 	return &a2aProxyRepository{db: tx}
+}
+
+func (r *a2aProxyRepository) LockAgentEnv(ctx context.Context, ouID, projectName, agentName string, environmentUUID uuid.UUID) error {
+	return advisoryXactLock(r.db.WithContext(ctx), a2aProxyLockNamespace, a2aProxyLockKey(ouID, projectName, agentName, environmentUUID))
+}
+
+func a2aProxyLockKey(ouID, projectName, agentName string, environmentUUID uuid.UUID) string {
+	return strings.Join([]string{ouID, projectName, agentName, environmentUUID.String()}, "/")
 }
 
 func (r *a2aProxyRepository) Get(ctx context.Context, ouID, projectName, agentName, environmentName string) (*models.A2AProxy, error) {

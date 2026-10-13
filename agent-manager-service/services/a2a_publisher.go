@@ -41,10 +41,12 @@ type a2aPublicationKey struct {
 	AgentUUID *uuid.UUID
 }
 
-// a2aTeardown is an environment's gateway deletion, sent once its DB work has committed.
+// a2aTeardown is an environment's gateway withdrawal, sent once its DB work has committed.
 type a2aTeardown struct {
 	artifactUUID uuid.UUID
 	gatewayIDs   []string
+	// dropsArtifact deletes the gateway's Agent with its API keys; otherwise it is undeployed and keeps them.
+	dropsArtifact bool
 }
 
 // TxRunner opens one database transaction and runs fn inside it, so a unit test can hand fn a sentinel.
@@ -166,6 +168,7 @@ func (p *A2APublisher) TeardownEnvAndDropArtifact(
 	if err != nil {
 		return a2aTeardown{}, err
 	}
+	teardown.dropsArtifact = true
 	if artifactUUID == uuid.Nil {
 		return teardown, nil
 	}
@@ -176,9 +179,9 @@ func (p *A2APublisher) TeardownEnvAndDropArtifact(
 	return teardown, nil
 }
 
-// SendTeardown tells each gateway to drop the torn-down Agent; best effort.
+// SendTeardown tells each gateway to stop serving the torn-down Agent; best effort.
 func (p *A2APublisher) SendTeardown(ctx context.Context, t a2aTeardown) {
-	sendA2AAgentDeletion(ctx, p.events, t.artifactUUID, t.gatewayIDs, p.logger)
+	sendA2AAgentWithdrawal(ctx, p.events, t.artifactUUID, t.gatewayIDs, !t.dropsArtifact, p.logger)
 }
 
 // DeleteForAgent drops the agent's publication and proxy rows; deleteAgentAPIArtifact tells the gateways.
@@ -206,7 +209,6 @@ func (p *A2APublisher) TeardownEnvironment(ctx context.Context, ouID string, env
 		teardown, err := p.teardownDeletedEnv(ctx, pub)
 		if err != nil {
 			errs = append(errs, err)
-			continue
 		}
 		teardowns = append(teardowns, teardown)
 	}
@@ -224,6 +226,7 @@ func (p *A2APublisher) TeardownEnvironment(ctx context.Context, ouID string, env
 }
 
 // teardownDeletedEnv removes one publication together with its artifact, which a deleted environment no longer needs.
+// On failure it still returns the teardown to send; agent deletion sweeps the artifact left behind.
 func (p *A2APublisher) teardownDeletedEnv(ctx context.Context, pub models.A2APublication) (a2aTeardown, error) {
 	key := a2aPublicationKey{
 		OUID: pub.OUID, ProjectName: pub.ProjectName, AgentName: pub.AgentName,
@@ -236,7 +239,12 @@ func (p *A2APublisher) teardownDeletedEnv(ctx context.Context, pub models.A2APub
 		return err
 	})
 	if err != nil {
-		return a2aTeardown{}, fmt.Errorf("agent %s: %w", pub.AgentName, err)
+		// The environment's rows go regardless, so the gateways must drop the Agent now or never.
+		return a2aTeardown{
+			artifactUUID:  pub.ArtifactUUID,
+			gatewayIDs:    collectA2AAgentDeletionTargets(p.deploymentRepo, p.gatewayRepo, pub.ArtifactUUID, pub.OUID, true, p.logger),
+			dropsArtifact: true,
+		}, fmt.Errorf("agent %s: %w", pub.AgentName, err)
 	}
 	return teardown, nil
 }

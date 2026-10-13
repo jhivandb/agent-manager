@@ -188,7 +188,7 @@ func TestA2APublisherTeardownEnvKeepsTheArtifactAndWaitsToTellTheGateway(t *test
 	publisher.SendTeardown(context.Background(), teardown)
 	require.Len(t, m.hub.published, 1)
 	assert.Equal(t, "gw-1", m.hub.published[0].GatewayID)
-	assert.Equal(t, artifactUUID.String(), deletedAgentID(t, m.hub.published[0]))
+	assert.Equal(t, artifactUUID.String(), undeployedAgentID(t, m.hub.published[0]))
 }
 
 func TestA2APublisherDeleteForAgentDropsPublicationsAndProxies(t *testing.T) {
@@ -271,11 +271,13 @@ func TestA2APublisherTeardownEnvironmentRemovesEverythingAndTellsTheGateways(t *
 	assert.Equal(t, artifactUUID.String(), deletedAgentID(t, m.hub.published[0]))
 }
 
-// One agent's failure does not keep the environment's other rows alive.
+// One agent's failure does not keep the environment's other rows alive, and its gateways are
+// still told: with its rows gone nothing could find the Agent to stop it later.
 func TestA2APublisherTeardownEnvironmentStillDropsTheRowsAfterAFailure(t *testing.T) {
 	m := newPublisherMocks(t)
+	artifactUUID := uuid.New()
 	m.pubs.ListForEnvironmentFunc = func(context.Context, string, uuid.UUID) ([]models.A2APublication, error) {
-		return []models.A2APublication{{AgentName: "weather", ArtifactUUID: uuid.New()}}, nil
+		return []models.A2APublication{{AgentName: "weather", ArtifactUUID: artifactUUID}}, nil
 	}
 	m.txErr = assert.AnError // every per-row transaction fails to commit
 	m.pubs.DeleteForEnvironmentFunc = func(context.Context, string, uuid.UUID) error { return nil }
@@ -286,5 +288,7 @@ func TestA2APublisherTeardownEnvironmentStillDropsTheRowsAfterAFailure(t *testin
 	assert.ErrorIs(t, err, assert.AnError)
 	assert.Len(t, m.pubs.DeleteForEnvironmentCalls(), 1)
 	assert.Len(t, m.proxies.DeleteForEnvironmentCalls(), 1)
-	assert.Empty(t, m.hub.published, "a teardown that did not commit is not announced")
+	require.Len(t, m.hub.published, 1)
+	assert.Equal(t, "gw-1", m.hub.published[0].GatewayID)
+	assert.Equal(t, artifactUUID.String(), deletedAgentID(t, m.hub.published[0]))
 }

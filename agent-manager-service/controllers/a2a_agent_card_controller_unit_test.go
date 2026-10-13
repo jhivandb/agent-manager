@@ -53,6 +53,7 @@ func cardSourceRequest(body string) *http.Request {
 func TestSetAgentCardSourceErrorsMapToStatusCodes(t *testing.T) {
 	for sentinel, code := range map[error]int{
 		utils.ErrA2AProxyOriginChangeNeedsAuthReset: http.StatusConflict,
+		utils.ErrA2ACardURLNotProxyable:             http.StatusBadRequest,
 		utils.ErrInvalidURL:                         http.StatusBadRequest,
 		utils.ErrAgentCardSourceNotExternal:         http.StatusBadRequest,
 	} {

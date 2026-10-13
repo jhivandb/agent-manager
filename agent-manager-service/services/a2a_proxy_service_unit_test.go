@@ -53,6 +53,8 @@ type proxyHarness struct {
 	configs, txConfigs *repomocks.AgentConfigRepositoryMock
 	oc                 *clientmocks.OpenChoreoClientMock
 	artifactUUID       uuid.UUID
+	// steps records the order of the transition lock and the proxy reads.
+	steps []string
 }
 
 func newProxyHarness(t *testing.T) *proxyHarness {
@@ -71,7 +73,12 @@ func newProxyHarness(t *testing.T) *proxyHarness {
 	m.proxies.GetByEnvUUIDFunc = func(context.Context, string, string, string, uuid.UUID) (*models.A2AProxy, error) {
 		return nil, repositories.ErrA2AProxyNotFound
 	}
+	h.txProxies.LockAgentEnvFunc = func(context.Context, string, string, string, uuid.UUID) error {
+		h.steps = append(h.steps, "lock")
+		return nil
+	}
 	h.txProxies.GetByEnvUUIDFunc = func(ctx context.Context, ouID, projectName, agentName string, envUUID uuid.UUID) (*models.A2AProxy, error) {
+		h.steps = append(h.steps, "read-proxy")
 		return m.proxies.GetByEnvUUIDFunc(ctx, ouID, projectName, agentName, envUUID)
 	}
 	h.txCards.GetFunc = func(ctx context.Context, ouID, projectName, agentName, envName string) (*models.A2AAgentCard, error) {
@@ -117,6 +124,19 @@ func (h *proxyHarness) proxied(header, secret string) {
 			EnvironmentUUID: uuid.MustParse(proxyTestEnvUUID), UpstreamAuthHeader: header, UpstreamAuthSecret: secret,
 		}, nil
 	}
+}
+
+// assertNothingWritten checks a refused transition wrote nothing; the transaction it opened rolls back.
+func (h *proxyHarness) assertNothingWritten(t *testing.T) {
+	t.Helper()
+	assert.Empty(t, h.txProxies.UpsertCalls())
+	assert.Empty(t, h.txProxies.DeleteCalls())
+	assert.Empty(t, h.txCards.EnqueueCalls())
+	assert.Empty(t, h.txCards.ClearCardCalls())
+	assert.Empty(t, h.txCards.DeleteForAgentEnvCalls())
+	assert.Empty(t, h.txPubs.EnqueueCalls())
+	assert.Empty(t, h.txPubs.DeleteForAgentEnvCalls())
+	assert.Empty(t, h.txDeployments.DeleteForArtifactCalls())
 }
 
 // acceptsWrites lets every write a transition may make succeed, inside the transaction only.
@@ -192,7 +212,21 @@ func TestSetA2AProxyNeedsARegisteredCardURL(t *testing.T) {
 	err := h.svc.SetA2AProxy(tierGrantedCtx(t), "org-1", "checkout", "weather", "dev", nil)
 
 	assert.ErrorIs(t, err, utils.ErrA2AProxyNeedsCardSource)
-	assert.Zero(t, h.transactions)
+	h.assertNothingWritten(t)
+}
+
+// A URL the gateway could never front is refused before anything parks the card.
+func TestSetA2AProxyRefusesACardURLTheGatewayCannotFront(t *testing.T) {
+	h := newProxyHarness(t)
+	h.cards.GetFunc = func(context.Context, string, string, string, string) (*models.A2AAgentCard, error) {
+		return &models.A2AAgentCard{Source: models.A2AAgentCardSourceExternal, SourceURL: "https://agent.example/card.json"}, nil
+	}
+
+	err := h.svc.SetA2AProxy(tierGrantedCtx(t), "org-1", "checkout", "weather", "dev", nil)
+
+	require.ErrorIs(t, err, utils.ErrA2ACardURLNotProxyable)
+	assert.Contains(t, err.Error(), "/.well-known/agent-card.json")
+	h.assertNothingWritten(t)
 }
 
 // The stored card stays until the fetch after the republish replaces it.
@@ -252,7 +286,7 @@ func TestSetA2AProxySecretSemantics(t *testing.T) {
 
 			if tc.wantErr != nil {
 				assert.ErrorIs(t, err, tc.wantErr)
-				assert.Zero(t, h.transactions)
+				h.assertNothingWritten(t)
 				return
 			}
 			require.NoError(t, err)
@@ -310,7 +344,7 @@ func TestSetA2AProxyRefusesWithoutAnAuditRecord(t *testing.T) {
 	h := newProxyHarness(t)
 	err := h.svc.SetA2AProxy(tierOnlyCtx(), "org-1", "checkout", "weather", "dev", nil)
 	assert.ErrorIs(t, err, audit.ErrRecorderUnavailable)
-	assert.Zero(t, h.transactions)
+	h.assertNothingWritten(t)
 }
 
 func TestDeleteA2AProxyRefusesWithoutAnAuditRecord(t *testing.T) {
@@ -318,7 +352,7 @@ func TestDeleteA2AProxyRefusesWithoutAnAuditRecord(t *testing.T) {
 	h.proxied("X-Key", "c2VjcmV0")
 	err := h.svc.DeleteA2AProxy(tierOnlyCtx(), "org-1", "checkout", "weather", "dev")
 	assert.ErrorIs(t, err, audit.ErrRecorderUnavailable)
-	assert.Zero(t, h.transactions)
+	h.assertNothingWritten(t)
 }
 
 func TestA2AProxyOnADirectEnvironmentIsNotFound(t *testing.T) {
@@ -331,7 +365,60 @@ func TestA2AProxyOnADirectEnvironmentIsNotFound(t *testing.T) {
 	assert.ErrorIs(t, err, utils.ErrEnvironmentNotProxied)
 	assert.ErrorIs(t, h.svc.DeleteA2AProxy(tierGrantedCtx(t), "org-1", "checkout", "weather", "dev"), utils.ErrEnvironmentNotProxied)
 	assert.ErrorIs(t, h.svc.RefreshA2AProxy(tierGrantedCtx(t), "org-1", "checkout", "weather", "dev"), utils.ErrEnvironmentNotProxied)
-	assert.Zero(t, h.transactions)
+	h.assertNothingWritten(t)
+}
+
+// Every transition takes the environment's lock before reading the proxy row, so concurrent ones
+// serialise instead of acting on a stale read or deadlocking on row locks taken in different orders.
+func TestA2AProxyTransitionsLockBeforeReadingTheProxy(t *testing.T) {
+	calls := map[string]func(h *proxyHarness) error{
+		"set": func(h *proxyHarness) error {
+			return h.svc.SetA2AProxy(tierGrantedCtx(t), "org-1", "checkout", "weather", "dev", nil)
+		},
+		"delete": func(h *proxyHarness) error {
+			h.proxied("", "")
+			return h.svc.DeleteA2AProxy(tierGrantedCtx(t), "org-1", "checkout", "weather", "dev")
+		},
+		"refresh": func(h *proxyHarness) error {
+			h.proxied("", "")
+			return h.svc.RefreshA2AProxy(tierGrantedCtx(t), "org-1", "checkout", "weather", "dev")
+		},
+		"card source stored": func(h *proxyHarness) error {
+			h.proxied("", "")
+			return h.svc.StoreCardSource(context.Background(), externalA2AAgent(), "org-1", "checkout", devEnv(),
+				"https://agent.example/v2/.well-known/agent-card.json")
+		},
+	}
+	for name, call := range calls {
+		t.Run(name, func(t *testing.T) {
+			h := newProxyHarness(t)
+			h.acceptsWrites()
+
+			require.NoError(t, call(h))
+
+			require.NotEmpty(t, h.steps)
+			assert.Equal(t, []string{"lock", "read-proxy"}, h.steps[:2])
+			assert.Empty(t, h.proxies.GetByEnvUUIDCalls(), "the proxy row is never read outside the lock")
+		})
+	}
+}
+
+// On a direct environment the URL is stored as is, under the same lock a switch to proxied takes.
+func TestStoreCardSourceQueuesADirectEnvironmentsURL(t *testing.T) {
+	h := newProxyHarness(t)
+	h.acceptsWrites()
+	const url = "https://agent.example/card.json" // fine to fetch directly, though the gateway could not front it
+
+	require.NoError(t, h.svc.StoreCardSource(context.Background(), externalA2AAgent(), "org-1", "checkout", devEnv(), url))
+
+	written := h.txCards.EnqueueCalls()
+	require.Len(t, written, 1)
+	assert.Equal(t, url, written[0].Card.SourceURL)
+	assert.Equal(t, models.A2AAgentCardSourceExternal, written[0].Card.Source)
+	assert.Equal(t, "dev", written[0].Card.EnvironmentName)
+	assert.Equal(t, uuid.MustParse(proxyTestEnvUUID), written[0].Card.EnvironmentUUID)
+	assert.Empty(t, h.txCards.ClearCardCalls(), "the card is fetched from the origin, not parked")
+	assert.Empty(t, h.txPubs.EnqueueCalls())
 }
 
 func TestGetA2AProxyReportsThePublicationState(t *testing.T) {
@@ -369,7 +456,8 @@ func TestGetA2AProxyWithoutAPublicationReportsFailed(t *testing.T) {
 	assert.NotEmpty(t, got.LastError)
 }
 
-// The artifact, and the API keys bound to it, survive a switch to direct.
+// The artifact, and the API keys bound to it, survive a switch to direct: the gateway is told to
+// undeploy, which keeps the Agent's keys, not to delete, which drops them.
 func TestDeleteA2AProxySwitchesOnlyThatEnvironmentToDirect(t *testing.T) {
 	h := newProxyHarness(t)
 	h.acceptsWrites()
@@ -388,7 +476,7 @@ func TestDeleteA2AProxySwitchesOnlyThatEnvironmentToDirect(t *testing.T) {
 	require.Len(t, h.txCards.ClearCardCalls(), 1, "the gateway's card goes")
 	require.Len(t, h.txCards.RequeueCalls(), 1, "and the origin's is fetched directly")
 	require.Len(t, h.hub.published, 1, "the gateway is told once the transaction committed")
-	assert.Equal(t, h.artifactUUID.String(), deletedAgentID(t, h.hub.published[0]))
+	assert.Equal(t, h.artifactUUID.String(), undeployedAgentID(t, h.hub.published[0]))
 }
 
 func TestRefreshA2AProxyQueuesAPublicationNeverARequeue(t *testing.T) {
@@ -460,13 +548,13 @@ func TestSetA2AProxyDropsItsWritesWhenTheAgentIsDeletedMeanwhile(t *testing.T) {
 
 // The URL write, the parking and the republish are one transaction: the row is never due in between.
 // With no stored secret the URL may move to another origin.
-func TestOnCardSourceChangedStoresTheURLParksTheCardAndRepublishes(t *testing.T) {
+func TestStoreCardSourceStoresTheURLParksTheCardAndRepublishes(t *testing.T) {
 	h := newProxyHarness(t)
 	h.acceptsWrites()
 	h.proxied("", "")
 	newURL := "https://other.example/.well-known/agent-card.json"
 
-	require.NoError(t, h.svc.OnCardSourceChanged(context.Background(), externalA2AAgent(), "org-1", "checkout", devEnv(), newURL))
+	require.NoError(t, h.svc.StoreCardSource(context.Background(), externalA2AAgent(), "org-1", "checkout", devEnv(), newURL))
 
 	written := h.txCards.EnqueueCalls()
 	require.Len(t, written, 1, "the URL is written inside the transaction, never on the plain repo")
@@ -479,8 +567,25 @@ func TestOnCardSourceChangedStoresTheURLParksTheCardAndRepublishes(t *testing.T)
 	assert.Equal(t, 1, h.transactions)
 }
 
+func TestStoreCardSourceRefusesACardURLTheGatewayCannotFront(t *testing.T) {
+	for name, newURL := range map[string]string{
+		"another path": "https://agent.example/card.json",
+		"a query":      "https://agent.example/.well-known/agent-card.json?v=1",
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newProxyHarness(t)
+			h.proxied("", "")
+
+			err := h.svc.StoreCardSource(context.Background(), externalA2AAgent(), "org-1", "checkout", devEnv(), newURL)
+
+			require.ErrorIs(t, err, utils.ErrA2ACardURLNotProxyable)
+			h.assertNothingWritten(t)
+		})
+	}
+}
+
 // The stored secret is sent to whatever the card URL names, so it may not follow the URL to another origin.
-func TestOnCardSourceChangedRefusesToMoveAStoredSecretToAnotherOrigin(t *testing.T) {
+func TestStoreCardSourceRefusesToMoveAStoredSecretToAnotherOrigin(t *testing.T) {
 	for name, newURL := range map[string]string{
 		"another host":   "https://attacker.example/.well-known/agent-card.json",
 		"another scheme": "http://agent.example/.well-known/agent-card.json",
@@ -490,7 +595,7 @@ func TestOnCardSourceChangedRefusesToMoveAStoredSecretToAnotherOrigin(t *testing
 			h := newProxyHarness(t)
 			h.proxied("X-Key", "c2VjcmV0")
 
-			err := h.svc.OnCardSourceChanged(context.Background(), externalA2AAgent(), "org-1", "checkout", devEnv(), newURL)
+			err := h.svc.StoreCardSource(context.Background(), externalA2AAgent(), "org-1", "checkout", devEnv(), newURL)
 
 			require.ErrorIs(t, err, utils.ErrA2AProxyOriginChangeNeedsAuthReset)
 			assert.Len(t, h.txProxies.GetByEnvUUIDCalls(), 1, "the proxy is read inside the transaction")
@@ -503,27 +608,27 @@ func TestOnCardSourceChangedRefusesToMoveAStoredSecretToAnotherOrigin(t *testing
 	}
 }
 
-func TestOnCardSourceChangedRefusesWhenNoRegisteredURLVouchesForTheSecret(t *testing.T) {
+func TestStoreCardSourceRefusesWhenNoRegisteredURLVouchesForTheSecret(t *testing.T) {
 	h := newProxyHarness(t)
 	h.proxied("X-Key", "c2VjcmV0")
 	h.cards.GetFunc = func(context.Context, string, string, string, string) (*models.A2AAgentCard, error) {
 		return nil, repositories.ErrA2AAgentCardNotFound
 	}
 
-	err := h.svc.OnCardSourceChanged(context.Background(), externalA2AAgent(), "org-1", "checkout", devEnv(),
+	err := h.svc.StoreCardSource(context.Background(), externalA2AAgent(), "org-1", "checkout", devEnv(),
 		"https://agent.example/.well-known/agent-card.json")
 
 	require.ErrorIs(t, err, utils.ErrA2AProxyOriginChangeNeedsAuthReset)
 	assert.Empty(t, h.txCards.EnqueueCalls())
 }
 
-func TestOnCardSourceChangedKeepsTheSecretOnTheSameOrigin(t *testing.T) {
+func TestStoreCardSourceKeepsTheSecretOnTheSameOrigin(t *testing.T) {
 	h := newProxyHarness(t)
 	h.acceptsWrites()
 	h.proxied("X-Key", "c2VjcmV0")
 	newURL := "https://AGENT.example:443/v2/.well-known/agent-card.json"
 
-	require.NoError(t, h.svc.OnCardSourceChanged(context.Background(), externalA2AAgent(), "org-1", "checkout", devEnv(), newURL))
+	require.NoError(t, h.svc.StoreCardSource(context.Background(), externalA2AAgent(), "org-1", "checkout", devEnv(), newURL))
 
 	written := h.txCards.EnqueueCalls()
 	require.Len(t, written, 1)
@@ -531,30 +636,65 @@ func TestOnCardSourceChangedKeepsTheSecretOnTheSameOrigin(t *testing.T) {
 	assert.Len(t, h.txPubs.EnqueueCalls(), 1)
 }
 
-func TestOnCardSourceRemovedTearsDownAndDeletesTheCard(t *testing.T) {
+func TestRemoveCardSourceTearsDownAndDeletesTheCard(t *testing.T) {
 	h := newProxyHarness(t)
 	h.acceptsWrites()
 	h.proxied("X-Key", "c2VjcmV0")
 
-	require.NoError(t, h.svc.OnCardSourceRemoved(auditableCtx(t), externalA2AAgent(), "org-1", "checkout", devEnv()))
+	require.NoError(t, h.svc.RemoveCardSource(auditableCtx(t), externalA2AAgent(), "org-1", "checkout", devEnv()))
 
 	assert.Len(t, h.txCards.DeleteForAgentEnvCalls(), 1)
 	assert.Empty(t, h.txCards.RequeueCalls())
 	assert.Len(t, h.txProxies.DeleteCalls(), 1)
-	assert.ErrorIs(t, h.svc.OnCardSourceRemoved(context.Background(), externalA2AAgent(), "org-1", "checkout", devEnv()),
+	assert.ErrorIs(t, h.svc.RemoveCardSource(context.Background(), externalA2AAgent(), "org-1", "checkout", devEnv()),
 		audit.ErrRecorderUnavailable, "it discards the stored secret, so it is refused unrecorded")
 }
 
-func TestIsProxied(t *testing.T) {
+// Removing the source of a direct environment just deletes its card row, with no proxy to audit.
+func TestRemoveCardSourceOnADirectEnvironmentDeletesTheCard(t *testing.T) {
 	h := newProxyHarness(t)
-	proxied, err := h.svc.IsProxied(context.Background(), "org-1", "checkout", "weather", uuid.MustParse(proxyTestEnvUUID))
-	require.NoError(t, err)
-	assert.False(t, proxied)
+	h.acceptsWrites()
 
-	h.proxied("", "")
-	proxied, err = h.svc.IsProxied(context.Background(), "org-1", "checkout", "weather", uuid.MustParse(proxyTestEnvUUID))
-	require.NoError(t, err)
-	assert.True(t, proxied)
+	require.NoError(t, h.svc.RemoveCardSource(context.Background(), externalA2AAgent(), "org-1", "checkout", devEnv()))
+
+	deleted := h.txCards.DeleteForAgentEnvCalls()
+	require.Len(t, deleted, 1)
+	assert.Equal(t, "dev", deleted[0].EnvironmentName)
+	assert.Empty(t, h.txProxies.DeleteCalls())
+}
+
+func TestRefreshCardSource(t *testing.T) {
+	t.Run("a direct environment requeues the row in place", func(t *testing.T) {
+		h := newProxyHarness(t)
+		h.acceptsWrites()
+
+		require.NoError(t, h.svc.RefreshCardSource(context.Background(), externalA2AAgent(), "org-1", "checkout", devEnv()))
+
+		requeued := h.txCards.RequeueCalls()
+		require.Len(t, requeued, 1, "update-only, so a removed row is not recreated")
+		assert.Equal(t, "dev", requeued[0].EnvironmentName)
+		assert.Empty(t, h.txPubs.EnqueueCalls())
+	})
+	t.Run("a direct environment needs a registered source", func(t *testing.T) {
+		h := newProxyHarness(t)
+		h.txCards.RequeueFunc = func(context.Context, string, string, string, string) error {
+			return repositories.ErrA2AAgentCardNotFound
+		}
+
+		err := h.svc.RefreshCardSource(context.Background(), externalA2AAgent(), "org-1", "checkout", devEnv())
+
+		assert.ErrorIs(t, err, utils.ErrAgentCardNotFound)
+	})
+	t.Run("a proxied environment republishes and leaves the card parked", func(t *testing.T) {
+		h := newProxyHarness(t)
+		h.acceptsWrites()
+		h.proxied("", "")
+
+		require.NoError(t, h.svc.RefreshCardSource(context.Background(), externalA2AAgent(), "org-1", "checkout", devEnv()))
+
+		assert.Len(t, h.txPubs.EnqueueCalls(), 1)
+		assert.Empty(t, h.txCards.RequeueCalls(), "a requeue would un-park the card before the gateway has the Agent")
+	})
 }
 
 // failingRecorder is an audit sink outage: RecordSync fails with an error that does not name the recorder.
@@ -581,7 +721,7 @@ func TestA2AProxyWritesRefuseWhenTheAuditSinkFails(t *testing.T) {
 		},
 		"card source removed": func(h *proxyHarness) error {
 			h.proxied("X-Key", "c2VjcmV0")
-			return h.svc.OnCardSourceRemoved(sinkOutageCtx(), externalA2AAgent(), "org-1", "checkout", devEnv())
+			return h.svc.RemoveCardSource(sinkOutageCtx(), externalA2AAgent(), "org-1", "checkout", devEnv())
 		},
 	}
 	for name, call := range calls {
@@ -592,7 +732,7 @@ func TestA2AProxyWritesRefuseWhenTheAuditSinkFails(t *testing.T) {
 
 			assert.ErrorIs(t, err, audit.ErrRecorderUnavailable)
 			assert.ErrorIs(t, err, assert.AnError)
-			assert.Zero(t, h.transactions, "nothing is written")
+			h.assertNothingWritten(t)
 		})
 	}
 }
