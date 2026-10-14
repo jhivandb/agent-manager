@@ -57,6 +57,8 @@ type A2AProxyRepository interface {
 	DeleteForAgent(ctx context.Context, ouID, projectName, agentName string) error
 	// DeleteForEnvironment removes every agent's row in a deleted environment.
 	DeleteForEnvironment(ctx context.Context, ouID string, environmentUUID uuid.UUID) error
+	// ListEnvironmentUUIDs returns the distinct environment UUIDs with rows recorded under environmentName.
+	ListEnvironmentUUIDs(ctx context.Context, ouID, environmentName string) ([]uuid.UUID, error)
 }
 
 type a2aProxyRepository struct {
@@ -151,4 +153,12 @@ func (r *a2aProxyRepository) DeleteForEnvironment(ctx context.Context, ouID stri
 	return r.db.WithContext(ctx).
 		Where("ou_id = ? AND environment_uuid = ?", ouID, environmentUUID).
 		Delete(&models.A2AProxy{}).Error
+}
+
+func (r *a2aProxyRepository) ListEnvironmentUUIDs(ctx context.Context, ouID, environmentName string) ([]uuid.UUID, error) {
+	var ids []uuid.UUID
+	err := r.db.WithContext(ctx).Model(&models.A2AProxy{}).
+		Where("ou_id = ? AND environment_name = ?", ouID, environmentName).
+		Distinct().Pluck("environment_uuid", &ids).Error
+	return ids, err
 }

@@ -41,6 +41,9 @@ import (
 //			GetFunc: func(ctx context.Context, ouID string, projectName string, agentName string, environmentUUID uuid.UUID) (*models.A2APublication, error) {
 //				panic("mock out the Get method")
 //			},
+//			ListEnvironmentUUIDsFunc: func(ctx context.Context, ouID string, environmentName string) ([]uuid.UUID, error) {
+//				panic("mock out the ListEnvironmentUUIDs method")
+//			},
 //			ListForEnvironmentFunc: func(ctx context.Context, ouID string, environmentUUID uuid.UUID) ([]models.A2APublication, error) {
 //				panic("mock out the ListForEnvironment method")
 //			},
@@ -89,6 +92,9 @@ type A2APublicationRepositoryMock struct {
 
 	// GetFunc mocks the Get method.
 	GetFunc func(ctx context.Context, ouID string, projectName string, agentName string, environmentUUID uuid.UUID) (*models.A2APublication, error)
+
+	// ListEnvironmentUUIDsFunc mocks the ListEnvironmentUUIDs method.
+	ListEnvironmentUUIDsFunc func(ctx context.Context, ouID string, environmentName string) ([]uuid.UUID, error)
 
 	// ListForEnvironmentFunc mocks the ListForEnvironment method.
 	ListForEnvironmentFunc func(ctx context.Context, ouID string, environmentUUID uuid.UUID) ([]models.A2APublication, error)
@@ -184,6 +190,15 @@ type A2APublicationRepositoryMock struct {
 			// EnvironmentUUID is the environmentUUID argument value.
 			EnvironmentUUID uuid.UUID
 		}
+		// ListEnvironmentUUIDs holds details about calls to the ListEnvironmentUUIDs method.
+		ListEnvironmentUUIDs []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// OuID is the ouID argument value.
+			OuID string
+			// EnvironmentName is the environmentName argument value.
+			EnvironmentName string
+		}
 		// ListForEnvironment holds details about calls to the ListForEnvironment method.
 		ListForEnvironment []struct {
 			// Ctx is the ctx argument value.
@@ -253,6 +268,7 @@ type A2APublicationRepositoryMock struct {
 	lockEnqueue              sync.RWMutex
 	lockFindPublished        sync.RWMutex
 	lockGet                  sync.RWMutex
+	lockListEnvironmentUUIDs sync.RWMutex
 	lockListForEnvironment   sync.RWMutex
 	lockMarkAttemptFailed    sync.RWMutex
 	lockMarkFailed           sync.RWMutex
@@ -555,6 +571,46 @@ func (mock *A2APublicationRepositoryMock) GetCalls() []struct {
 	mock.lockGet.RLock()
 	calls = mock.calls.Get
 	mock.lockGet.RUnlock()
+	return calls
+}
+
+// ListEnvironmentUUIDs calls ListEnvironmentUUIDsFunc.
+func (mock *A2APublicationRepositoryMock) ListEnvironmentUUIDs(ctx context.Context, ouID string, environmentName string) ([]uuid.UUID, error) {
+	if mock.ListEnvironmentUUIDsFunc == nil {
+		panic("A2APublicationRepositoryMock.ListEnvironmentUUIDsFunc: method is nil but A2APublicationRepository.ListEnvironmentUUIDs was just called")
+	}
+	callInfo := struct {
+		Ctx             context.Context
+		OuID            string
+		EnvironmentName string
+	}{
+		Ctx:             ctx,
+		OuID:            ouID,
+		EnvironmentName: environmentName,
+	}
+	mock.lockListEnvironmentUUIDs.Lock()
+	mock.calls.ListEnvironmentUUIDs = append(mock.calls.ListEnvironmentUUIDs, callInfo)
+	mock.lockListEnvironmentUUIDs.Unlock()
+	return mock.ListEnvironmentUUIDsFunc(ctx, ouID, environmentName)
+}
+
+// ListEnvironmentUUIDsCalls gets all the calls that were made to ListEnvironmentUUIDs.
+// Check the length with:
+//
+//	len(mockedA2APublicationRepository.ListEnvironmentUUIDsCalls())
+func (mock *A2APublicationRepositoryMock) ListEnvironmentUUIDsCalls() []struct {
+	Ctx             context.Context
+	OuID            string
+	EnvironmentName string
+} {
+	var calls []struct {
+		Ctx             context.Context
+		OuID            string
+		EnvironmentName string
+	}
+	mock.lockListEnvironmentUUIDs.RLock()
+	calls = mock.calls.ListEnvironmentUUIDs
+	mock.lockListEnvironmentUUIDs.RUnlock()
 	return calls
 }
 

@@ -183,3 +183,19 @@ func TestA2AProxyLockAgentEnvSerialisesOneEnvironment(t *testing.T) {
 	require.NoError(t, holder.Rollback().Error)
 	assert.True(t, tryLock("weather", envUUID), "the lock ends with the transaction")
 }
+
+func TestA2AProxyListsTheEnvironmentUUIDsUnderAName(t *testing.T) {
+	repo := NewA2AProxyRepository(db.GetDB())
+	ctx := context.Background()
+	old := newTestProxy("names-" + uuid.New().String()[:8])
+	cleanupProxy(t, repo, old)
+	require.NoError(t, repo.Upsert(ctx, old))
+
+	got, err := repo.ListEnvironmentUUIDs(ctx, old.OUID, old.EnvironmentName)
+	require.NoError(t, err)
+	assert.Equal(t, []uuid.UUID{old.EnvironmentUUID}, got)
+
+	none, err := repo.ListEnvironmentUUIDs(ctx, old.OUID, "Staging")
+	require.NoError(t, err)
+	assert.Empty(t, none)
+}

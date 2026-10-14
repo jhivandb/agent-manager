@@ -680,6 +680,7 @@ func TestEnvironmentService_DeleteEnvironmentDropsA2ACards(t *testing.T) {
 	recordingCardRepo := func() *repomocks.A2AAgentCardRepositoryMock {
 		return &repomocks.A2AAgentCardRepositoryMock{
 			DeleteForEnvironmentFunc: func(context.Context, string, uuid.UUID) error { return nil },
+			ListEnvironmentUUIDsFunc: func(context.Context, string, string) ([]uuid.UUID, error) { return []uuid.UUID{}, nil },
 		}
 	}
 
@@ -715,6 +716,7 @@ func TestEnvironmentService_DeleteEnvironmentDropsA2ACards(t *testing.T) {
 		gateways := cleanedGatewayRepo()
 		cards := &repomocks.A2AAgentCardRepositoryMock{
 			DeleteForEnvironmentFunc: func(context.Context, string, uuid.UUID) error { return errors.New("db down") },
+			ListEnvironmentUUIDsFunc: func(context.Context, string, string) ([]uuid.UUID, error) { return []uuid.UUID{}, nil },
 		}
 		svc := NewEnvironmentService(discardLogger(), gateways, deletingEnvOC(envUUID, nil),
 			&clientmocks.ThunderProberMock{}, nil, nil, nil, nil, cards, nil)
@@ -2083,6 +2085,8 @@ func TestEnvironmentService_DeleteEnvironmentTearsDownA2APublications(t *testing
 	const org, envID = "acme", "dev"
 	const envUUID = "44444444-4444-4444-4444-444444444444"
 	m := newPublisherMocks(t)
+	m.pubs.ListEnvironmentUUIDsFunc = func(context.Context, string, string) ([]uuid.UUID, error) { return []uuid.UUID{}, nil }
+	m.proxies.ListEnvironmentUUIDsFunc = m.pubs.ListEnvironmentUUIDsFunc
 	var torndown []uuid.UUID
 	m.pubs.ListForEnvironmentFunc = func(_ context.Context, _ string, env uuid.UUID) ([]models.A2APublication, error) {
 		torndown = append(torndown, env)
@@ -2110,4 +2114,87 @@ func TestEnvironmentService_DeleteEnvironmentKeepsA2APublicationsWhenOCRefuses(t
 	assert.Empty(t, m.pubs.ListForEnvironmentCalls())
 	assert.Empty(t, m.pubs.DeleteForEnvironmentCalls())
 	assert.Empty(t, m.proxies.DeleteForEnvironmentCalls())
+}
+
+// A repeat DELETE after OpenChoreo already removed the environment is the recovery path for a failed cleanup.
+func TestEnvironmentService_DeleteEnvironmentCleansUpAfterOpenChoreoAlreadyDeletedIt(t *testing.T) {
+	stale := uuid.MustParse("55555555-5555-5555-5555-555555555555")
+	m := newPublisherMocks(t)
+	m.pubs.ListEnvironmentUUIDsFunc = func(context.Context, string, string) ([]uuid.UUID, error) {
+		return []uuid.UUID{stale}, nil
+	}
+	m.proxies.ListEnvironmentUUIDsFunc = func(context.Context, string, string) ([]uuid.UUID, error) {
+		return []uuid.UUID{}, nil
+	}
+	var torndown []uuid.UUID
+	m.pubs.ListForEnvironmentFunc = func(_ context.Context, _ string, env uuid.UUID) ([]models.A2APublication, error) {
+		torndown = append(torndown, env)
+		return []models.A2APublication{}, nil
+	}
+	m.pubs.DeleteForEnvironmentFunc = func(context.Context, string, uuid.UUID) error { return nil }
+	m.proxies.DeleteForEnvironmentFunc = func(context.Context, string, uuid.UUID) error { return nil }
+	oc := &clientmocks.OpenChoreoClientMock{
+		GetEnvironmentFunc: func(context.Context, string, string) (*models.EnvironmentResponse, error) {
+			return nil, utils.ErrEnvironmentNotFound
+		},
+	}
+	svc := NewEnvironmentService(discardLogger(), cleanedGatewayRepo(), oc,
+		&clientmocks.ThunderProberMock{}, nil, nil, nil, nil, nil, m.publisher())
+
+	err := svc.DeleteEnvironment(context.Background(), "acme", "dev")
+
+	require.ErrorIs(t, err, utils.ErrEnvironmentNotFound, "the environment is still reported gone")
+	assert.Equal(t, []uuid.UUID{stale}, torndown)
+}
+
+// A same-named environment deleted earlier left rows behind; deleting the live one sweeps them too.
+func TestEnvironmentService_DeleteEnvironmentAlsoTearsDownASameNamedLeftover(t *testing.T) {
+	const live = "44444444-4444-4444-4444-444444444444"
+	stale := uuid.MustParse("55555555-5555-5555-5555-555555555555")
+	m := newPublisherMocks(t)
+	m.pubs.ListEnvironmentUUIDsFunc = func(context.Context, string, string) ([]uuid.UUID, error) {
+		return []uuid.UUID{stale, uuid.MustParse(live)}, nil
+	}
+	m.proxies.ListEnvironmentUUIDsFunc = func(context.Context, string, string) ([]uuid.UUID, error) {
+		return []uuid.UUID{stale}, nil
+	}
+	var torndown []uuid.UUID
+	m.pubs.ListForEnvironmentFunc = func(_ context.Context, _ string, env uuid.UUID) ([]models.A2APublication, error) {
+		torndown = append(torndown, env)
+		return []models.A2APublication{}, nil
+	}
+	m.pubs.DeleteForEnvironmentFunc = func(context.Context, string, uuid.UUID) error { return nil }
+	m.proxies.DeleteForEnvironmentFunc = func(context.Context, string, uuid.UUID) error { return nil }
+	svc := NewEnvironmentService(discardLogger(), cleanedGatewayRepo(), deletingEnvOC(live, nil),
+		&clientmocks.ThunderProberMock{}, nil, nil, nil, nil, nil, m.publisher())
+
+	require.NoError(t, svc.DeleteEnvironment(context.Background(), "acme", "dev"))
+
+	assert.ElementsMatch(t, []uuid.UUID{uuid.MustParse(live), stale}, torndown, "each UUID is torn down once")
+}
+
+func TestEnvironmentService_DeleteEnvironmentRetriesAFailedA2ATeardown(t *testing.T) {
+	const live = "44444444-4444-4444-4444-444444444444"
+	m := newPublisherMocks(t)
+	m.pubs.ListEnvironmentUUIDsFunc = func(context.Context, string, string) ([]uuid.UUID, error) {
+		return []uuid.UUID{}, nil
+	}
+	m.proxies.ListEnvironmentUUIDsFunc = m.pubs.ListEnvironmentUUIDsFunc
+	calls := 0
+	m.pubs.ListForEnvironmentFunc = func(context.Context, string, uuid.UUID) ([]models.A2APublication, error) {
+		calls++
+		if calls == 1 {
+			return nil, errors.New("db blip")
+		}
+		return []models.A2APublication{}, nil
+	}
+	m.pubs.DeleteForEnvironmentFunc = func(context.Context, string, uuid.UUID) error { return nil }
+	m.proxies.DeleteForEnvironmentFunc = func(context.Context, string, uuid.UUID) error { return nil }
+	svc := NewEnvironmentService(discardLogger(), cleanedGatewayRepo(), deletingEnvOC(live, nil),
+		&clientmocks.ThunderProberMock{}, nil, nil, nil, nil, nil, m.publisher()).(*environmentService)
+	svc.a2aCleanupBackoff = 0
+
+	require.NoError(t, svc.DeleteEnvironment(context.Background(), "acme", "dev"))
+
+	assert.Equal(t, 2, calls, "the teardown is retried after a transient failure")
 }

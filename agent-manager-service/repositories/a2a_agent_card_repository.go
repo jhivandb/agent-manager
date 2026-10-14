@@ -78,6 +78,8 @@ type A2AAgentCardRepository interface {
 	DeleteIfUnchanged(ctx context.Context, read models.A2AAgentCard) error
 	// DeleteForEnvironment drops every agent's row in a deleted environment.
 	DeleteForEnvironment(ctx context.Context, ouID string, environmentUUID uuid.UUID) error
+	// ListEnvironmentUUIDs returns the distinct environment UUIDs with rows recorded under environmentName.
+	ListEnvironmentUUIDs(ctx context.Context, ouID, environmentName string) ([]uuid.UUID, error)
 }
 
 // A2AAgentCardClaimLease is how long a claimed row stays invisible to other claimers.
@@ -358,4 +360,12 @@ func (r *a2aAgentCardRepository) DeleteForEnvironment(ctx context.Context, ouID 
 	return r.db.WithContext(ctx).
 		Where("ou_id = ? AND environment_uuid = ?", ouID, environmentUUID).
 		Delete(&models.A2AAgentCard{}).Error
+}
+
+func (r *a2aAgentCardRepository) ListEnvironmentUUIDs(ctx context.Context, ouID, environmentName string) ([]uuid.UUID, error) {
+	var ids []uuid.UUID
+	err := r.db.WithContext(ctx).Model(&models.A2AAgentCard{}).
+		Where("ou_id = ? AND environment_name = ?", ouID, environmentName).
+		Distinct().Pluck("environment_uuid", &ids).Error
+	return ids, err
 }

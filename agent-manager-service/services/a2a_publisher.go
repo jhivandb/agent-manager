@@ -225,6 +225,19 @@ func (p *A2APublisher) TeardownEnvironment(ctx context.Context, ouID string, env
 	return errors.Join(errs...)
 }
 
+// EnvironmentUUIDs lists every environment UUID with publication or proxy rows recorded under name.
+func (p *A2APublisher) EnvironmentUUIDs(ctx context.Context, ouID, name string) ([]uuid.UUID, error) {
+	pubs, err := p.pubRepo.ListEnvironmentUUIDs(ctx, ouID, name)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list A2A publication environments: %w", err)
+	}
+	proxies, err := p.proxyRepo.ListEnvironmentUUIDs(ctx, ouID, name)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list A2A proxy environments: %w", err)
+	}
+	return append(pubs, proxies...), nil
+}
+
 // teardownDeletedEnv removes one publication together with its artifact, which a deleted environment no longer needs.
 // On failure it still returns the teardown to send; agent deletion sweeps the artifact left behind.
 func (p *A2APublisher) teardownDeletedEnv(ctx context.Context, pub models.A2APublication) (a2aTeardown, error) {

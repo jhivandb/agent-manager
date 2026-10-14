@@ -60,6 +60,8 @@ type A2APublicationRepository interface {
 
 	// DeleteForEnvironment removes every agent's row in a deleted environment.
 	DeleteForEnvironment(ctx context.Context, ouID string, environmentUUID uuid.UUID) error
+	// ListEnvironmentUUIDs returns the distinct environment UUIDs with rows recorded under environmentName.
+	ListEnvironmentUUIDs(ctx context.Context, ouID, environmentName string) ([]uuid.UUID, error)
 
 	// ClaimDue returns up to limit pending rows whose next attempt time has
 	// arrived, pushing each one's next attempt out by a lease so no other
@@ -283,4 +285,12 @@ func (r *a2aPublicationRepository) DeleteForAgent(ctx context.Context, ouID, pro
 	return r.db.WithContext(ctx).
 		Where("ou_id = ? AND project_name = ? AND agent_name = ?", ouID, projectName, agentName).
 		Delete(&models.A2APublication{}).Error
+}
+
+func (r *a2aPublicationRepository) ListEnvironmentUUIDs(ctx context.Context, ouID, environmentName string) ([]uuid.UUID, error) {
+	var ids []uuid.UUID
+	err := r.db.WithContext(ctx).Model(&models.A2APublication{}).
+		Where("ou_id = ? AND environment_name = ?", ouID, environmentName).
+		Distinct().Pluck("environment_uuid", &ids).Error
+	return ids, err
 }

@@ -27,6 +27,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -90,6 +91,11 @@ type EnvironmentService interface {
 	ThunderHandleRegistered(ctx context.Context, handle string) (bool, error)
 }
 
+const (
+	a2aEnvCleanupAttempts = 3
+	a2aEnvCleanupBackoff  = 200 * time.Millisecond
+)
+
 type environmentService struct {
 	logger             *slog.Logger
 	ocClient           occlient.OpenChoreoClient
@@ -101,6 +107,8 @@ type environmentService struct {
 	encryptionKey      []byte
 	a2aCardRepo        repositories.A2AAgentCardRepository
 	a2aPublisher       *A2APublisher
+	a2aCleanupAttempts int
+	a2aCleanupBackoff  time.Duration
 }
 
 // NewEnvironmentService creates a new environment service
@@ -116,6 +124,8 @@ func NewEnvironmentService(logger *slog.Logger, gatewayRepo repositories.Gateway
 		encryptionKey:      encryptionKey,
 		a2aCardRepo:        a2aCardRepo,
 		a2aPublisher:       a2aPublisher,
+		a2aCleanupAttempts: a2aEnvCleanupAttempts,
+		a2aCleanupBackoff:  a2aEnvCleanupBackoff,
 	}
 }
 
@@ -312,6 +322,8 @@ func (s *environmentService) DeleteEnvironment(ctx context.Context, ouID string,
 	if err != nil {
 		s.logger.Error("Failed to look up environment", "ouID", ouID, "envID", envID, "error", err)
 		if errors.Is(err, utils.ErrNotFound) || errors.Is(err, utils.ErrEnvironmentNotFound) {
+			// A repeat DELETE is how a failed or skipped A2A cleanup is retried.
+			s.tearDownA2AState(ctx, ouID, envID, uuid.Nil)
 			return utils.ErrEnvironmentNotFound
 		}
 		return fmt.Errorf("failed to look up environment: %w", err)
@@ -364,22 +376,7 @@ func (s *environmentService) DeleteEnvironment(ctx context.Context, ouID string,
 		}
 	}
 
-	// Best-effort like the MCP cleanup: a same-named re-created env must not inherit these cards.
-	if s.a2aCardRepo != nil {
-		if err := s.a2aCardRepo.DeleteForEnvironment(ctx, ouID, envUUID); err != nil {
-			s.logger.Error("Environment deleted but its A2A agent cards were not removed",
-				"ouID", ouID, "envID", envID, "envUUID", envUUID, "error", err)
-		}
-	}
-
-	// An external agent has no release binding to block the delete, so a proxied environment can
-	// go while its gateway still serves the Agent. Best effort, like the card cleanup above.
-	if s.a2aPublisher != nil {
-		if err := s.a2aPublisher.TeardownEnvironment(ctx, ouID, envUUID); err != nil {
-			s.logger.Error("Environment deleted but its A2A gateway publications were not fully removed",
-				"ouID", ouID, "envID", envID, "envUUID", envUUID, "error", err)
-		}
-	}
+	s.tearDownA2AState(ctx, ouID, env.Name, envUUID)
 
 	// Local cleanup: gateway↔env mapping rows. The gateway themselves are unaffected.
 	deleted, err := s.gatewayRepo.DeleteEnvironmentMappingsByEnvironmentID(envUUID.String())
@@ -390,6 +387,89 @@ func (s *environmentService) DeleteEnvironment(ctx context.Context, ouID string,
 	}
 	s.logger.Info("Deleted environment", "envID", envID, "envUUID", envUUID, "gatewayMappingsDeleted", deleted)
 	return nil
+}
+
+// tearDownA2AState removes the A2A state of envUUID and of every other environment once recorded under name.
+func (s *environmentService) tearDownA2AState(ctx context.Context, ouID, name string, envUUID uuid.UUID) {
+	if s.a2aCardRepo == nil && s.a2aPublisher == nil {
+		return
+	}
+	ids, err := s.a2aEnvironmentUUIDs(ctx, ouID, name)
+	if err != nil {
+		s.logger.Error("Could not list leftover A2A state for the environment name", "ouID", ouID, "envName", name, "error", err)
+	}
+	if envUUID != uuid.Nil {
+		ids = append(ids, envUUID)
+	}
+	for _, id := range uniqueUUIDs(ids) {
+		if err := s.retryA2ACleanup(ctx, func() error { return s.tearDownA2AEnvironment(ctx, ouID, id) }); err != nil {
+			s.logger.Error("Environment deleted but its A2A state was not fully removed; repeat the DELETE to retry",
+				"ouID", ouID, "envName", name, "envUUID", id, "error", err)
+		}
+	}
+}
+
+func (s *environmentService) a2aEnvironmentUUIDs(ctx context.Context, ouID, name string) ([]uuid.UUID, error) {
+	var ids []uuid.UUID
+	if s.a2aCardRepo != nil {
+		cards, err := s.a2aCardRepo.ListEnvironmentUUIDs(ctx, ouID, name)
+		if err != nil {
+			return nil, err
+		}
+		ids = append(ids, cards...)
+	}
+	if s.a2aPublisher != nil {
+		published, err := s.a2aPublisher.EnvironmentUUIDs(ctx, ouID, name)
+		if err != nil {
+			return nil, err
+		}
+		ids = append(ids, published...)
+	}
+	return ids, nil
+}
+
+// tearDownA2AEnvironment drops cards, then withdraws publications and proxies; both are idempotent.
+func (s *environmentService) tearDownA2AEnvironment(ctx context.Context, ouID string, envUUID uuid.UUID) error {
+	var errs []error
+	if s.a2aCardRepo != nil {
+		if err := s.a2aCardRepo.DeleteForEnvironment(ctx, ouID, envUUID); err != nil {
+			errs = append(errs, fmt.Errorf("failed to delete A2A agent cards: %w", err))
+		}
+	}
+	if s.a2aPublisher != nil {
+		if err := s.a2aPublisher.TeardownEnvironment(ctx, ouID, envUUID); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func (s *environmentService) retryA2ACleanup(ctx context.Context, fn func() error) error {
+	var err error
+	for attempt := 0; attempt < s.a2aCleanupAttempts; attempt++ {
+		if err = fn(); err == nil {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return errors.Join(err, ctx.Err())
+		case <-time.After(s.a2aCleanupBackoff):
+		}
+	}
+	return err
+}
+
+func uniqueUUIDs(ids []uuid.UUID) []uuid.UUID {
+	seen := make(map[uuid.UUID]struct{}, len(ids))
+	out := make([]uuid.UUID, 0, len(ids))
+	for _, id := range ids {
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out
 }
 
 func (s *environmentService) GetEnvironmentGateways(ctx context.Context, ouID string, envID string) ([]models.GatewayResponse, error) {
