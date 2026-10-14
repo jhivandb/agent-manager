@@ -182,6 +182,7 @@ func TestA2AAgentLifecycle(t *testing.T) {
 		repositories.NewAgentConfigRepo(gdb),
 		openChoreoClient,
 		services.NewA2ACardFetcher(),
+		bytes.Repeat([]byte{7}, 32), // a platform agent has no upstream secret to decrypt
 		services.NewGatewayEventsService(hub),
 		testLifecycleLogger(),
 	)
