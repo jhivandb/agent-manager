@@ -55,7 +55,7 @@ const (
 // errUpstreamNotReady means the binding has not published a ServiceURL yet. It
 // is the expected condition until the first build or deploy binds, not a
 // misconfiguration.
-var errUpstreamNotReady = errors.New("release binding has not published a service URL yet")
+var errUpstreamNotReady = newA2APublicError("release binding has not published a service URL yet", nil)
 
 // A2APublicationReconcilerService drains the a2a_publications queue.
 type A2APublicationReconcilerService interface {
@@ -365,7 +365,11 @@ func (s *a2aPublicationReconcilerService) recordAttemptFailure(ctx context.Conte
 		s.recordWaiting(ctx, pub, cause)
 		return
 	}
-	lastErr := sanitizeA2ALastError(cause.Error())
+	lastErr := userFacingA2APublishError(cause)
+	if lastErr == a2aPublishInternalError {
+		s.logger.Warn("A2A publication failed internally",
+			"agentName", pub.AgentName, "environment", pub.EnvironmentName, "error", cause)
+	}
 	if errors.Is(cause, errA2ANotProxyable) || pub.AttemptCount+1 >= a2aPublicationAttemptBudget {
 		s.logger.Error("A2A agent cannot reach its gateway; giving up",
 			"agentName", pub.AgentName, "environment", pub.EnvironmentName,
@@ -397,13 +401,21 @@ func (s *a2aPublicationReconcilerService) recordAttemptFailure(ctx context.Conte
 func (s *a2aPublicationReconcilerService) recordWaiting(ctx context.Context, pub models.A2APublication, cause error) {
 	s.logger.Debug("A2A agent binding not ready yet, will check again",
 		"agentName", pub.AgentName, "environment", pub.EnvironmentName)
-	err := s.pubRepo.MarkWaiting(ctx, pub, sanitizeA2ALastError(cause.Error()), time.Now().Add(a2aReconcilerRetryIn))
+	err := s.pubRepo.MarkWaiting(ctx, pub, userFacingA2APublishError(cause), time.Now().Add(a2aReconcilerRetryIn))
 	switch {
 	case errors.Is(err, repositories.ErrA2APublicationSuperseded):
 		s.logSuperseded(pub)
 	case err != nil:
 		s.logger.Error("Failed to schedule A2A publication retry", "error", err)
 	}
+}
+
+// userFacingA2APublishError is the last_error a reader may see; unproxyable reasons come from the card itself.
+func userFacingA2APublishError(cause error) string {
+	if errors.Is(cause, errA2ANotProxyable) {
+		return sanitizeA2ALastError(cause.Error())
+	}
+	return userFacingA2AError(cause, a2aPublishInternalError)
 }
 
 // resolvedUpstream is where the gateway forwards to; nil transports keep M1's /rpc and /rest.
@@ -455,7 +467,7 @@ func (s *a2aPublicationReconcilerService) resolveExternalUpstream(ctx context.Co
 	}
 	body, err := s.fetcher.Fetch(ctx, card.SourceURL, true)
 	if err != nil {
-		return resolvedUpstream{}, fmt.Errorf("failed to fetch the origin agent card: %w", err)
+		return resolvedUpstream{}, prefixA2APublicError("could not fetch the origin agent card", err)
 	}
 	upstreamURL, transports, err := deriveA2AProxyRoutes(card.SourceURL, body)
 	if err != nil {

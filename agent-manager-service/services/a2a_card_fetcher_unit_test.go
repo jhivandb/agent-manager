@@ -246,3 +246,11 @@ func TestA2ACardFetcherPlatformRedirectPolicy(t *testing.T) {
 	assert.False(t, redirectAllowed(t, "http://gw.example/a", "https://other.example/a"))
 	assert.False(t, redirectAllowed(t, "http://gw.example:8080/a", "https://gw.example:9443/a"), "upgrade to another port")
 }
+
+// A dial failure on the platform client must not leak the address it dialled.
+func TestA2ACardFetcherDialFailuresArePublicAndAddressFree(t *testing.T) {
+	_, err := newA2ACardFetcher(time.Second, "127.0.0.1:1").Fetch(context.Background(),
+		"http://gw.invalid/a"+a2aAgentCardPath, false)
+	require.Error(t, err)
+	assert.Equal(t, "could not reach the agent card URL", userFacingA2AError(err, "internal"))
+}

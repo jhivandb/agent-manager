@@ -697,7 +697,7 @@ func TestReconcilerRetriesWhileTheOriginIsUnreachable(t *testing.T) {
 	pub := pendingPublication()
 	h.withExternalOrigin(&pub)
 	h.fetcher.FetchFunc = func(context.Context, string, bool) (json.RawMessage, error) {
-		return nil, errors.New("could not reach the agent card URL")
+		return nil, newA2APublicError("could not reach the agent card URL", nil)
 	}
 
 	h.svc.publishOne(context.Background(), pub)
@@ -833,4 +833,32 @@ func TestReconcilerStopsTheBatchBeforeTheLeaseEnds(t *testing.T) {
 
 func TestPublicationBatchFitsInsideTheClaimLease(t *testing.T) {
 	assert.Less(t, a2aPublicationBatchBudget, repositories.A2APublicationClaimLease)
+}
+
+func TestReconcilerHidesInternalErrorsFromLastError(t *testing.T) {
+	h := newA2AReconcilerHarness("http://svc.dev:8080")
+	h.deploymentRepo.CreateWithLimitEnforcementFunc = func(*models.Deployment, int) error {
+		return errors.New("failed to connect to `user=ams database=amdb host=10.0.0.5`: SQLSTATE 28P01")
+	}
+
+	h.svc.publishOne(context.Background(), pendingPublication())
+
+	retries := h.pubRepo.MarkAttemptFailedCalls()
+	require.Len(t, retries, 1)
+	assert.Equal(t, a2aPublishInternalError, retries[0].LastErr)
+}
+
+func TestReconcilerNamesTheOriginInAFetchFailure(t *testing.T) {
+	h := newA2AReconcilerHarness("")
+	pub := pendingPublication()
+	h.withExternalOrigin(&pub)
+	h.fetcher.FetchFunc = func(context.Context, string, bool) (json.RawMessage, error) {
+		return nil, newA2APublicError("agent card request returned HTTP 503", nil)
+	}
+
+	h.svc.publishOne(context.Background(), pub)
+
+	retries := h.pubRepo.MarkAttemptFailedCalls()
+	require.Len(t, retries, 1)
+	assert.Equal(t, "could not fetch the origin agent card: agent card request returned HTTP 503", retries[0].LastErr)
 }

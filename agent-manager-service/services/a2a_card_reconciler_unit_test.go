@@ -169,7 +169,7 @@ func TestCardReconcilerBacksOffExponentially(t *testing.T) {
 func TestCardReconcilerGivesUpPastTheBudget(t *testing.T) {
 	h := newCardReconcilerHarness("http://gw.example/a")
 	h.fetcher.FetchFunc = func(context.Context, string, bool) (json.RawMessage, error) {
-		return nil, errors.New("agent card request returned HTTP 503")
+		return nil, newA2APublicError("agent card request returned HTTP 503", nil)
 	}
 	row := pendingCard(models.A2AAgentCardSourcePlatform)
 	row.AttemptCount = a2aCardAttemptBudget - 1
@@ -185,7 +185,7 @@ func TestCardReconcilerGivesUpPastTheBudget(t *testing.T) {
 func TestCardReconcilerPlatformFailuresNameTheURL(t *testing.T) {
 	h := newCardReconcilerHarness("http://gw.example/a")
 	h.fetcher.FetchFunc = func(context.Context, string, bool) (json.RawMessage, error) {
-		return nil, errors.New("agent card request returned HTTP 404")
+		return nil, newA2APublicError("agent card request returned HTTP 404", nil)
 	}
 
 	h.svc.fetchOne(context.Background(), pendingCard(models.A2AAgentCardSourcePlatform))
@@ -243,8 +243,7 @@ func TestCardReconcilerChargesAnAttemptWhenTheCardCannotBeStored(t *testing.T) {
 
 	retries := h.repo.MarkAttemptFailedCalls()
 	require.Len(t, retries, 1)
-	assert.Contains(t, retries[0].LastErr, "failed to store agent card")
-	assert.Contains(t, retries[0].LastErr, "22P05")
+	assert.Equal(t, a2aCardInternalError, retries[0].LastErr)
 }
 
 func TestCardReconcilerFailsTheRowWhenTheLastCardCannotBeStored(t *testing.T) {
@@ -263,7 +262,7 @@ func TestCardReconcilerFailsTheRowWhenTheLastCardCannotBeStored(t *testing.T) {
 func TestCardReconcilerStoresAValidUTF8LastError(t *testing.T) {
 	h := newCardReconcilerHarness("http://gw.example/a")
 	h.fetcher.FetchFunc = func(context.Context, string, bool) (json.RawMessage, error) {
-		return nil, errors.New("dial tcp: lookup \xff\x00host: no such host")
+		return nil, newA2APublicError("dial tcp: lookup \xff\x00host: no such host", nil)
 	}
 
 	h.svc.fetchOne(context.Background(), pendingCard(models.A2AAgentCardSourcePlatform))
@@ -278,7 +277,7 @@ func TestCardReconcilerStoresAValidUTF8LastError(t *testing.T) {
 func TestCardReconcilerCapsTheLastErrorLength(t *testing.T) {
 	h := newCardReconcilerHarness("http://gw.example/a")
 	h.fetcher.FetchFunc = func(context.Context, string, bool) (json.RawMessage, error) {
-		return nil, errors.New(strings.Repeat("é", 10*a2aLastErrorMaxRunes))
+		return nil, newA2APublicError(strings.Repeat("é", 10*a2aLastErrorMaxRunes), nil)
 	}
 
 	h.svc.fetchOne(context.Background(), pendingCard(models.A2AAgentCardSourcePlatform))
@@ -527,4 +526,17 @@ func TestCardReconcilerRetriesUntilTheIngressGatewayIsMapped(t *testing.T) {
 	failed := h.repo.MarkAttemptFailedCalls()
 	require.Len(t, failed, 1)
 	assert.Contains(t, failed[0].LastErr, "no ingress gateway")
+}
+
+func TestCardReconcilerHidesInternalErrorsFromLastError(t *testing.T) {
+	h := newCardReconcilerHarness("")
+	h.proxies.GetByEnvUUIDFunc = func(context.Context, string, string, string, uuid.UUID) (*models.A2AProxy, error) {
+		return nil, errors.New("failed to connect to `user=ams database=amdb`: SQLSTATE 28P01")
+	}
+
+	h.svc.fetchOne(context.Background(), pendingCard(models.A2AAgentCardSourceExternal))
+
+	retries := h.repo.MarkAttemptFailedCalls()
+	require.Len(t, retries, 1)
+	assert.Equal(t, a2aCardInternalError, retries[0].LastErr)
 }

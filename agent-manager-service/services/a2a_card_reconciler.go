@@ -49,10 +49,10 @@ const (
 )
 
 // errA2ACardEndpointNotReady means the agent's environment has no public endpoint URL yet.
-var errA2ACardEndpointNotReady = errors.New("agent has no public endpoint in this environment yet")
+var errA2ACardEndpointNotReady = newA2APublicError("agent has no public endpoint in this environment yet", nil)
 
 // errA2ACardRolloutInProgress means the agent's latest release is not serving in this environment yet.
-var errA2ACardRolloutInProgress = errors.New("agent is still rolling out in this environment")
+var errA2ACardRolloutInProgress = newA2APublicError("agent is still rolling out in this environment", nil)
 
 // errA2ACardNotDeployed means the agent has no live binding in the row's environment.
 var errA2ACardNotDeployed = errors.New("agent is not deployed in this environment")
@@ -238,7 +238,7 @@ func (s *a2aCardReconcilerService) fetchCardThroughGateway(ctx context.Context, 
 	url := strings.TrimRight(buildPublicProxyURL(gateway, nil), "/") + "/" + row.AgentName + a2aAgentCardPath
 	body, err := s.fetcher.Fetch(ctx, url, false)
 	if err != nil {
-		return a2aCardFetch{url: url}, fmt.Errorf("%s: %w", url, err)
+		return a2aCardFetch{url: url}, prefixA2APublicError(url, err)
 	}
 	return a2aCardFetch{url: url, body: body}, nil
 }
@@ -263,14 +263,18 @@ func (s *a2aCardReconcilerService) fetchPlatformCard(ctx context.Context, row mo
 	body, err := s.fetcher.Fetch(ctx, attempt.url, false)
 	if err != nil {
 		// The derived URL is otherwise invisible to the user.
-		return attempt, fmt.Errorf("%s: %w", attempt.url, err)
+		return attempt, prefixA2APublicError(attempt.url, err)
 	}
 	attempt.body = body
 	return attempt, nil
 }
 
 func (s *a2aCardReconcilerService) recordAttemptFailure(ctx context.Context, row models.A2AAgentCard, releaseName string, cause error) {
-	lastErr := sanitizeA2ALastError(cause.Error())
+	lastErr := userFacingA2AError(cause, a2aCardInternalError)
+	if lastErr == a2aCardInternalError {
+		s.logger.Warn("A2A agent card fetch failed internally",
+			"agentName", row.AgentName, "environment", row.EnvironmentName, "error", cause)
+	}
 	err := s.markAttemptFailed(ctx, row, cause, lastErr, releaseName)
 	if err != nil && !errors.Is(err, repositories.ErrA2AAgentCardSuperseded) {
 		s.logger.Error("Failed to record A2A agent card attempt; retrying with a fixed message",
