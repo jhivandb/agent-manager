@@ -273,7 +273,7 @@ func (s *a2aCardReconcilerService) recordAttemptFailure(ctx context.Context, row
 	lastErr := userFacingA2AError(cause, a2aCardInternalError)
 	if lastErr == a2aCardInternalError {
 		s.logger.Warn("A2A agent card fetch failed internally",
-			"agentName", row.AgentName, "environment", row.EnvironmentName, "error", cause)
+			"agentName", row.AgentName, "environment", row.EnvironmentName, "error", a2aLogError(cause))
 	}
 	err := s.markAttemptFailed(ctx, row, cause, lastErr, releaseName)
 	if err != nil && !errors.Is(err, repositories.ErrA2AAgentCardSuperseded) {
@@ -293,12 +293,12 @@ func (s *a2aCardReconcilerService) recordAttemptFailure(ctx context.Context, row
 func (s *a2aCardReconcilerService) markAttemptFailed(ctx context.Context, row models.A2AAgentCard, cause error, lastErr, releaseName string) error {
 	if row.AttemptCount+1 >= a2aCardAttemptBudget {
 		s.logger.Warn("A2A agent card could not be fetched within the attempt budget",
-			"agentName", row.AgentName, "environment", row.EnvironmentName, "error", cause)
+			"agentName", row.AgentName, "environment", row.EnvironmentName, "error", a2aLogError(cause))
 		return s.cardRepo.MarkFailed(ctx, row, lastErr, releaseName)
 	}
 	s.logger.Debug("A2A agent card not fetchable yet, will retry",
 		"agentName", row.AgentName, "environment", row.EnvironmentName,
-		"attempt", row.AttemptCount+1, "reason", cause)
+		"attempt", row.AttemptCount+1, "reason", a2aLogError(cause))
 	return s.cardRepo.MarkAttemptFailed(ctx, row, lastErr, releaseName, time.Now().Add(a2aCardRetryIn(row.AttemptCount)))
 }
 

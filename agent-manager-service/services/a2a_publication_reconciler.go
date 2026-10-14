@@ -371,12 +371,12 @@ func (s *a2aPublicationReconcilerService) recordAttemptFailure(ctx context.Conte
 	lastErr := userFacingA2APublishError(cause)
 	if lastErr == a2aPublishInternalError {
 		s.logger.Warn("A2A publication failed internally",
-			"agentName", pub.AgentName, "environment", pub.EnvironmentName, "error", cause)
+			"agentName", pub.AgentName, "environment", pub.EnvironmentName, "error", a2aLogError(cause))
 	}
 	if errors.Is(cause, errA2ANotProxyable) || pub.AttemptCount+1 >= a2aPublicationAttemptBudget {
 		s.logger.Error("A2A agent cannot reach its gateway; giving up",
 			"agentName", pub.AgentName, "environment", pub.EnvironmentName,
-			"attempts", pub.AttemptCount+1, "error", cause)
+			"attempts", pub.AttemptCount+1, "error", a2aLogError(cause))
 		err := s.pubRepo.MarkFailed(ctx, pub, lastErr)
 		switch {
 		case errors.Is(err, repositories.ErrA2APublicationSuperseded):
@@ -390,7 +390,7 @@ func (s *a2aPublicationReconcilerService) recordAttemptFailure(ctx context.Conte
 	}
 	s.logger.Debug("A2A agent not publishable yet, will retry",
 		"agentName", pub.AgentName, "environment", pub.EnvironmentName,
-		"attempt", pub.AttemptCount+1, "reason", cause)
+		"attempt", pub.AttemptCount+1, "reason", a2aLogError(cause))
 	err := s.pubRepo.MarkAttemptFailed(ctx, pub, lastErr, time.Now().Add(a2aReconcilerRetryIn))
 	switch {
 	case errors.Is(err, repositories.ErrA2APublicationSuperseded):
@@ -483,7 +483,7 @@ func (s *a2aPublicationReconcilerService) resolveExternalUpstream(ctx context.Co
 	return resolvedUpstream{url: upstreamURL, transports: transports, auth: proxy.UpstreamAuth()}, nil
 }
 
-// originCardHeader is the stored upstream credential as a fetch header; the off-origin 409 keeps it on the card's origin.
+// originCardHeader is the stored upstream credential as a fetch header; sameOriginClient refuses off-origin redirects while it is attached.
 func (s *a2aPublicationReconcilerService) originCardHeader(proxy *models.A2AProxy) (*A2ACardFetchHeader, error) {
 	if proxy.UpstreamAuthHeader == "" || proxy.UpstreamAuthSecret == "" {
 		return nil, nil //nolint:nilnil // A proxy without a stored credential fetches the card unauthenticated.

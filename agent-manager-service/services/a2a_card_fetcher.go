@@ -162,7 +162,7 @@ func (f *a2aCardFetcher) fetch(
 		if guarded && errors.Is(err, utils.ErrInvalidURL) {
 			return nil, refusedCardURL(err)
 		}
-		// The dial error can name internal addresses; it stays in the cause for the log.
+		// The dial error can name internal addresses; the cause is logged via a2aLogError, never shown.
 		return nil, newA2APublicError("could not reach the agent card URL", err)
 	}
 	defer func() { _ = resp.Body.Close() }()

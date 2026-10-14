@@ -62,6 +62,18 @@ func prefixA2APublicError(prefix string, err error) error {
 	return fmt.Errorf("%s: %w", prefix, err)
 }
 
+// a2aLogError renders err for logs only, appending the hidden cause of a public error.
+func a2aLogError(err error) string {
+	if err == nil {
+		return ""
+	}
+	var public *a2aPublicError
+	if errors.As(err, &public) && public.cause != nil {
+		return err.Error() + " (cause: " + a2aLogError(public.cause) + ")"
+	}
+	return err.Error()
+}
+
 const (
 	a2aPublishInternalError = "publishing to the gateway failed because of an internal error; check the service logs"
 	a2aCardInternalError    = "the agent card could not be fetched because of an internal error; check the service logs"

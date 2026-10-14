@@ -42,3 +42,12 @@ func TestPrefixA2APublicErrorKeepsThePrefixOnlyWhenPublic(t *testing.T) {
 	assert.Equal(t, "fallback", userFacingA2AError(wrapped, "fallback"))
 	assert.ErrorIs(t, wrapped, raw)
 }
+
+func TestA2ALogErrorExposesTheHiddenCauseOnlyForLogs(t *testing.T) {
+	err := prefixA2APublicError("http://gw/a", newA2APublicError("could not reach the agent card URL",
+		errors.New("dial tcp 10.0.0.5:8080: connect: connection refused")))
+	logged := a2aLogError(err)
+	assert.Contains(t, logged, "could not reach the agent card URL")
+	assert.Contains(t, logged, "dial tcp 10.0.0.5:8080")
+	assert.NotContains(t, userFacingA2AError(err, "fallback"), "10.0.0.5")
+}

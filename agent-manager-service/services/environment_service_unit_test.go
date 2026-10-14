@@ -35,6 +35,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -720,6 +721,7 @@ func TestEnvironmentService_DeleteEnvironmentDropsA2ACards(t *testing.T) {
 		}
 		svc := NewEnvironmentService(discardLogger(), gateways, deletingEnvOC(envUUID, nil),
 			&clientmocks.ThunderProberMock{}, nil, nil, nil, nil, cards, nil)
+		svc.(*environmentService).a2aCleanupBackoff = 0
 
 		require.NoError(t, svc.DeleteEnvironment(context.Background(), org, envID))
 		assert.Len(t, gateways.DeleteEnvironmentMappingsByEnvironmentIDCalls(), 1, "mapping cleanup still runs")
@@ -2197,4 +2199,17 @@ func TestEnvironmentService_DeleteEnvironmentRetriesAFailedA2ATeardown(t *testin
 	require.NoError(t, svc.DeleteEnvironment(context.Background(), "acme", "dev"))
 
 	assert.Equal(t, 2, calls, "the teardown is retried after a transient failure")
+}
+
+func TestEnvironmentService_RetryA2ACleanupDoesNotSleepAfterTheFinalAttempt(t *testing.T) {
+	svc := &environmentService{logger: discardLogger(), a2aCleanupAttempts: 1, a2aCleanupBackoff: time.Hour}
+	done := make(chan error, 1)
+	go func() { done <- svc.retryA2ACleanup(context.Background(), func() error { return errors.New("boom") }) }()
+
+	select {
+	case err := <-done:
+		require.Error(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("retryA2ACleanup slept after its final attempt")
+	}
 }

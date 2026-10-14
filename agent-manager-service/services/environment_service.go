@@ -402,8 +402,8 @@ func (s *environmentService) tearDownA2AState(ctx context.Context, ouID, name st
 		ids = append(ids, envUUID)
 	}
 	for _, id := range uniqueUUIDs(ids) {
-		if err := s.retryA2ACleanup(ctx, func() error { return s.tearDownA2AEnvironment(ctx, ouID, id) }); err != nil {
-			s.logger.Error("Environment deleted but its A2A state was not fully removed; repeat the DELETE to retry",
+		if err := s.retryA2ACleanup(ctx, func() error { return s.tearDownA2AEnvironment(ctx, ouID, id) }, "ouID", ouID, "envName", name, "envUUID", id); err != nil {
+			s.logger.Error("Environment deleted but its A2A state was not fully removed; repeat the DELETE before re-creating the environment to retry",
 				"ouID", ouID, "envName", name, "envUUID", id, "error", err)
 		}
 	}
@@ -444,11 +444,15 @@ func (s *environmentService) tearDownA2AEnvironment(ctx context.Context, ouID st
 	return errors.Join(errs...)
 }
 
-func (s *environmentService) retryA2ACleanup(ctx context.Context, fn func() error) error {
+func (s *environmentService) retryA2ACleanup(ctx context.Context, fn func() error, logAttrs ...any) error {
 	var err error
 	for attempt := 0; attempt < s.a2aCleanupAttempts; attempt++ {
 		if err = fn(); err == nil {
 			return nil
+		}
+		s.logger.Warn("A2A teardown attempt failed", append([]any{"attempt", attempt + 1, "of", s.a2aCleanupAttempts, "error", err}, logAttrs...)...)
+		if attempt == s.a2aCleanupAttempts-1 {
+			break
 		}
 		select {
 		case <-ctx.Done():
