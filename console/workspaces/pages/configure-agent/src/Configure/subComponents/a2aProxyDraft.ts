@@ -53,7 +53,15 @@ export function draftFromProxy(proxy?: A2AProxyResponse): A2AProxyDraft {
   };
 }
 
-/** Mirrors the server's checks: the gateway pastes the value into quoted YAML and renders {{ }}. */
+/** C0, DEL and C1, as Go's unicode.IsControl sees them. */
+function hasControlCharacter(value: string): boolean {
+  return [...value].some((c) => {
+    const code = c.codePointAt(0) ?? 0;
+    return code < 0x20 || (code >= 0x7f && code <= 0x9f);
+  });
+}
+
+/** Mirrors the server: the gateway pastes into quoted YAML, doubles '%' and renders {{ }}. */
 export function upstreamAuthError(draft: A2AProxyDraft, proxy?: A2AProxyResponse): string | null {
   const header = draft.header.trim();
   if (!draft.enabled || draft.secret === "clear" || (header === "" && draft.value === "")) return null;
@@ -66,6 +74,8 @@ export function upstreamAuthError(draft: A2AProxyDraft, proxy?: A2AProxyResponse
     return `The value can be at most ${UPSTREAM_VALUE_MAX_BYTES} bytes`;
   }
   if (/['\r\n]/.test(draft.value)) return "The value cannot contain quotes or line breaks";
+  if (draft.value.includes("%")) return "The value cannot contain '%'";
+  if (hasControlCharacter(draft.value)) return "The value cannot contain control characters";
   if (draft.value.includes("{{")) return "The value cannot contain '{{'";
   return null;
 }

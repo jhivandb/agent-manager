@@ -331,6 +331,11 @@ func TestValidateA2AUpstreamAuth(t *testing.T) {
 		"a single quote":         {Header: "X-Key", Value: value("it's")},
 		"a carriage return":      {Header: "X-Key", Value: value("a\rb")},
 		"a line feed":            {Header: "X-Key", Value: value("a\nb")},
+		"a percent sign":         {Header: "X-Key", Value: value("abc%2Fdef")},
+		"an escape":              {Header: "X-Key", Value: value("a\x1bb")},
+		"a tab":                  {Header: "X-Key", Value: value("a\tb")},
+		"a DEL":                  {Header: "X-Key", Value: value("a\x7fb")},
+		"a C1 control":           {Header: "X-Key", Value: value("a\u0085b")},
 		// The gateway renders {{ }} with secret and env functions.
 		"template syntax": {Header: "X-Key", Value: value(`{{ secret "openai" }}`)},
 	} {

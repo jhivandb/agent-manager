@@ -12270,7 +12270,7 @@ components:
           minLength: 1
           writeOnly: true
           description: >-
-            Header value: at most 8192 bytes, with no quote, line break or "{{". Omit it to keep
+            Header value: at most 8192 bytes, with no quote, "%", control character (including line breaks and tabs) or "{{". Omit it to keep
             the stored secret.
     AgentCardCORSConfig:
       type: object

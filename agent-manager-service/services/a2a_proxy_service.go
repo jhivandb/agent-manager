@@ -26,6 +26,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"unicode"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -632,7 +633,7 @@ func ensureDefaultAgentConfig(ctx context.Context, configs repositories.AgentCon
 	return nil
 }
 
-// validateA2AUpstreamAuth enforces what the gateway carries safely: it pastes into single-quoted YAML and renders {{ }}.
+// validateA2AUpstreamAuth enforces what the gateway carries safely: it pastes into single-quoted YAML, doubles '%' and renders {{ }}.
 func validateA2AUpstreamAuth(auth *models.A2AProxyAuthUpdate) error {
 	if auth == nil {
 		return nil
@@ -656,6 +657,10 @@ func validateA2AUpstreamAuth(auth *models.A2AProxyAuthUpdate) error {
 		return fmt.Errorf("%w: value must be at most %d bytes", utils.ErrInvalidUpstreamAuth, a2aUpstreamValueMaxLen)
 	case strings.ContainsAny(value, "'\r\n"):
 		return fmt.Errorf("%w: value must not contain quotes or line breaks", utils.ErrInvalidUpstreamAuth)
+	case strings.Contains(value, "%"):
+		return fmt.Errorf("%w: value must not contain '%%'", utils.ErrInvalidUpstreamAuth)
+	case strings.IndexFunc(value, unicode.IsControl) >= 0:
+		return fmt.Errorf("%w: value must not contain control characters", utils.ErrInvalidUpstreamAuth)
 	case strings.Contains(value, "{{"):
 		return fmt.Errorf("%w: value must not contain '{{'", utils.ErrInvalidUpstreamAuth)
 	}

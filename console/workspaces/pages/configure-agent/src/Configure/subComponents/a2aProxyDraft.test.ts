@@ -55,12 +55,19 @@ describe("a2aProxyDraft", () => {
     for (const bad of [
       fresh("X Key", "v"), fresh("Host", "v"), fresh("X-Key", ""), fresh("X-Key", "it's"),
       fresh("X-Key", "a\nb"), fresh("X-Key", '{{ secret "x" }}'), fresh("X-Key", "é".repeat(4097)),
+      fresh("X-Key", "abc%2Fdef"), fresh("X-Key", "a\u001bb"), fresh("X-Key", "a\tb"),
+      fresh("X-Key", "a\u007fb"), fresh("X-Key", "a\u0085b"),
     ]) {
       expect(upstreamAuthError(bad), JSON.stringify(bad)).not.toBeNull();
     }
     expect(upstreamAuthError(fresh("X-Key", "a".repeat(8192)))).toBeNull();
     expect(upstreamAuthError(fresh("", ""))).toBeNull();
     expect(upstreamAuthError(draftFromProxy(stored), stored)).toBeNull();
+  });
+
+  it("names the character the gateway cannot carry", () => {
+    expect(upstreamAuthError(fresh("X-Key", "abc%2F"))).toBe("The value cannot contain '%'");
+    expect(upstreamAuthError(fresh("X-Key", "a\tb"))).toBe("The value cannot contain control characters");
   });
 
   it("refuses the headers the gateway owns, in any case", () => {

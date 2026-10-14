@@ -21,7 +21,7 @@ var _ MappedNullable = &A2AProxyUpstreamAuth{}
 type A2AProxyUpstreamAuth struct {
 	// Header name. Host is not allowed.
 	Header string `json:"header"`
-	// Header value: at most 8192 bytes, with no quote, line break or \"{{\". Omit it to keep the stored secret.
+	// Header value: at most 8192 bytes, with no quote, \"%\", control character (including line breaks and tabs) or \"{{\". Omit it to keep the stored secret.
 	Value *string `json:"value,omitempty"`
 }
 
