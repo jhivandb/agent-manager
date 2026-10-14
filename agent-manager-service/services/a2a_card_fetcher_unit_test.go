@@ -148,17 +148,27 @@ func TestA2ACardFetcherGuardedModeRejectsLoopback(t *testing.T) {
 type fakeFetchCall struct {
 	URL     string
 	Guarded bool
+	Header  *A2ACardFetchHeader
 }
 
 // fakeA2ACardFetcher is the hand-written stub for the in-package A2ACardFetcher.
 type fakeA2ACardFetcher struct {
-	FetchFunc func(ctx context.Context, url string, guarded bool) (json.RawMessage, error)
-	calls     []fakeFetchCall
+	FetchFunc       func(ctx context.Context, url string, guarded bool) (json.RawMessage, error)
+	FetchOriginFunc func(ctx context.Context, url string, header *A2ACardFetchHeader) (json.RawMessage, error)
+	calls           []fakeFetchCall
 }
 
 func (f *fakeA2ACardFetcher) Fetch(ctx context.Context, url string, guarded bool) (json.RawMessage, error) {
-	f.calls = append(f.calls, fakeFetchCall{URL: url, Guarded: guarded})
+	f.calls = append(f.calls, fakeFetchCall{URL: url, Guarded: guarded, Header: nil})
 	return f.FetchFunc(ctx, url, guarded)
+}
+
+func (f *fakeA2ACardFetcher) FetchOrigin(ctx context.Context, url string, header *A2ACardFetchHeader) (json.RawMessage, error) {
+	f.calls = append(f.calls, fakeFetchCall{URL: url, Guarded: true, Header: header})
+	if f.FetchOriginFunc != nil {
+		return f.FetchOriginFunc(ctx, url, header)
+	}
+	return f.FetchFunc(ctx, url, true)
 }
 
 func TestA2ACardFetcherPlatformDoesNotFollowRedirectsToOtherHosts(t *testing.T) {
@@ -253,4 +263,58 @@ func TestA2ACardFetcherDialFailuresArePublicAndAddressFree(t *testing.T) {
 		"http://gw.invalid/a"+a2aAgentCardPath, false)
 	require.Error(t, err)
 	assert.Equal(t, "could not reach the agent card URL", userFacingA2AError(err, "internal"))
+}
+
+// permissiveOriginFetcher stands in for the guarded client, which rejects loopback.
+func permissiveOriginFetcher() *a2aCardFetcher {
+	return &a2aCardFetcher{
+		plain:   &http.Client{Timeout: time.Second},
+		guarded: &http.Client{Timeout: time.Second},
+	}
+}
+
+func TestA2ACardFetcherOriginSendsTheHeader(t *testing.T) {
+	var got string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Get("X-Upstream-Key")
+		_, _ = w.Write([]byte(validTestCard))
+	}))
+	t.Cleanup(srv.Close)
+
+	_, err := permissiveOriginFetcher().FetchOrigin(context.Background(), srv.URL+a2aAgentCardPath,
+		&A2ACardFetchHeader{Name: "X-Upstream-Key", Value: "s3cret"})
+	require.NoError(t, err)
+	assert.Equal(t, "s3cret", got)
+}
+
+func TestA2ACardFetcherOriginKeepsTheHeaderOnTheOrigin(t *testing.T) {
+	var leaked atomic.Bool
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		leaked.Store(r.Header.Get("X-Upstream-Key") != "")
+		_, _ = w.Write([]byte(validTestCard))
+	}))
+	t.Cleanup(other.Close)
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, other.URL+a2aAgentCardPath, http.StatusFound)
+	}))
+	t.Cleanup(origin.Close)
+
+	_, err := permissiveOriginFetcher().FetchOrigin(context.Background(), origin.URL+a2aAgentCardPath,
+		&A2ACardFetchHeader{Name: "X-Upstream-Key", Value: "s3cret"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "redirects to another host are not followed")
+	assert.False(t, leaked.Load(), "the credential must not reach another origin")
+}
+
+func TestA2ACardFetcherOriginWithoutAHeaderSendsNone(t *testing.T) {
+	var got string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Get("X-Upstream-Key")
+		_, _ = w.Write([]byte(validTestCard))
+	}))
+	t.Cleanup(srv.Close)
+
+	_, err := permissiveOriginFetcher().FetchOrigin(context.Background(), srv.URL+a2aAgentCardPath, nil)
+	require.NoError(t, err)
+	assert.Empty(t, got)
 }

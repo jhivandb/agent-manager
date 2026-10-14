@@ -71,6 +71,7 @@ type a2aReconcilerHarness struct {
 	deploymentRepo *repomocks.DeploymentRepositoryMock
 	ocClient       *clientmocks.OpenChoreoClientMock
 	fetcher        *fakeA2ACardFetcher
+	upstreamSecret string
 }
 
 // newA2AReconcilerHarness wires a reconciler whose every dependency succeeds and
@@ -140,7 +141,7 @@ func newA2AReconcilerHarness(serviceURL string) *a2aReconcilerHarness {
 		proxyRepo:      proxyRepo,
 		fetcher:        fetcher,
 		svc: NewA2APublicationReconcilerService(pubRepo, cardRepo, proxyRepo, deploymentRepo, gatewayRepo,
-			agentConfigRepo, ocClient, fetcher, NewGatewayEventsService(hub), testLogger()).(*a2aPublicationReconcilerService),
+			agentConfigRepo, ocClient, fetcher, proxyTestKey, NewGatewayEventsService(hub), testLogger()).(*a2aPublicationReconcilerService),
 	}
 }
 
@@ -612,9 +613,14 @@ const originTestCard = `{"name":"Weather","skills":[],"supportedInterfaces":[` +
 // withExternalOrigin makes pub an external row whose environment is proxied with a stored secret.
 func (h *a2aReconcilerHarness) withExternalOrigin(pub *models.A2APublication) {
 	pub.Source = models.A2APublicationSourceExternal
+	secret, err := encryptA2AUpstreamSecret("s3cret", proxyTestKey)
+	if err != nil {
+		panic(err)
+	}
+	h.upstreamSecret = secret
 	h.ocClient.GetReleaseBindingServiceURLFunc = nil // an external agent has no release binding
 	h.proxyRepo.GetByEnvUUIDFunc = func(context.Context, string, string, string, uuid.UUID) (*models.A2AProxy, error) {
-		return &models.A2AProxy{UpstreamAuthHeader: "X-Upstream-Key", UpstreamAuthSecret: "c2VjcmV0"}, nil
+		return &models.A2AProxy{UpstreamAuthHeader: "X-Upstream-Key", UpstreamAuthSecret: secret}, nil
 	}
 	h.cardRepo.GetFunc = func(context.Context, string, string, string, string) (*models.A2AAgentCard, error) {
 		return &models.A2AAgentCard{Source: models.A2AAgentCardSourceExternal, SourceURL: originTestCardURL}, nil
@@ -635,8 +641,10 @@ func TestReconcilerPublishesAnExternalAgentFromItsOriginCard(t *testing.T) {
 	h.svc.publishOne(context.Background(), pub)
 
 	require.Len(t, h.fetcher.calls, 1)
-	assert.Equal(t, fakeFetchCall{URL: originTestCardURL, Guarded: true}, h.fetcher.calls[0],
-		"the origin is SSRF-checked again at every publish")
+	assert.Equal(t, fakeFetchCall{
+		URL: originTestCardURL, Guarded: true,
+		Header: &A2ACardFetchHeader{Name: "X-Upstream-Key", Value: "s3cret"},
+	}, h.fetcher.calls[0], "the origin is SSRF-checked and sent the stored credential")
 	created := h.deploymentRepo.CreateWithLimitEnforcementCalls()
 	require.Len(t, created, 1)
 	var doc A2AAgentDeploymentYAML
@@ -645,7 +653,7 @@ func TestReconcilerPublishesAnExternalAgentFromItsOriginCard(t *testing.T) {
 	assert.Equal(t, []A2ATransport{{ProtocolBinding: "JSONRPC", PathPrefix: "/rpc"}}, doc.Spec.A2A.OperationConfigs.Transports)
 	require.NotNil(t, doc.Spec.Upstream.Auth)
 	assert.Equal(t, "X-Upstream-Key", *doc.Spec.Upstream.Auth.Header)
-	assert.Equal(t, "c2VjcmV0", *doc.Spec.Upstream.Auth.SecretRef)
+	assert.Equal(t, h.upstreamSecret, *doc.Spec.Upstream.Auth.SecretRef)
 
 	published := h.pubRepo.MarkPublishedCalls()
 	require.Len(t, published, 1)
@@ -861,4 +869,34 @@ func TestReconcilerNamesTheOriginInAFetchFailure(t *testing.T) {
 	retries := h.pubRepo.MarkAttemptFailedCalls()
 	require.Len(t, retries, 1)
 	assert.Equal(t, "could not fetch the origin agent card: agent card request returned HTTP 503", retries[0].LastErr)
+}
+
+func TestReconcilerFetchesAnUnauthenticatedOriginWithoutAHeader(t *testing.T) {
+	h := newA2AReconcilerHarness("")
+	pub := pendingPublication()
+	h.withExternalOrigin(&pub)
+	h.proxyRepo.GetByEnvUUIDFunc = func(context.Context, string, string, string, uuid.UUID) (*models.A2AProxy, error) {
+		return &models.A2AProxy{}, nil
+	}
+
+	h.svc.publishOne(context.Background(), pub)
+
+	require.Len(t, h.fetcher.calls, 1)
+	assert.Nil(t, h.fetcher.calls[0].Header)
+}
+
+func TestReconcilerRetriesWhenTheUpstreamSecretCannotBeDecrypted(t *testing.T) {
+	h := newA2AReconcilerHarness("")
+	pub := pendingPublication()
+	h.withExternalOrigin(&pub)
+	h.proxyRepo.GetByEnvUUIDFunc = func(context.Context, string, string, string, uuid.UUID) (*models.A2AProxy, error) {
+		return &models.A2AProxy{UpstreamAuthHeader: "X-Upstream-Key", UpstreamAuthSecret: "bm90LWNpcGhlcnRleHQ="}, nil
+	}
+
+	h.svc.publishOne(context.Background(), pub)
+
+	assert.Empty(t, h.fetcher.calls, "no fetch without the credential the origin needs")
+	retries := h.pubRepo.MarkAttemptFailedCalls()
+	require.Len(t, retries, 1)
+	assert.Equal(t, a2aPublishInternalError, retries[0].LastErr)
 }

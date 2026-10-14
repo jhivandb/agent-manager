@@ -76,6 +76,7 @@ type a2aPublicationReconcilerService struct {
 	agentConfigRepo repositories.AgentConfigRepository
 	ocClient        client.OpenChoreoClient
 	fetcher         A2ACardFetcher
+	encryptionKey   []byte
 	events          *GatewayEventsService
 	logger          *slog.Logger
 	stopCh          chan struct{}
@@ -96,6 +97,7 @@ func NewA2APublicationReconcilerService(
 	agentConfigRepo repositories.AgentConfigRepository,
 	ocClient client.OpenChoreoClient,
 	fetcher A2ACardFetcher,
+	encryptionKey []byte,
 	events *GatewayEventsService,
 	logger *slog.Logger,
 ) A2APublicationReconcilerService {
@@ -108,6 +110,7 @@ func NewA2APublicationReconcilerService(
 		agentConfigRepo: agentConfigRepo,
 		ocClient:        ocClient,
 		fetcher:         fetcher,
+		encryptionKey:   encryptionKey,
 		events:          events,
 		logger:          logger,
 		stopCh:          make(chan struct{}),
@@ -465,7 +468,11 @@ func (s *a2aPublicationReconcilerService) resolveExternalUpstream(ctx context.Co
 	if _, err := a2aProxyUpstream(card.SourceURL); err != nil {
 		return resolvedUpstream{}, err
 	}
-	body, err := s.fetcher.Fetch(ctx, card.SourceURL, true)
+	header, err := s.originCardHeader(proxy)
+	if err != nil {
+		return resolvedUpstream{}, err
+	}
+	body, err := s.fetcher.FetchOrigin(ctx, card.SourceURL, header)
 	if err != nil {
 		return resolvedUpstream{}, prefixA2APublicError("could not fetch the origin agent card", err)
 	}
@@ -474,6 +481,18 @@ func (s *a2aPublicationReconcilerService) resolveExternalUpstream(ctx context.Co
 		return resolvedUpstream{}, err
 	}
 	return resolvedUpstream{url: upstreamURL, transports: transports, auth: proxy.UpstreamAuth()}, nil
+}
+
+// originCardHeader is the stored upstream credential as a fetch header; the off-origin 409 keeps it on the card's origin.
+func (s *a2aPublicationReconcilerService) originCardHeader(proxy *models.A2AProxy) (*A2ACardFetchHeader, error) {
+	if proxy.UpstreamAuthHeader == "" || proxy.UpstreamAuthSecret == "" {
+		return nil, nil //nolint:nilnil // A proxy without a stored credential fetches the card unauthenticated.
+	}
+	value, err := decryptA2AUpstreamSecret(proxy.UpstreamAuthSecret, s.encryptionKey)
+	if err != nil {
+		return nil, err
+	}
+	return &A2ACardFetchHeader{Name: proxy.UpstreamAuthHeader, Value: value}, nil
 }
 
 // attemptPublish emits the Agent resource and reports where it went.

@@ -679,3 +679,15 @@ func encryptA2AUpstreamSecret(value string, key []byte) (string, error) {
 	}
 	return base64.StdEncoding.EncodeToString(ciphertext), nil
 }
+
+func decryptA2AUpstreamSecret(secret string, key []byte) (string, error) {
+	ciphertext, err := base64.StdEncoding.DecodeString(secret)
+	if err != nil {
+		return "", fmt.Errorf("failed to decode the upstream secret: %w", err)
+	}
+	plaintext, err := utils.DecryptBytes(ciphertext, key)
+	if err != nil {
+		return "", fmt.Errorf("failed to decrypt the upstream secret: %w", err)
+	}
+	return string(plaintext), nil
+}

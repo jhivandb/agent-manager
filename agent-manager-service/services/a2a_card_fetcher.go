@@ -38,10 +38,18 @@ const (
 	a2aCardMaxBytes     = 1 << 20
 )
 
+// A2ACardFetchHeader is a credential sent on a card fetch.
+type A2ACardFetchHeader struct {
+	Name  string
+	Value string
+}
+
 // A2ACardFetcher fetches and minimally validates an A2A 1.0 public agent card.
 type A2ACardFetcher interface {
 	// Fetch returns the card as served. guarded selects the SSRF-hardened client for user-supplied URLs.
 	Fetch(ctx context.Context, url string, guarded bool) (json.RawMessage, error)
+	// FetchOrigin fetches a user-supplied URL SSRF-guarded; with a header, redirects stay on the URL's origin.
+	FetchOrigin(ctx context.Context, url string, header *A2ACardFetchHeader) (json.RawMessage, error)
 }
 
 type a2aCardFetcher struct {
@@ -112,12 +120,42 @@ func (f *a2aCardFetcher) Fetch(ctx context.Context, url string, guarded bool) (j
 	if guarded {
 		client = f.guarded
 	}
+	return f.fetch(ctx, client, url, guarded, nil)
+}
 
+func (f *a2aCardFetcher) FetchOrigin(ctx context.Context, url string, header *A2ACardFetchHeader) (json.RawMessage, error) {
+	client := f.guarded
+	if header != nil {
+		client = sameOriginClient(f.guarded)
+	}
+	return f.fetch(ctx, client, url, true, header)
+}
+
+// sameOriginClient is base that additionally refuses redirects off the original origin.
+func sameOriginClient(base *http.Client) *http.Client {
+	c := *base
+	c.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if base.CheckRedirect != nil {
+			if err := base.CheckRedirect(req, via); err != nil {
+				return err
+			}
+		}
+		return sameHostRedirectOnly(req, via)
+	}
+	return &c
+}
+
+func (f *a2aCardFetcher) fetch(
+	ctx context.Context, client *http.Client, url string, guarded bool, header *A2ACardFetchHeader,
+) (json.RawMessage, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, newA2APublicError("the agent card URL is invalid", err)
 	}
 	req.Header.Set("Accept", "application/json")
+	if header != nil {
+		req.Header.Set(header.Name, header.Value)
+	}
 
 	resp, err := client.Do(req)
 	if err != nil {
