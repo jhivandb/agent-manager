@@ -480,7 +480,7 @@ func TestA2APublicationEnqueueRecordsTheAgentUUID(t *testing.T) {
 	assert.Equal(t, first, *statusOf(t, pub).AgentUUID)
 
 	again := newTestPublication(pub.AgentName)
-	again.OUID = pub.OUID
+	again.OUID, again.EnvironmentUUID = pub.OUID, pub.EnvironmentUUID
 	second := uuid.New()
 	again.AgentUUID = &second
 	require.NoError(t, repo.Enqueue(ctx, again))

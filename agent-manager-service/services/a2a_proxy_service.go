@@ -318,7 +318,7 @@ func (s *a2aProxyService) lockedProxy(ctx context.Context, tx *gorm.DB, t a2aPro
 	}
 	proxy, err := proxies.GetByEnvUUID(ctx, t.key.OUID, t.key.ProjectName, t.key.AgentName, t.key.EnvironmentUUID)
 	if errors.Is(err, repositories.ErrA2AProxyNotFound) {
-		return nil, nil
+		return nil, nil //nolint:nilnil // No row means the environment is direct.
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to read the A2A proxy: %w", err)
