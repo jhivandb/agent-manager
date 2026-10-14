@@ -63,8 +63,8 @@ func prefixA2APublicError(prefix string, err error) error {
 }
 
 const (
-	a2aPublishInternalError = "Publishing to the gateway failed because of an internal error. It will be retried; check the service logs if it persists."
-	a2aCardInternalError    = "The agent card could not be fetched because of an internal error. It will be retried; check the service logs if it persists."
+	a2aPublishInternalError = "publishing to the gateway failed because of an internal error; check the service logs"
+	a2aCardInternalError    = "the agent card could not be fetched because of an internal error; check the service logs"
 )
 
 // userFacingA2AError is cause's public message, or fallback when cause carries internal detail.

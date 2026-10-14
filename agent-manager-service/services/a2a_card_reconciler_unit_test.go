@@ -262,7 +262,7 @@ func TestCardReconcilerFailsTheRowWhenTheLastCardCannotBeStored(t *testing.T) {
 func TestCardReconcilerStoresAValidUTF8LastError(t *testing.T) {
 	h := newCardReconcilerHarness("http://gw.example/a")
 	h.fetcher.FetchFunc = func(context.Context, string, bool) (json.RawMessage, error) {
-		return nil, newA2APublicError("dial tcp: lookup \xff\x00host: no such host", nil)
+		return nil, newA2APublicError("agent card request returned HTTP 502 \xff\x00 from upstream", nil)
 	}
 
 	h.svc.fetchOne(context.Background(), pendingCard(models.A2AAgentCardSourcePlatform))
@@ -271,7 +271,7 @@ func TestCardReconcilerStoresAValidUTF8LastError(t *testing.T) {
 	require.Len(t, retries, 1)
 	assert.True(t, utf8.ValidString(retries[0].LastErr))
 	assert.NotContains(t, retries[0].LastErr, "\x00")
-	assert.Contains(t, retries[0].LastErr, "no such host")
+	assert.Contains(t, retries[0].LastErr, "HTTP 502")
 }
 
 func TestCardReconcilerCapsTheLastErrorLength(t *testing.T) {
