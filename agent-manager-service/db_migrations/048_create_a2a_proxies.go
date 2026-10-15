@@ -21,7 +21,7 @@ import (
 )
 
 // a2a_proxies marks an environment as gateway-proxied and holds its encrypted upstream auth.
-// a2a_publications gets a source and moves to an environment-UUID key, like a2a_agent_cards in 047.
+// a2a_publications gets a source and an environment-UUID key next to its name key.
 var migration048 = migration{
 	ID: 48,
 	Migrate: func(db *gorm.DB) error {
@@ -53,14 +53,10 @@ var migration048 = migration{
 				return err
 			}
 
-			dropNameKey := `
-			ALTER TABLE a2a_publications DROP CONSTRAINT IF EXISTS uq_a2a_publications_agent_env`
-			if err := runSQL(tx, dropNameKey); err != nil {
-				return err
-			}
-
+			// The name key stays until upstream/main pods, which upsert ON CONFLICT on it, are gone.
+			// TODO: drop uq_a2a_publications_agent_env in the next release's migration.
 			addUUIDKey := `
-			ALTER TABLE a2a_publications ADD CONSTRAINT uq_a2a_publications_agent_env
+			ALTER TABLE a2a_publications ADD CONSTRAINT uq_a2a_publications_agent_env_uuid
 				UNIQUE (ou_id, project_name, agent_name, environment_uuid)`
 			return runSQL(tx, addUUIDKey)
 		})
