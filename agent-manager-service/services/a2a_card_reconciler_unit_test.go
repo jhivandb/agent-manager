@@ -143,6 +143,7 @@ func TestCardReconcilerFetchesAnExternalCardGuarded(t *testing.T) {
 	require.Len(t, h.fetcher.calls, 1)
 	assert.Equal(t, row.SourceURL, h.fetcher.calls[0].URL)
 	assert.True(t, h.fetcher.calls[0].Guarded)
+	assert.Nil(t, h.fetcher.calls[0].Header)
 	require.Len(t, h.repo.MarkFetchedCalls(), 1)
 }
 
@@ -387,17 +388,51 @@ func TestCardReconcilerStopsTheBatchBeforeTheLeaseEnds(t *testing.T) {
 	rolloutBlocksUntilCancelled(h)
 	h.svc.batchBudget = 20 * time.Millisecond
 	h.repo.ClaimDueFunc = func(context.Context, time.Time, int) ([]models.A2AAgentCard, error) {
-		return []models.A2AAgentCard{
-			pendingCard(models.A2AAgentCardSourcePlatform),
-			pendingCard(models.A2AAgentCardSourcePlatform),
-			pendingCard(models.A2AAgentCardSourcePlatform),
-		}, nil
+		rows := make([]models.A2AAgentCard, a2aWorkerConcurrency+2)
+		for i := range rows {
+			rows[i] = pendingCard(models.A2AAgentCardSourcePlatform)
+		}
+		return rows, nil
 	}
 
 	runWithin(t, 2*time.Second, func() { h.svc.RunOnce(context.Background()) })
 
-	assert.Len(t, h.ocClient.GetReleaseBindingRolloutCalls(), 1, "rows left at the deadline wait for their lease to lapse")
-	assert.Len(t, h.repo.MarkAttemptFailedCalls(), 1, "only the cut-off row is charged")
+	assert.Len(t, h.ocClient.GetReleaseBindingRolloutCalls(), a2aWorkerConcurrency,
+		"rows left at the deadline wait for their lease to lapse")
+	assert.Len(t, h.repo.MarkAttemptFailedCalls(), a2aWorkerConcurrency, "only the cut-off rows are charged")
+}
+
+// One slow origin must not hold up the rest of the batch.
+func TestCardReconcilerFetchesRowsConcurrently(t *testing.T) {
+	h := newCardReconcilerHarness("http://gw.example/a")
+	started := make(chan struct{}, a2aWorkerConcurrency)
+	release := make(chan struct{})
+	h.fetcher.FetchFunc = func(context.Context, string, bool) (json.RawMessage, error) {
+		started <- struct{}{}
+		<-release
+		return json.RawMessage(validTestCard), nil
+	}
+	h.repo.ClaimDueFunc = func(context.Context, time.Time, int) ([]models.A2AAgentCard, error) {
+		rows := make([]models.A2AAgentCard, a2aWorkerConcurrency)
+		for i := range rows {
+			rows[i] = pendingCard(models.A2AAgentCardSourcePlatform)
+		}
+		return rows, nil
+	}
+
+	done := make(chan struct{})
+	go func() { h.svc.RunOnce(context.Background()); close(done) }()
+	for range a2aWorkerConcurrency {
+		select {
+		case <-started:
+		case <-time.After(2 * time.Second):
+			require.FailNow(t, "rows were not fetched concurrently")
+		}
+	}
+	close(release)
+	<-done
+
+	assert.Len(t, h.repo.MarkFetchedCalls(), a2aWorkerConcurrency)
 }
 
 func TestCardReconcilerBatchFitsInsideTheClaimLease(t *testing.T) {
@@ -523,6 +558,26 @@ func TestCardReconcilerFetchesAProxiedCardThroughTheGateway(t *testing.T) {
 	assert.Equal(t, row.EnvironmentUUID.String(), *asked.EnvironmentID)
 	assert.Equal(t, models.IngressGatewayRoles, asked.FunctionalityTypeIn)
 	require.Len(t, h.repo.MarkFetchedCalls(), 1)
+}
+
+// The fetched card path sits under the context the published Agent is served at.
+func TestCardReconcilerGatewayCardURLFollowsTheAgentContext(t *testing.T) {
+	for _, vhost := range []string{"gw.example", "https://gw.example", "https://gw.example/"} {
+		t.Run(vhost, func(t *testing.T) {
+			h := newCardReconcilerHarness("")
+			h.proxies.GetByEnvUUIDFunc = func(context.Context, string, string, string, uuid.UUID) (*models.A2AProxy, error) {
+				return &models.A2AProxy{}, nil
+			}
+			h.gateways.ListWithFiltersFunc = func(repositories.GatewayFilterOptions) ([]*models.Gateway, error) {
+				return []*models.Gateway{{UUID: uuid.New(), Vhost: vhost}}, nil
+			}
+
+			h.svc.fetchOne(context.Background(), pendingCard(models.A2AAgentCardSourceExternal))
+
+			require.Len(t, h.fetcher.calls, 1)
+			assert.Equal(t, "https://gw.example/trip-planner/.well-known/agent-card.json", h.fetcher.calls[0].URL)
+		})
+	}
 }
 
 func TestCardReconcilerRetriesWhenTheProxyLookupFails(t *testing.T) {

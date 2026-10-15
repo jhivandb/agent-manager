@@ -150,15 +150,9 @@ func (r *a2aProxyRepository) DeleteForAgent(ctx context.Context, ouID, projectNa
 }
 
 func (r *a2aProxyRepository) DeleteForEnvironment(ctx context.Context, ouID string, environmentUUID uuid.UUID) error {
-	return r.db.WithContext(ctx).
-		Where("ou_id = ? AND environment_uuid = ?", ouID, environmentUUID).
-		Delete(&models.A2AProxy{}).Error
+	return deleteForEnvironment[models.A2AProxy](ctx, r.db, ouID, environmentUUID)
 }
 
 func (r *a2aProxyRepository) ListEnvironmentUUIDs(ctx context.Context, ouID, environmentName string) ([]uuid.UUID, error) {
-	var ids []uuid.UUID
-	err := r.db.WithContext(ctx).Model(&models.A2AProxy{}).
-		Where("ou_id = ? AND environment_name = ?", ouID, environmentName).
-		Distinct().Pluck("environment_uuid", &ids).Error
-	return ids, err
+	return listEnvironmentUUIDs[models.A2AProxy](ctx, r.db, ouID, environmentName)
 }

@@ -21,12 +21,10 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/wso2/agent-manager/agent-manager-service/middleware"
 	"github.com/wso2/agent-manager/agent-manager-service/services"
 	"github.com/wso2/agent-manager/agent-manager-service/utils"
 )
@@ -39,15 +37,6 @@ type cardServiceStub struct {
 
 func (s *cardServiceStub) SetA2ACardSource(ctx context.Context, ouID, projectName, agentName, envName, sourceURL string) error {
 	return s.SetSourceFunc(ctx, ouID, projectName, agentName, envName, sourceURL)
-}
-
-func cardSourceRequest(body string) *http.Request {
-	req := httptest.NewRequest(http.MethodPut,
-		"/orgs/default/projects/checkout/agents/weather/environments/dev/agent-card/source", strings.NewReader(body))
-	req.SetPathValue(utils.PathParamProjName, "checkout")
-	req.SetPathValue(utils.PathParamAgentName, "weather")
-	req.SetPathValue(utils.PathParamEnvID, "dev")
-	return req.WithContext(middleware.WithResolvedOrg(req.Context(), middleware.ResolvedOrg{OUID: "ou-org"}))
 }
 
 func TestSetAgentCardSourceErrorsMapToStatusCodes(t *testing.T) {
@@ -63,7 +52,7 @@ func TestSetAgentCardSourceErrorsMapToStatusCodes(t *testing.T) {
 			}}
 			rec := httptest.NewRecorder()
 			NewA2AAgentCardController(stub).SetAgentCardSource(rec,
-				cardSourceRequest(`{"url":"https://other.example/.well-known/agent-card.json"}`))
+				agentEnvRequest(http.MethodPut, "agent-card/source", `{"url":"https://other.example/.well-known/agent-card.json"}`))
 			assert.Equal(t, code, rec.Code)
 		})
 	}

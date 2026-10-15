@@ -17,9 +17,13 @@
 package services
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -50,4 +54,35 @@ func TestA2ALogErrorExposesTheHiddenCauseOnlyForLogs(t *testing.T) {
 	assert.Contains(t, logged, "could not reach the agent card URL")
 	assert.Contains(t, logged, "dial tcp 10.0.0.5:8080")
 	assert.NotContains(t, userFacingA2AError(err, "fallback"), "10.0.0.5")
+}
+
+func TestDrainWithinLeaseRunsEveryRowWithinTheConcurrencyCap(t *testing.T) {
+	var mu sync.Mutex
+	var inFlight, peak, ran int
+	rows := make([]int, 3*a2aWorkerConcurrency)
+
+	drainWithinLease(context.Background(), testLogger(), time.Now().Add(time.Minute), rows, "test", func(context.Context, int) {
+		mu.Lock()
+		inFlight++
+		peak = max(peak, inFlight)
+		mu.Unlock()
+		time.Sleep(5 * time.Millisecond)
+		mu.Lock()
+		inFlight--
+		ran++
+		mu.Unlock()
+	})
+
+	assert.Equal(t, len(rows), ran, "it returns only once every started row is done")
+	assert.LessOrEqual(t, peak, a2aWorkerConcurrency)
+	assert.Greater(t, peak, 1, "rows overlap")
+}
+
+func TestDrainWithinLeaseStartsNoRowOnceTheLeaseIsSpent(t *testing.T) {
+	var ran atomic.Int32
+
+	drainWithinLease(context.Background(), testLogger(), time.Now().Add(-time.Second), []int{1, 2}, "test",
+		func(context.Context, int) { ran.Add(1) })
+
+	assert.Zero(t, ran.Load())
 }

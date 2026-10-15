@@ -2796,37 +2796,41 @@ func detachedCleanupContext(ctx context.Context) (context.Context, context.Cance
 	return context.WithTimeout(context.WithoutCancel(ctx), agentCleanupTimeout)
 }
 
-// withAgentConfigCleanupRetry retries a configuration teardown with exponential backoff.
-//
-// Every external step of DeleteForAgentDeletion tolerates an already-gone resource — the
-// proxy/provider revocations swallow their not-found sentinels and DeleteSecret is
-// idempotent by contract — so re-running it after a partial success finishes the
-// remaining steps instead of double-deleting. That is what makes retrying on *any* error
-// safe here: the error it returns is a joined summary of which steps failed, not a typed
-// sentinel that could be classified as transient or permanent.
-//
-// A permanent failure therefore costs the full attempt budget before giving up. That is
-// the accepted trade: an un-revoked credential stays live until someone intervenes, so
-// spending a few seconds to rule out a transient cause is worth more than failing fast.
-func withAgentConfigCleanupRetry(ctx context.Context, logger *slog.Logger, configUUID string, fn func() error) error {
+// cleanupRetry bounds the retries of an idempotent cleanup step; delay is the wait after 0-based failed attempt n.
+type cleanupRetry struct {
+	attempts int
+	delay    func(n int) time.Duration
+}
+
+// fixedCleanupRetry waits the same backoff between every attempt.
+func fixedCleanupRetry(attempts int, backoff time.Duration) cleanupRetry {
+	return cleanupRetry{attempts: attempts, delay: func(int) time.Duration { return backoff }}
+}
+
+// agentConfigCleanupRetry backs off exponentially: an un-revoked credential stays live, so a few seconds to rule out a transient cause is worth it.
+func agentConfigCleanupRetry() cleanupRetry {
+	return cleanupRetry{attempts: agentConfigCleanupAttempts, delay: func(n int) time.Duration { return agentConfigCleanupRetryDelay << n }}
+}
+
+// retryCleanup runs an idempotent step until it succeeds or r is spent, never waiting after the final attempt.
+func retryCleanup(ctx context.Context, logger *slog.Logger, r cleanupRetry, step string, fn func() error, logAttrs ...any) error {
 	var lastErr error
-	for attempt := range agentConfigCleanupAttempts {
-		lastErr = fn()
-		if lastErr == nil {
+	for attempt := range r.attempts {
+		if lastErr = fn(); lastErr == nil {
 			if attempt > 0 {
-				logger.Info("Configuration teardown succeeded on retry", "configUUID", configUUID, "attempt", attempt+1)
+				logger.Info(step+" succeeded on retry", append([]any{"attempt", attempt + 1}, logAttrs...)...)
 			}
 			return nil
 		}
-		if attempt == agentConfigCleanupAttempts-1 {
+		if attempt == r.attempts-1 {
 			break
 		}
-		delay := agentConfigCleanupRetryDelay << attempt
-		logger.Warn("Configuration teardown failed, retrying",
-			"configUUID", configUUID, "attempt", attempt+1, "retryIn", delay, "error", lastErr)
+		delay := r.delay(attempt)
+		logger.Warn(step+" failed, retrying",
+			append([]any{"attempt", attempt + 1, "of", r.attempts, "retryIn", delay, "error", lastErr}, logAttrs...)...)
 		select {
 		case <-ctx.Done():
-			return lastErr
+			return errors.Join(lastErr, ctx.Err())
 		case <-time.After(delay):
 		}
 	}
@@ -2952,9 +2956,9 @@ func (s *agentManagerService) deleteAgentLLMConfigurations(ctx context.Context, 
 			s.logger.Warn("Failed to parse config UUID during agent deletion", "uuid", cfg.UUID, "type", cfg.Type, "error", parseErr)
 			continue
 		}
-		delErr := withAgentConfigCleanupRetry(ctx, s.logger, cfg.UUID, func() error {
+		delErr := retryCleanup(ctx, s.logger, agentConfigCleanupRetry(), "Configuration teardown", func() error {
 			return s.agentConfigurationService.DeleteForAgentDeletion(ctx, configUUID, ouID, projectName, agentName, isExternalAgent)
-		})
+		}, "configUUID", cfg.UUID)
 		if delErr != nil {
 			// DeleteForAgentDeletion keeps the agent_configurations row when any external
 			// step failed, so the record of what still needs revoking survives. Creating an
@@ -3460,27 +3464,10 @@ func (s *agentManagerService) DeployAgent(ctx context.Context, ouID string, proj
 	if resilienceTimeoutSeconds > 0 {
 		deployResilienceTimeoutSeconds = &resilienceTimeoutSeconds
 	}
-	agentConfig := &models.AgentConfig{
-		OUID:                      ouID,
-		ProjectName:               projectName,
-		AgentName:                 agentName,
-		EnvironmentName:           targetEnv.Name,
-		EnableAutoInstrumentation: enableAutoInstrumentation,
-		InstrumentationVersion:    existingInstrumentationVersion,
-		EnableApiKeySecurity:      apiCfg.EnableApiKeySecurity,
-		CORSEnabled:               apiCfg.CORSEnabled,
-		CORSAllowOrigins:          apiCfg.CORSAllowOrigins,
-		CORSAllowMethods:          apiCfg.CORSAllowMethods,
-		CORSAllowHeaders:          apiCfg.CORSAllowHeaders,
-		CORSAllowCredentials:      apiCfg.CORSAllowCredentials,
-		EnableOAuthSecurity:       apiCfg.EnableOAuthSecurity,
-		OAuthIssuers:              apiCfg.OAuthIssuers,
-		OAuthAudiences:            apiCfg.OAuthAudiences,
-		OAuthHeaderName:           apiCfg.OAuthHeaderName,
-		OAuthAuthHeaderPrefix:     apiCfg.OAuthAuthHeaderPrefix,
-		OAuthForwardToken:         apiCfg.OAuthForwardToken,
-		ResilienceTimeoutSeconds:  deployResilienceTimeoutSeconds,
-	}
+	agentConfig := agentConfigFromAPIConfig(ouID, projectName, agentName, targetEnv.Name, apiCfg)
+	agentConfig.EnableAutoInstrumentation = enableAutoInstrumentation
+	agentConfig.InstrumentationVersion = existingInstrumentationVersion
+	agentConfig.ResilienceTimeoutSeconds = deployResilienceTimeoutSeconds
 	agentConfig.SetCardCORSOverride(cardCORSOverride)
 	if configErr := s.agentConfigRepo.Upsert(ctx, agentConfig); configErr != nil {
 		s.logger.Error("Failed to persist agent config after deploy", "agentName", agentName, "environment", lowestEnv, "error", configErr)
@@ -3567,6 +3554,28 @@ type resolvedCORSConfig struct {
 	OAuthHeaderName       string
 	OAuthAuthHeaderPrefix string
 	OAuthForwardToken     bool
+}
+
+// agentConfigFromAPIConfig is the environment's config row carrying api; callers set the remaining fields.
+func agentConfigFromAPIConfig(ouID, projectName, agentName, envName string, api resolvedCORSConfig) *models.AgentConfig {
+	return &models.AgentConfig{
+		OUID:                  ouID,
+		ProjectName:           projectName,
+		AgentName:             agentName,
+		EnvironmentName:       envName,
+		EnableApiKeySecurity:  api.EnableApiKeySecurity,
+		CORSEnabled:           api.CORSEnabled,
+		CORSAllowOrigins:      api.CORSAllowOrigins,
+		CORSAllowMethods:      api.CORSAllowMethods,
+		CORSAllowHeaders:      api.CORSAllowHeaders,
+		CORSAllowCredentials:  api.CORSAllowCredentials,
+		EnableOAuthSecurity:   api.EnableOAuthSecurity,
+		OAuthIssuers:          api.OAuthIssuers,
+		OAuthAudiences:        api.OAuthAudiences,
+		OAuthHeaderName:       api.OAuthHeaderName,
+		OAuthAuthHeaderPrefix: api.OAuthAuthHeaderPrefix,
+		OAuthForwardToken:     api.OAuthForwardToken,
+	}
 }
 
 // resolveTracingConfig resolves instrumentation config: request > DB > default (true if withDefaults, else false).
@@ -4619,27 +4628,10 @@ func (s *agentManagerService) PromoteAgent(ctx context.Context, ouID string, pro
 			promoteResilienceTimeoutSeconds = &resilienceTimeoutSeconds
 		}
 		// Persist config for the target environment
-		agentConfig := &models.AgentConfig{
-			OUID:                      ouID,
-			ProjectName:               projectName,
-			AgentName:                 agentName,
-			EnvironmentName:           req.TargetEnvironment,
-			EnableAutoInstrumentation: tracingCfg.EnableAutoInstrumentation,
-			InstrumentationVersion:    resolvedInstrumentationVersion,
-			EnableApiKeySecurity:      apiCfg.EnableApiKeySecurity,
-			CORSEnabled:               apiCfg.CORSEnabled,
-			CORSAllowOrigins:          apiCfg.CORSAllowOrigins,
-			CORSAllowMethods:          apiCfg.CORSAllowMethods,
-			CORSAllowHeaders:          apiCfg.CORSAllowHeaders,
-			CORSAllowCredentials:      apiCfg.CORSAllowCredentials,
-			EnableOAuthSecurity:       apiCfg.EnableOAuthSecurity,
-			OAuthIssuers:              apiCfg.OAuthIssuers,
-			OAuthAudiences:            apiCfg.OAuthAudiences,
-			OAuthHeaderName:           apiCfg.OAuthHeaderName,
-			OAuthAuthHeaderPrefix:     apiCfg.OAuthAuthHeaderPrefix,
-			OAuthForwardToken:         apiCfg.OAuthForwardToken,
-			ResilienceTimeoutSeconds:  promoteResilienceTimeoutSeconds,
-		}
+		agentConfig := agentConfigFromAPIConfig(ouID, projectName, agentName, req.TargetEnvironment, apiCfg)
+		agentConfig.EnableAutoInstrumentation = tracingCfg.EnableAutoInstrumentation
+		agentConfig.InstrumentationVersion = resolvedInstrumentationVersion
+		agentConfig.ResilienceTimeoutSeconds = promoteResilienceTimeoutSeconds
 		agentConfig.SetCardCORSOverride(cardCORSOverride)
 		if upsertErr := s.agentConfigRepo.Upsert(ctx, agentConfig); upsertErr != nil {
 			s.logger.Error("Failed to persist agent config for target environment", "agentName", agentName, "environment", req.TargetEnvironment, "error", upsertErr)
@@ -5026,11 +5018,15 @@ func (s *agentManagerService) UpdateAgentDeploySettings(ctx context.Context, ouI
 	if err != nil {
 		return err
 	}
+	pubKey, publishes, err := s.a2aRepublicationKey(ctx, agent, ouID, projectName, agentName, req.EnvironmentName, targetEnv.UUID)
+	if err != nil {
+		return err
+	}
+	// A direct external environment has nothing that applies deploy settings.
 	external := isExternalProvisioned(agent)
-	if external {
-		if err := s.requireProxiedEnvironment(ctx, agent, ouID, projectName, targetEnv); err != nil {
-			return err
-		}
+	if external && !publishes {
+		return fmt.Errorf("%w: deploy settings apply only to environments that route this agent through the gateway",
+			utils.ErrInvalidInput)
 	}
 
 	// Resolve final settings: precedence is request → existing DB
@@ -5094,39 +5090,18 @@ func (s *agentManagerService) UpdateAgentDeploySettings(ctx context.Context, ouI
 		settingsResilienceTimeoutSeconds = &resilienceTimeoutSeconds
 	}
 	// Persist resolved config so subsequent deploy/promote calls see the current values.
-	agentConfig := &models.AgentConfig{
-		OUID:                      ouID,
-		ProjectName:               projectName,
-		AgentName:                 agentName,
-		EnvironmentName:           req.EnvironmentName,
-		EnableAutoInstrumentation: tracingCfg.EnableAutoInstrumentation,
-		InstrumentationVersion:    resolvedInstrumentationVersion,
-		EnableApiKeySecurity:      apiCfg.EnableApiKeySecurity,
-		CORSEnabled:               apiCfg.CORSEnabled,
-		CORSAllowOrigins:          apiCfg.CORSAllowOrigins,
-		CORSAllowMethods:          apiCfg.CORSAllowMethods,
-		CORSAllowHeaders:          apiCfg.CORSAllowHeaders,
-		CORSAllowCredentials:      apiCfg.CORSAllowCredentials,
-		EnableOAuthSecurity:       apiCfg.EnableOAuthSecurity,
-		OAuthIssuers:              apiCfg.OAuthIssuers,
-		OAuthAudiences:            apiCfg.OAuthAudiences,
-		OAuthHeaderName:           apiCfg.OAuthHeaderName,
-		OAuthAuthHeaderPrefix:     apiCfg.OAuthAuthHeaderPrefix,
-		OAuthForwardToken:         apiCfg.OAuthForwardToken,
-		ResilienceTimeoutSeconds:  settingsResilienceTimeoutSeconds,
-	}
+	agentConfig := agentConfigFromAPIConfig(ouID, projectName, agentName, req.EnvironmentName, apiCfg)
+	agentConfig.EnableAutoInstrumentation = tracingCfg.EnableAutoInstrumentation
+	agentConfig.InstrumentationVersion = resolvedInstrumentationVersion
+	agentConfig.ResilienceTimeoutSeconds = settingsResilienceTimeoutSeconds
 	agentConfig.SetCardCORSOverride(cardCORSOverride)
 	if upsertErr := s.agentConfigRepo.Upsert(ctx, agentConfig); upsertErr != nil {
 		s.logger.Error("Failed to persist agent deploy settings", "agentName", agentName, "environment", req.EnvironmentName, "error", upsertErr)
 		return fmt.Errorf("failed to persist agent deploy settings: %w", upsertErr)
 	}
 
-	key, ok, err := s.a2aRepublicationKey(ctx, agent, ouID, projectName, agentName, req.EnvironmentName, targetEnv.UUID)
-	if err != nil {
-		return err
-	}
-	if ok {
-		if err := s.a2aPublisher.Enqueue(ctx, nil, key, a2aPublicationSourceFor(agent), artifact.UUID); err != nil {
+	if publishes {
+		if err := s.a2aPublisher.Enqueue(ctx, nil, pubKey, a2aPublicationSourceFor(agent), artifact.UUID); err != nil {
 			return fmt.Errorf("deploy settings saved but the gateway was not updated; save them again to retry: %w", err)
 		}
 	}
@@ -5137,38 +5112,13 @@ func (s *agentManagerService) UpdateAgentDeploySettings(ctx context.Context, ouI
 
 // deploySettingsApplyTo is true for API agents and for external A2A agents, whose proxied environments take inbound auth and CORS at the gateway.
 func deploySettingsApplyTo(agent *models.AgentResponse) bool {
-	switch agent.Type.Type {
-	case string(utils.AgentTypeAPI):
-		return true
-	case string(utils.AgentTypeExternalAPI):
+	if isExternalProvisioned(agent) {
 		return utils.IsA2AAgentSubType(agent.Type.SubType)
 	}
-	return false
+	return agent.Type.Type == string(utils.AgentTypeAPI)
 }
 
-// requireProxiedEnvironment refuses deploy settings for a direct external environment, where nothing applies them.
-func (s *agentManagerService) requireProxiedEnvironment(
-	ctx context.Context, agent *models.AgentResponse, ouID, projectName string, env *models.EnvironmentResponse,
-) error {
-	envUUID, err := uuid.Parse(env.UUID)
-	if err != nil {
-		return fmt.Errorf("environment %q has an unparseable UUID %q: %w", env.Name, env.UUID, err)
-	}
-	proxied := false
-	if s.a2aPublisher != nil {
-		if proxied, err = s.a2aPublisher.ShouldPublish(ctx, agent, ouID, projectName, envUUID); err != nil {
-			return err
-		}
-	}
-	if !proxied {
-		return fmt.Errorf("%w: deploy settings apply only to environments that route this agent through the gateway",
-			utils.ErrInvalidInput)
-	}
-	return nil
-}
-
-// applyReleaseBindingSettings writes the settings onto the agent's release binding (one atomic
-// update, which rolls the pods) and returns the instrumentation version to persist.
+// applyReleaseBindingSettings writes the settings to the release binding in one pod-rolling update and returns the instrumentation version to persist.
 func (s *agentManagerService) applyReleaseBindingSettings(
 	ctx context.Context, ouID, agentName string, req *spec.UpdateAgentDeploySettingsRequest,
 	agent *models.AgentResponse, targetEnv *models.EnvironmentResponse, policies []map[string]interface{},

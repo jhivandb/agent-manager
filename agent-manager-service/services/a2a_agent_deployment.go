@@ -162,6 +162,11 @@ func a2aAgentEnvArtifactName(projectName, agentName, envID string) string {
 	return fmt.Sprintf("%s-%s-%s", strings.TrimSpace(projectName), strings.TrimSpace(agentName), suffix)
 }
 
+// a2aAgentContext is the agent's gateway context, shaped like a REST agent's (buildAPIConfigurationTraitParameters).
+func a2aAgentContext(agentName string) string {
+	return "/" + strings.TrimPrefix(strings.TrimSpace(agentName), "/")
+}
+
 // generateA2AAgentDeploymentYAML renders the Agent resource as YAML.
 func generateA2AAgentDeploymentYAML(in A2AAgentDeploymentInput) (string, error) {
 	deployment, err := buildA2AAgentDeploymentYAML(in)
@@ -220,12 +225,9 @@ func buildA2AAgentDeploymentYAML(in A2AAgentDeploymentInput) (*A2AAgentDeploymen
 		Spec: A2AAgentDeploymentSpec{
 			DisplayName: in.DisplayName,
 			Version:     a2aAgentVersion,
-			// Matches what the api-configuration trait sets for a REST agent
-			// (buildAPIConfigurationTraitParameters), so A2A and REST agents
-			// keep consistent URL shapes.
-			Context:  "/" + strings.TrimPrefix(strings.TrimSpace(in.AgentName), "/"),
-			Upstream: A2AUpstream{URL: upstreamURL, Auth: in.UpstreamAuth},
-			A2A:      a2a,
+			Context:     a2aAgentContext(in.AgentName),
+			Upstream:    A2AUpstream{URL: upstreamURL, Auth: in.UpstreamAuth},
+			A2A:         a2a,
 		},
 	}, nil
 }

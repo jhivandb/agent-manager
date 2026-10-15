@@ -17,9 +17,13 @@
 package services
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -86,6 +90,44 @@ func userFacingA2AError(cause error, fallback string) string {
 		return sanitizeA2ALastError(public.Error())
 	}
 	return fallback
+}
+
+// warnIfInternalA2AError logs cause as msg when lastErr is the fallback that hides it from the user.
+func warnIfInternalA2AError(logger *slog.Logger, lastErr, fallback string, cause error, msg string, args ...any) {
+	if lastErr == fallback {
+		logger.Warn(msg, append(args, "error", a2aLogError(cause))...)
+	}
+}
+
+// a2aWorkerConcurrency caps how many rows of a claimed batch run at once.
+const a2aWorkerConcurrency = 4
+
+// drainWithinLease runs each row, a2aWorkerConcurrency at a time, and starts none once the lease budget is spent.
+func drainWithinLease[T any](
+	ctx context.Context, logger *slog.Logger, deadline time.Time, rows []T, label string, each func(context.Context, T),
+) {
+	batchCtx, cancel := context.WithDeadline(ctx, deadline)
+	defer cancel()
+	var wg sync.WaitGroup
+	defer wg.Wait()
+	slots := make(chan struct{}, a2aWorkerConcurrency)
+	for i, row := range rows {
+		slots <- struct{}{}
+		if batchCtx.Err() != nil {
+			logger.Info(label+" batch ran out of lease; leaving the rest for a later claim", "remaining", len(rows)-i)
+			return
+		}
+		wg.Go(func() {
+			defer func() { <-slots }()
+			each(batchCtx, row)
+		})
+	}
+}
+
+// a2aAttemptContexts bounds an attempt by timeout and returns a context to record its outcome on even after that.
+func a2aAttemptContexts(ctx context.Context, timeout time.Duration) (attempt, record context.Context, cancel context.CancelFunc) {
+	attempt, cancel = context.WithTimeout(ctx, timeout)
+	return attempt, context.WithoutCancel(ctx), cancel
 }
 
 // resolveIngressGateway picks the environment's INGRESS gateway, where inbound A2A traffic belongs; egress gateways host outbound LLM/MCP artifacts.

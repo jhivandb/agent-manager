@@ -721,7 +721,7 @@ func TestEnvironmentService_DeleteEnvironmentDropsA2ACards(t *testing.T) {
 		}
 		svc := NewEnvironmentService(discardLogger(), gateways, deletingEnvOC(envUUID, nil),
 			&clientmocks.ThunderProberMock{}, nil, nil, nil, nil, cards, nil, nil)
-		svc.(*environmentService).a2aCleanupBackoff = 0
+		svc.(*environmentService).cleanupBackoff = 0
 
 		require.NoError(t, svc.DeleteEnvironment(context.Background(), org, envID))
 		assert.Len(t, gateways.DeleteEnvironmentMappingsByEnvironmentIDCalls(), 1, "mapping cleanup still runs")
@@ -2194,7 +2194,7 @@ func TestEnvironmentService_DeleteEnvironmentRetriesAFailedA2ATeardown(t *testin
 	m.proxies.DeleteForEnvironmentFunc = func(context.Context, string, uuid.UUID) error { return nil }
 	svc := NewEnvironmentService(discardLogger(), cleanedGatewayRepo(), deletingEnvOC(live, nil),
 		&clientmocks.ThunderProberMock{}, nil, nil, nil, nil, nil, m.publisher(), nil).(*environmentService)
-	svc.a2aCleanupBackoff = 0
+	svc.cleanupBackoff = 0
 
 	require.NoError(t, svc.DeleteEnvironment(context.Background(), "acme", "dev"))
 
@@ -2251,11 +2251,36 @@ func TestEnvironmentService_DeleteEnvironmentRetriesAgentConfigDeletion(t *testi
 	configs := agentConfigRepoRecording(1)
 	svc := NewEnvironmentService(discardLogger(), cleanedGatewayRepo(), deletingEnvOC("44444444-4444-4444-4444-444444444444", nil),
 		&clientmocks.ThunderProberMock{}, nil, nil, nil, nil, nil, nil, configs).(*environmentService)
-	svc.a2aCleanupBackoff = 0
+	svc.cleanupBackoff = 0
 
 	require.NoError(t, svc.DeleteEnvironment(context.Background(), "acme", "dev"))
 
 	assert.Len(t, configs.DeleteForEnvironmentCalls(), 2, "a transient failure is retried")
+}
+
+// mcpCleanupStub fails the first MCP cleanup; every other config service method panics.
+type mcpCleanupStub struct {
+	AgentConfigurationService
+	calls int
+}
+
+func (s *mcpCleanupStub) CleanupEnvironmentMCPArtifacts(context.Context, string, uuid.UUID, string) error {
+	s.calls++
+	if s.calls == 1 {
+		return errors.New("gateway blip")
+	}
+	return nil
+}
+
+func TestEnvironmentService_DeleteEnvironmentRetriesMCPCleanup(t *testing.T) {
+	mcp := &mcpCleanupStub{}
+	svc := NewEnvironmentService(discardLogger(), cleanedGatewayRepo(), deletingEnvOC("44444444-4444-4444-4444-444444444444", nil),
+		&clientmocks.ThunderProberMock{}, mcp, nil, nil, nil, nil, nil, nil).(*environmentService)
+	svc.cleanupBackoff = 0
+
+	require.NoError(t, svc.DeleteEnvironment(context.Background(), "acme", "dev"))
+
+	assert.Equal(t, 2, mcp.calls, "a transient failure is retried")
 }
 
 // One failed listing must not hide the publications another listing still finds.
@@ -2309,24 +2334,11 @@ func TestEnvironmentService_DeleteEnvironmentCleanupSurvivesCanceledRequest(t *t
 	}
 	svc := NewEnvironmentService(discardLogger(), cleanedGatewayRepo(), deletingEnvOC("44444444-4444-4444-4444-444444444444", nil),
 		&clientmocks.ThunderProberMock{}, nil, nil, nil, nil, cards, nil, nil).(*environmentService)
-	svc.a2aCleanupBackoff = time.Millisecond // nonzero, so a canceled ctx deterministically wins the retry select
+	svc.cleanupBackoff = time.Millisecond // nonzero, so a canceled ctx deterministically wins the retry select
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
 	require.NoError(t, svc.DeleteEnvironment(ctx, "acme", "dev"))
 
 	assert.GreaterOrEqual(t, len(cards.DeleteForEnvironmentCalls()), 2, "the teardown is retried, not abandoned at the first ctx.Done()")
-}
-
-func TestEnvironmentService_RetryA2ACleanupDoesNotSleepAfterTheFinalAttempt(t *testing.T) {
-	svc := &environmentService{logger: discardLogger(), a2aCleanupAttempts: 1, a2aCleanupBackoff: time.Hour}
-	done := make(chan error, 1)
-	go func() { done <- svc.retryA2ACleanup(context.Background(), func() error { return errors.New("boom") }) }()
-
-	select {
-	case err := <-done:
-		require.Error(t, err)
-	case <-time.After(5 * time.Second):
-		t.Fatal("retryA2ACleanup slept after its final attempt")
-	}
 }

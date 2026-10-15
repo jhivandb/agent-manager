@@ -18,7 +18,6 @@ package services
 
 import (
 	"context"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -136,20 +135,16 @@ func (t a2aProxyTarget) cardRow(sourceURL string) *models.A2AAgentCard {
 }
 
 func (s *a2aProxyService) GetA2AProxy(ctx context.Context, ouID, projectName, agentName, envName string) (*models.A2AProxyStatus, error) {
-	// Rows exist only for live proxied environments, so OpenChoreo is asked only on a miss.
+	// Rows exist only for live proxied environments, so a miss is reported as not proxied without asking OpenChoreo.
 	proxy, err := s.proxyRepo.Get(ctx, ouID, projectName, agentName, envName)
 	if errors.Is(err, repositories.ErrA2AProxyNotFound) {
-		if _, err := s.agent(ctx, ouID, projectName, agentName); err != nil {
-			return nil, err
-		}
 		return nil, utils.ErrEnvironmentNotProxied
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to read the A2A proxy: %w", err)
 	}
 	status := &models.A2AProxyStatus{UpstreamAuthHeader: proxy.UpstreamAuthHeader}
-	key := a2aPublicationKey{OUID: ouID, ProjectName: projectName, AgentName: agentName, EnvironmentName: envName, EnvironmentUUID: proxy.EnvironmentUUID}
-	pub, err := s.publisher.Publication(ctx, key)
+	pub, err := s.publisher.Publication(ctx, ouID, projectName, agentName, proxy.EnvironmentUUID)
 	switch {
 	case errors.Is(err, repositories.ErrA2APublicationNotFound):
 		// Enabling writes both rows together, so a missing publication never resolves on its own.
@@ -285,29 +280,15 @@ func (s *a2aProxyService) RefreshCardSource(
 
 // target resolves an external A2A agent and an environment the caller may act on.
 func (s *a2aProxyService) target(ctx context.Context, ouID, projectName, agentName, envName string) (a2aProxyTarget, error) {
-	agent, err := s.agent(ctx, ouID, projectName, agentName)
+	agent, err := getExternalA2AAgent(ctx, s.ocClient, ouID, projectName, agentName, utils.ErrA2AProxyAgentNotExternal)
 	if err != nil {
 		return a2aProxyTarget{}, err
-	}
-	if !utils.IsA2AAgentSubType(agent.Type.SubType) {
-		return a2aProxyTarget{}, utils.ErrAgentNotA2A
-	}
-	if !isExternalProvisioned(agent) {
-		return a2aProxyTarget{}, utils.ErrA2AProxyAgentNotExternal
 	}
 	env, err := requireEnvironmentTier(ctx, s.ocClient, s.logger, ouID, envName)
 	if err != nil {
 		return a2aProxyTarget{}, err
 	}
 	return newA2AProxyTarget(agent, ouID, projectName, env)
-}
-
-func (s *a2aProxyService) agent(ctx context.Context, ouID, projectName, agentName string) (*models.AgentResponse, error) {
-	agent, err := s.ocClient.GetComponent(ctx, ouID, projectName, agentName)
-	if err != nil {
-		return nil, translateAgentError(err)
-	}
-	return agent, nil
 }
 
 // lockedProxy takes the environment's transition lock and reads its proxy row under it; nil while direct.
@@ -326,15 +307,25 @@ func (s *a2aProxyService) lockedProxy(ctx context.Context, tx *gorm.DB, t a2aPro
 	return proxy, nil
 }
 
+// lockedCard reads the environment's card row under the transition lockedProxy took; nil when it has none.
+func (s *a2aProxyService) lockedCard(ctx context.Context, tx *gorm.DB, t a2aProxyTarget) (*models.A2AAgentCard, error) {
+	card, err := s.cardRepo.WithTx(tx).Get(ctx, t.key.OUID, t.key.ProjectName, t.key.AgentName, t.key.EnvironmentName)
+	if errors.Is(err, repositories.ErrA2AAgentCardNotFound) {
+		return nil, nil //nolint:nilnil // No row means no card source is registered.
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to read the agent card: %w", err)
+	}
+	return card, nil
+}
+
 // requireCardSource is the 409 for an environment with no registered card URL to proxy.
 func (s *a2aProxyService) requireCardSource(ctx context.Context, tx *gorm.DB, t a2aProxyTarget) error {
-	card, err := s.cardRepo.WithTx(tx).Get(ctx, t.key.OUID, t.key.ProjectName, t.key.AgentName, t.key.EnvironmentName)
+	card, err := s.lockedCard(ctx, tx, t)
 	switch {
-	case errors.Is(err, repositories.ErrA2AAgentCardNotFound):
-		return utils.ErrA2AProxyNeedsCardSource
 	case err != nil:
-		return fmt.Errorf("failed to read the agent card: %w", err)
-	case card.Source != models.A2AAgentCardSourceExternal || card.SourceURL == "":
+		return err
+	case card == nil || card.Source != models.A2AAgentCardSourceExternal || card.SourceURL == "":
 		return utils.ErrA2AProxyNeedsCardSource
 	}
 	return requireProxyableCardURL(card.SourceURL)
@@ -347,12 +338,12 @@ func (s *a2aProxyService) requireSecretStaysOnOrigin(
 	if proxy.UpstreamAuthSecret == "" {
 		return nil
 	}
-	card, err := s.cardRepo.WithTx(tx).Get(ctx, t.key.OUID, t.key.ProjectName, t.key.AgentName, t.key.EnvironmentName)
+	card, err := s.lockedCard(ctx, tx, t)
 	switch {
-	case errors.Is(err, repositories.ErrA2AAgentCardNotFound):
-		return utils.ErrA2AProxyOriginChangeNeedsAuthReset
 	case err != nil:
-		return fmt.Errorf("failed to read the agent card: %w", err)
+		return err
+	case card == nil:
+		return utils.ErrA2AProxyOriginChangeNeedsAuthReset
 	}
 	registered, regErr := url.Parse(card.SourceURL)
 	next, nextErr := url.Parse(sourceURL)
@@ -380,9 +371,9 @@ func (s *a2aProxyService) proxyRow(
 		row.UpstreamAuthHeader, row.UpstreamAuthSecret = auth.Header, existing.UpstreamAuthSecret
 		return row, auth.Header != existing.UpstreamAuthHeader, nil
 	}
-	secret, err := encryptA2AUpstreamSecret(*auth.Value, s.encryptionKey)
+	secret, err := utils.EncryptSecretRef(*auth.Value, s.encryptionKey)
 	if err != nil {
-		return nil, false, err
+		return nil, false, fmt.Errorf("failed to encrypt the upstream secret: %w", err)
 	}
 	row.UpstreamAuthHeader, row.UpstreamAuthSecret = auth.Header, secret
 	return row, true, nil
@@ -412,8 +403,7 @@ func (s *a2aProxyService) enqueuePublication(ctx context.Context, tx *gorm.DB, t
 	return s.publisher.Enqueue(ctx, tx, t.key, models.A2APublicationSourceExternal, artifact.UUID)
 }
 
-// republish re-derives the routes from the origin card on the next publish; the card fetch follows it.
-// A direct environment gets ifDirect, or utils.ErrEnvironmentNotProxied when it is nil.
+// republish re-derives the routes from the origin card, then refetches it; a direct environment gets ifDirect (nil: ErrEnvironmentNotProxied).
 func (s *a2aProxyService) republish(ctx context.Context, t a2aProxyTarget, ifDirect a2aCardStep) error {
 	err := s.tx(ctx, func(tx *gorm.DB) error {
 		proxy, err := s.lockedProxy(ctx, tx, t)
@@ -477,8 +467,7 @@ func deleteCardRow(ctx context.Context, cards repositories.A2AAgentCardRepositor
 	return nil
 }
 
-// removeProxy switches the environment to direct; it discards the stored secret, so it is refused unrecorded.
-// A direct environment gets ifDirect, or utils.ErrEnvironmentNotProxied when it is nil.
+// removeProxy switches to direct, discarding the secret, so it is refused unrecorded; a direct environment gets ifDirect (nil: ErrEnvironmentNotProxied).
 func (s *a2aProxyService) removeProxy(ctx context.Context, t a2aProxyTarget, cardStep, ifDirect a2aCardStep) error {
 	var attempt *audit.Attempt
 	var teardown a2aTeardown
@@ -537,13 +526,9 @@ func (s *a2aProxyService) artifactUUID(t a2aProxyTarget) (uuid.UUID, error) {
 
 // dropIfAgentGone undoes this request's writes when the agent was deleted or replaced meanwhile; the deletion could not see them.
 func (s *a2aProxyService) dropIfAgentGone(ctx context.Context, t a2aProxyTarget) error {
-	current, err := s.agent(ctx, t.key.OUID, t.key.ProjectName, t.key.AgentName)
-	switch {
-	case errors.Is(err, utils.ErrAgentNotFound):
-	case err != nil:
+	gone, err := agentGoneOrReplaced(ctx, s.ocClient, t.key.OUID, t.key.ProjectName, t.key.AgentName, t.agent.UUID)
+	if err != nil || !gone {
 		return err
-	case current.UUID == t.agent.UUID:
-		return nil
 	}
 	teardown, err := s.forget(ctx, t)
 	if err != nil {
@@ -609,24 +594,7 @@ func (s *a2aProxyService) beginAudit(
 // ensureDefaultAgentConfig gives a newly proxied environment a platform A2A agent's inbound defaults; a saved config wins.
 func ensureDefaultAgentConfig(ctx context.Context, configs repositories.AgentConfigRepository, key a2aPublicationKey) error {
 	api := withA2AVersionHeader(resolveAPIConfig(nil, nil, nil, nil, nil, true))
-	err := configs.CreateIfAbsent(ctx, &models.AgentConfig{
-		OUID:                  key.OUID,
-		ProjectName:           key.ProjectName,
-		AgentName:             key.AgentName,
-		EnvironmentName:       key.EnvironmentName,
-		EnableApiKeySecurity:  api.EnableApiKeySecurity,
-		CORSEnabled:           api.CORSEnabled,
-		CORSAllowOrigins:      api.CORSAllowOrigins,
-		CORSAllowMethods:      api.CORSAllowMethods,
-		CORSAllowHeaders:      api.CORSAllowHeaders,
-		CORSAllowCredentials:  api.CORSAllowCredentials,
-		EnableOAuthSecurity:   api.EnableOAuthSecurity,
-		OAuthIssuers:          api.OAuthIssuers,
-		OAuthAudiences:        api.OAuthAudiences,
-		OAuthHeaderName:       api.OAuthHeaderName,
-		OAuthAuthHeaderPrefix: api.OAuthAuthHeaderPrefix,
-		OAuthForwardToken:     api.OAuthForwardToken,
-	})
+	err := configs.CreateIfAbsent(ctx, agentConfigFromAPIConfig(key.OUID, key.ProjectName, key.AgentName, key.EnvironmentName, api))
 	if err != nil {
 		return fmt.Errorf("failed to write the default agent config: %w", err)
 	}
@@ -675,24 +643,4 @@ var a2aReservedUpstreamHeaders = []string{
 func isReservedUpstreamHeader(header string) bool {
 	name := strings.ToLower(header)
 	return strings.HasPrefix(name, "proxy-") || slices.Contains(a2aReservedUpstreamHeaders, name)
-}
-
-func encryptA2AUpstreamSecret(value string, key []byte) (string, error) {
-	ciphertext, err := utils.EncryptBytes([]byte(value), key)
-	if err != nil {
-		return "", fmt.Errorf("failed to encrypt the upstream secret: %w", err)
-	}
-	return base64.StdEncoding.EncodeToString(ciphertext), nil
-}
-
-func decryptA2AUpstreamSecret(secret string, key []byte) (string, error) {
-	ciphertext, err := base64.StdEncoding.DecodeString(secret)
-	if err != nil {
-		return "", fmt.Errorf("failed to decode the upstream secret: %w", err)
-	}
-	plaintext, err := utils.DecryptBytes(ciphertext, key)
-	if err != nil {
-		return "", fmt.Errorf("failed to decrypt the upstream secret: %w", err)
-	}
-	return string(plaintext), nil
 }

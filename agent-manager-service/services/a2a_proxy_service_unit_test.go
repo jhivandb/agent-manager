@@ -19,7 +19,6 @@ package services
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"strings"
 	"testing"
 
@@ -30,7 +29,6 @@ import (
 
 	"github.com/wso2/agent-manager/agent-manager-service/audit"
 	"github.com/wso2/agent-manager/agent-manager-service/clients/clientmocks"
-	"github.com/wso2/agent-manager/agent-manager-service/middleware/jwtassertion"
 	"github.com/wso2/agent-manager/agent-manager-service/models"
 	"github.com/wso2/agent-manager/agent-manager-service/rbac"
 	"github.com/wso2/agent-manager/agent-manager-service/repositories"
@@ -156,11 +154,9 @@ func (h *proxyHarness) acceptsWrites() {
 
 func decryptForTest(t *testing.T, secretRef string) string {
 	t.Helper()
-	ciphertext, err := base64.StdEncoding.DecodeString(secretRef)
+	plaintext, err := utils.DecryptSecretRef(secretRef, proxyTestKey)
 	require.NoError(t, err)
-	plaintext, err := utils.DecryptBytes(ciphertext, proxyTestKey)
-	require.NoError(t, err)
-	return string(plaintext)
+	return plaintext
 }
 
 func devEnv() *models.EnvironmentResponse {
@@ -169,9 +165,7 @@ func devEnv() *models.EnvironmentResponse {
 
 // tierOnlyCtx authorises both tiers but carries no audit recorder.
 func tierOnlyCtx() context.Context {
-	return jwtassertion.ContextWithTokenClaimsAndScope(context.Background(), &jwtassertion.TokenClaims{
-		Scope: audit.ScopesOf([]rbac.Permission{rbac.AgentEnvNonProduction, rbac.AgentEnvProduction}),
-	})
+	return tierGrantedOn(context.Background())
 }
 
 func TestSetA2AProxySwitchesADirectEnvironmentToProxied(t *testing.T) {
@@ -368,6 +362,7 @@ func TestA2AProxyOnADirectEnvironmentIsNotFound(t *testing.T) {
 
 	_, err := h.svc.GetA2AProxy(context.Background(), "org-1", "checkout", "weather", "dev")
 	assert.ErrorIs(t, err, utils.ErrEnvironmentNotProxied)
+	assert.Empty(t, h.oc.GetComponentCalls(), "a GET miss costs no OpenChoreo call")
 	assert.ErrorIs(t, h.svc.DeleteA2AProxy(tierGrantedCtx(t), "org-1", "checkout", "weather", "dev"), utils.ErrEnvironmentNotProxied)
 	assert.ErrorIs(t, h.svc.RefreshA2AProxy(tierGrantedCtx(t), "org-1", "checkout", "weather", "dev"), utils.ErrEnvironmentNotProxied)
 	h.assertNothingWritten(t)
@@ -708,10 +703,7 @@ type failingRecorder struct{ audit.Recorder }
 func (failingRecorder) RecordSync(context.Context, audit.Event) error { return assert.AnError }
 
 func sinkOutageCtx() context.Context {
-	return jwtassertion.ContextWithTokenClaimsAndScope(
-		audit.WithRecorder(context.Background(), failingRecorder{audit.NewNoopRecorder()}),
-		&jwtassertion.TokenClaims{Scope: audit.ScopesOf([]rbac.Permission{rbac.AgentEnvNonProduction, rbac.AgentEnvProduction})},
-	)
+	return tierGrantedOn(audit.WithRecorder(context.Background(), failingRecorder{audit.NewNoopRecorder()}))
 }
 
 // A real sink failure is the documented 503, not a 500.

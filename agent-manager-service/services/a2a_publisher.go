@@ -136,12 +136,11 @@ func (p *A2APublisher) ShouldPublish(
 }
 
 // Publication returns the environment's publication row.
-func (p *A2APublisher) Publication(ctx context.Context, key a2aPublicationKey) (*models.A2APublication, error) {
-	return p.pubRepo.Get(ctx, key.OUID, key.ProjectName, key.AgentName, key.EnvironmentUUID)
+func (p *A2APublisher) Publication(ctx context.Context, ouID, projectName, agentName string, envUUID uuid.UUID) (*models.A2APublication, error) {
+	return p.pubRepo.Get(ctx, ouID, projectName, agentName, envUUID)
 }
 
-// TeardownEnv removes one environment's publication and gateway deployments inside tx, keeping
-// the artifact so its API keys survive a switch back; send the result once tx commits.
+// TeardownEnv drops one environment's publication and gateway deployments in tx but keeps the artifact and its API keys; send the result after commit.
 func (p *A2APublisher) TeardownEnv(
 	ctx context.Context, tx *gorm.DB, key a2aPublicationKey, artifactUUID uuid.UUID,
 ) (a2aTeardown, error) {
@@ -159,8 +158,7 @@ func (p *A2APublisher) TeardownEnv(
 	return a2aTeardown{artifactUUID: artifactUUID, gatewayIDs: gatewayIDs}, nil
 }
 
-// TeardownEnvAndDropArtifact is TeardownEnv for an environment that is going away: it also deletes
-// the artifact, whose API keys must not outlive it. uuid.Nil means it has none.
+// TeardownEnvAndDropArtifact is TeardownEnv that also deletes the artifact (uuid.Nil: none), so its API keys go too.
 func (p *A2APublisher) TeardownEnvAndDropArtifact(
 	ctx context.Context, tx *gorm.DB, key a2aPublicationKey, artifactUUID uuid.UUID,
 ) (a2aTeardown, error) {
@@ -196,9 +194,7 @@ func (p *A2APublisher) DeleteForAgent(ctx context.Context, ouID, projectName, ag
 	return errors.Join(errs...)
 }
 
-// TeardownEnvironment removes every A2A publication, gateway deployment, agent artifact (incl. those left by a
-// switch to direct, found by handle) and proxy row of a deleted environment, then tells the gateways.
-// One agent's failure does not stop the rest.
+// TeardownEnvironment removes a deleted environment's A2A rows, deployments and agent artifacts, then tells the gateways; one failure does not stop the rest.
 func (p *A2APublisher) TeardownEnvironment(ctx context.Context, ouID string, envUUID uuid.UUID) error {
 	pubs, err := p.pubRepo.ListForEnvironment(ctx, ouID, envUUID)
 	if err != nil {

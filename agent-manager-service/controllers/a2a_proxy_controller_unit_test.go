@@ -58,8 +58,9 @@ func (s *proxyServiceStub) RefreshA2AProxy(context.Context, string, string, stri
 	panic("not used")
 }
 
-func proxyRequest(method, body string) *http.Request {
-	req := httptest.NewRequest(method, "/orgs/default/projects/checkout/agents/weather/environments/dev/a2a-proxy",
+// agentEnvRequest targets resource under the checkout/weather agent's dev environment in a resolved org.
+func agentEnvRequest(method, resource, body string) *http.Request {
+	req := httptest.NewRequest(method, "/orgs/default/projects/checkout/agents/weather/environments/dev/"+resource,
 		strings.NewReader(body))
 	req.SetPathValue(utils.PathParamProjName, "checkout")
 	req.SetPathValue(utils.PathParamAgentName, "weather")
@@ -74,7 +75,7 @@ func TestGetA2AProxyReturnsTheHeaderButNoSecret(t *testing.T) {
 	}}
 	rec := httptest.NewRecorder()
 
-	NewA2AProxyController(stub).GetA2AProxy(rec, proxyRequest(http.MethodGet, ""))
+	NewA2AProxyController(stub).GetA2AProxy(rec, agentEnvRequest(http.MethodGet, "a2a-proxy", ""))
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	var body map[string]interface{}
@@ -100,7 +101,7 @@ func TestSetA2AProxyKeepsTheThreeAuthCasesApart(t *testing.T) {
 				return nil
 			}}
 			rec := httptest.NewRecorder()
-			NewA2AProxyController(stub).SetA2AProxy(rec, proxyRequest(http.MethodPut, tc.body))
+			NewA2AProxyController(stub).SetA2AProxy(rec, agentEnvRequest(http.MethodPut, "a2a-proxy", tc.body))
 			require.Equal(t, http.StatusAccepted, rec.Code)
 			assert.Equal(t, tc.want, got)
 		})
@@ -123,7 +124,7 @@ func TestA2AProxyErrorsMapToStatusCodes(t *testing.T) {
 				return fmt.Errorf("wrapped: %w", sentinel)
 			}}
 			rec := httptest.NewRecorder()
-			NewA2AProxyController(stub).SetA2AProxy(rec, proxyRequest(http.MethodPut, `{}`))
+			NewA2AProxyController(stub).SetA2AProxy(rec, agentEnvRequest(http.MethodPut, "a2a-proxy", `{}`))
 			assert.Equal(t, code, rec.Code)
 		})
 	}

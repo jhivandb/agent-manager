@@ -129,8 +129,7 @@ func a2aCardInterfaces(card json.RawMessage) ([]a2aCardInterface, error) {
 	return interfaces, nil
 }
 
-// a2aProxyTransport fronts one binding, or says why it cannot. The gateway rewrites every entry on a
-// fronted binding to its one endpoint, so the entries must agree on the URL and declare 1.0 or nothing.
+// a2aProxyTransport fronts one binding whose entries share one URL and declare 1.0 or nothing, or says why it cannot.
 func a2aProxyTransport(upstream *url.URL, binding string, interfaces []a2aCardInterface) (A2ATransport, string) {
 	var link string
 	offered := false
@@ -156,8 +155,7 @@ func a2aProxyTransport(upstream *url.URL, binding string, interfaces []a2aCardIn
 	return A2ATransport{ProtocolBinding: binding, PathPrefix: prefix}, ""
 }
 
-// a2aPathPrefixUnder is link's path below the upstream's; "" omits it. ok is false when link is elsewhere
-// or its remainder breaks the gateway's prefix rules.
+// a2aPathPrefixUnder is link's path below upstream's ("" omits it); ok is false off upstream or against the gateway's prefix rules.
 func a2aPathPrefixUnder(upstream *url.URL, link string) (string, bool) {
 	u, err := url.Parse(link)
 	if err != nil || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.RawPath != "" {

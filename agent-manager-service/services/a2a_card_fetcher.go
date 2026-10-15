@@ -46,8 +46,8 @@ type A2ACardFetchHeader struct {
 
 // A2ACardFetcher fetches and minimally validates an A2A 1.0 public agent card.
 type A2ACardFetcher interface {
-	// Fetch returns the card as served. guarded selects the SSRF-hardened client for user-supplied URLs.
-	Fetch(ctx context.Context, url string, guarded bool) (json.RawMessage, error)
+	// Fetch returns the card as served from a platform-derived URL, unguarded.
+	Fetch(ctx context.Context, url string) (json.RawMessage, error)
 	// FetchOrigin fetches a user-supplied URL SSRF-guarded; with a header, redirects stay on the URL's origin.
 	FetchOrigin(ctx context.Context, url string, header *A2ACardFetchHeader) (json.RawMessage, error)
 }
@@ -115,12 +115,8 @@ func refusedRedirectHost(resp *http.Response) string {
 	return loc.Host
 }
 
-func (f *a2aCardFetcher) Fetch(ctx context.Context, url string, guarded bool) (json.RawMessage, error) {
-	client := f.plain
-	if guarded {
-		client = f.guarded
-	}
-	return f.fetch(ctx, client, url, guarded, nil)
+func (f *a2aCardFetcher) Fetch(ctx context.Context, url string) (json.RawMessage, error) {
+	return f.fetch(ctx, f.plain, url, false, nil)
 }
 
 func (f *a2aCardFetcher) FetchOrigin(ctx context.Context, url string, header *A2ACardFetchHeader) (json.RawMessage, error) {

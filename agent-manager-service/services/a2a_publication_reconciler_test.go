@@ -613,7 +613,7 @@ const originTestCard = `{"name":"Weather","skills":[],"supportedInterfaces":[` +
 // withExternalOrigin makes pub an external row whose environment is proxied with a stored secret.
 func (h *a2aReconcilerHarness) withExternalOrigin(pub *models.A2APublication) {
 	pub.Source = models.A2APublicationSourceExternal
-	secret, err := encryptA2AUpstreamSecret("s3cret", proxyTestKey)
+	secret, err := utils.EncryptSecretRef("s3cret", proxyTestKey)
 	if err != nil {
 		panic(err)
 	}
@@ -698,6 +698,42 @@ func TestReconcilerFailsAnExternalRowWhoseProxyIsGone(t *testing.T) {
 
 	require.Len(t, h.pubRepo.MarkFailedCalls(), 1)
 	assert.Empty(t, h.fetcher.calls)
+}
+
+// The third-party origin is not called for a publish a local lookup already rules out.
+func TestReconcilerFetchesTheOriginOnlyAfterTheLocalLookups(t *testing.T) {
+	t.Run("no ingress gateway", func(t *testing.T) {
+		h := newA2AReconcilerHarness("")
+		pub := pendingPublication()
+		h.withExternalOrigin(&pub)
+		h.svc.gatewayRepo = &repomocks.GatewayRepositoryMock{
+			ListWithFiltersFunc: func(repositories.GatewayFilterOptions) ([]*models.Gateway, error) {
+				return []*models.Gateway{}, nil
+			},
+		}
+
+		h.svc.publishOne(context.Background(), pub)
+
+		assert.Empty(t, h.fetcher.calls)
+		retries := h.pubRepo.MarkAttemptFailedCalls()
+		require.Len(t, retries, 1)
+		assert.Contains(t, retries[0].LastErr, "no ingress gateway")
+	})
+	t.Run("unreadable agent config", func(t *testing.T) {
+		h := newA2AReconcilerHarness("")
+		pub := pendingPublication()
+		h.withExternalOrigin(&pub)
+		h.svc.agentConfigRepo = &repomocks.AgentConfigRepositoryMock{
+			GetFunc: func(context.Context, string, string, string, string) (*models.AgentConfig, error) {
+				return nil, assert.AnError
+			},
+		}
+
+		h.svc.publishOne(context.Background(), pub)
+
+		assert.Empty(t, h.fetcher.calls)
+		require.Len(t, h.pubRepo.MarkAttemptFailedCalls(), 1)
+	})
 }
 
 func TestReconcilerRetriesWhileTheOriginIsUnreachable(t *testing.T) {
@@ -827,7 +863,11 @@ func TestReconcilerStopsTheBatchBeforeTheLeaseEnds(t *testing.T) {
 	serviceURLBlocksUntilCancelled(h)
 	h.svc.batchBudget = 20 * time.Millisecond
 	h.pubRepo.ClaimDueFunc = func(context.Context, time.Time, int) ([]models.A2APublication, error) {
-		return []models.A2APublication{pendingPublication(), pendingPublication(), pendingPublication()}, nil
+		rows := make([]models.A2APublication, a2aWorkerConcurrency+2)
+		for i := range rows {
+			rows[i] = pendingPublication()
+		}
+		return rows, nil
 	}
 	h.pubRepo.FindPublishedFunc = func(context.Context, uuid.UUID, int) ([]models.A2APublication, error) {
 		return []models.A2APublication{}, nil
@@ -835,8 +875,8 @@ func TestReconcilerStopsTheBatchBeforeTheLeaseEnds(t *testing.T) {
 
 	runWithin(t, 2*time.Second, func() { h.svc.RunOnce(context.Background()) })
 
-	assert.Len(t, h.ocClient.GetReleaseBindingServiceURLCalls(), 1)
-	assert.Len(t, h.pubRepo.MarkAttemptFailedCalls(), 1, "only the cut-off row is charged")
+	assert.Len(t, h.ocClient.GetReleaseBindingServiceURLCalls(), a2aWorkerConcurrency)
+	assert.Len(t, h.pubRepo.MarkAttemptFailedCalls(), a2aWorkerConcurrency, "only the cut-off rows are charged")
 }
 
 func TestPublicationBatchFitsInsideTheClaimLease(t *testing.T) {

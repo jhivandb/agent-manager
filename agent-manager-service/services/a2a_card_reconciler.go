@@ -142,23 +142,13 @@ func (s *a2aCardReconcilerService) RunOnce(ctx context.Context) {
 		s.logger.Error("Failed to claim due A2A agent cards", "error", err)
 		return
 	}
-	batchCtx, cancel := context.WithDeadline(ctx, claimedAt.Add(s.batchBudget))
-	defer cancel()
-	for i, row := range due {
-		if batchCtx.Err() != nil {
-			s.logger.Info("A2A card batch ran out of lease; leaving the rest for a later claim", "remaining", len(due)-i)
-			return
-		}
-		s.fetchOne(batchCtx, row)
-	}
+	drainWithinLease(ctx, s.logger, claimedAt.Add(s.batchBudget), due, "A2A card", s.fetchOne)
 }
 
 // fetchOne fetches one row's card and records the outcome.
 func (s *a2aCardReconcilerService) fetchOne(ctx context.Context, row models.A2AAgentCard) {
-	attemptCtx, cancel := context.WithTimeout(ctx, s.attemptTimeout)
+	attemptCtx, ctx, cancel := a2aAttemptContexts(ctx, s.attemptTimeout)
 	defer cancel()
-	// The outcome must be recorded even when the attempt ran out of time.
-	ctx = context.WithoutCancel(ctx)
 	fetched, err := s.attemptFetch(attemptCtx, row)
 	if errors.Is(err, errA2ACardNotDeployed) {
 		s.dropUndeployedCard(ctx, row)
@@ -236,7 +226,7 @@ func (s *a2aCardReconcilerService) fetchExternalCard(ctx context.Context, row mo
 }
 
 func (s *a2aCardReconcilerService) fetchRegisteredCard(ctx context.Context, row models.A2AAgentCard) (a2aCardFetch, error) {
-	body, err := s.fetcher.Fetch(ctx, row.SourceURL, true)
+	body, err := s.fetcher.FetchOrigin(ctx, row.SourceURL, nil)
 	return a2aCardFetch{url: row.SourceURL, body: body}, err
 }
 
@@ -246,8 +236,8 @@ func (s *a2aCardReconcilerService) fetchCardThroughGateway(ctx context.Context, 
 	if err != nil {
 		return a2aCardFetch{}, err
 	}
-	url := strings.TrimRight(buildPublicProxyURL(gateway, nil), "/") + "/" + row.AgentName + a2aAgentCardPath
-	body, err := s.fetcher.Fetch(ctx, url, false)
+	url := strings.TrimRight(buildPublicProxyURL(gateway, nil), "/") + a2aAgentContext(row.AgentName) + a2aAgentCardPath
+	body, err := s.fetcher.Fetch(ctx, url)
 	if err != nil {
 		return a2aCardFetch{url: url}, prefixA2APublicError(url, err)
 	}
@@ -271,7 +261,7 @@ func (s *a2aCardReconcilerService) fetchPlatformCard(ctx context.Context, row mo
 		return attempt, errA2ACardEndpointNotReady
 	}
 	attempt.url = strings.TrimRight(rollout.ExternalURL, "/") + a2aAgentCardPath
-	body, err := s.fetcher.Fetch(ctx, attempt.url, false)
+	body, err := s.fetcher.Fetch(ctx, attempt.url)
 	if err != nil {
 		// The derived URL is otherwise invisible to the user.
 		return attempt, prefixA2APublicError(attempt.url, err)
@@ -282,10 +272,8 @@ func (s *a2aCardReconcilerService) fetchPlatformCard(ctx context.Context, row mo
 
 func (s *a2aCardReconcilerService) recordAttemptFailure(ctx context.Context, row models.A2AAgentCard, releaseName string, cause error) {
 	lastErr := userFacingA2AError(cause, a2aCardInternalError)
-	if lastErr == a2aCardInternalError {
-		s.logger.Warn("A2A agent card fetch failed internally",
-			"agentName", row.AgentName, "environment", row.EnvironmentName, "error", a2aLogError(cause))
-	}
+	warnIfInternalA2AError(s.logger, lastErr, a2aCardInternalError, cause, "A2A agent card fetch failed internally",
+		"agentName", row.AgentName, "environment", row.EnvironmentName)
 	err := s.markAttemptFailed(ctx, row, cause, lastErr, releaseName)
 	if err != nil && !errors.Is(err, repositories.ErrA2AAgentCardSuperseded) {
 		s.logger.Error("Failed to record A2A agent card attempt; retrying with a fixed message",

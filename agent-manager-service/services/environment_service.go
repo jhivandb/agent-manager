@@ -92,8 +92,8 @@ type EnvironmentService interface {
 }
 
 const (
-	a2aEnvCleanupAttempts = 3
-	a2aEnvCleanupBackoff  = 200 * time.Millisecond
+	envCleanupAttempts = 3
+	envCleanupBackoff  = 200 * time.Millisecond
 )
 
 type environmentService struct {
@@ -108,8 +108,8 @@ type environmentService struct {
 	a2aCardRepo        repositories.A2AAgentCardRepository
 	a2aPublisher       *A2APublisher
 	agentConfigRepo    repositories.AgentConfigRepository
-	a2aCleanupAttempts int
-	a2aCleanupBackoff  time.Duration
+	cleanupAttempts    int
+	cleanupBackoff     time.Duration
 }
 
 // NewEnvironmentService creates a new environment service
@@ -126,8 +126,8 @@ func NewEnvironmentService(logger *slog.Logger, gatewayRepo repositories.Gateway
 		a2aCardRepo:        a2aCardRepo,
 		a2aPublisher:       a2aPublisher,
 		agentConfigRepo:    agentConfigRepo,
-		a2aCleanupAttempts: a2aEnvCleanupAttempts,
-		a2aCleanupBackoff:  a2aEnvCleanupBackoff,
+		cleanupAttempts:    envCleanupAttempts,
+		cleanupBackoff:     envCleanupBackoff,
 	}
 }
 
@@ -324,8 +324,8 @@ func (s *environmentService) DeleteEnvironment(ctx context.Context, ouID string,
 	if err != nil {
 		s.logger.Error("Failed to look up environment", "ouID", ouID, "envID", envID, "error", err)
 		if errors.Is(err, utils.ErrNotFound) || errors.Is(err, utils.ErrEnvironmentNotFound) {
-			// A repeat DELETE is how a failed or skipped A2A cleanup is retried.
-			s.tearDownA2AState(ctx, ouID, envID, uuid.Nil)
+			// A repeat DELETE is how a failed or skipped cleanup is retried.
+			s.cleanUpDeletedEnvironment(ctx, ouID, envID, uuid.Nil)
 			return utils.ErrEnvironmentNotFound
 		}
 		return fmt.Errorf("failed to look up environment: %w", err)
@@ -368,19 +368,7 @@ func (s *environmentService) DeleteEnvironment(ctx context.Context, ouID string,
 		}
 	}
 
-	// Cascade MCP-proxy cleanup: tear down every agent-scoped MCP mapping deployed into this
-	// env and strip the env block from every org-level MCP proxy blueprint. Best-effort — the
-	// environment is already gone from OpenChoreo, so cleanup errors are logged, not fatal.
-	if s.agentConfigService != nil {
-		mcpCtx, cancel := detachedCleanupContext(ctx)
-		defer cancel()
-		if err := s.agentConfigService.CleanupEnvironmentMCPArtifacts(mcpCtx, ouID, envUUID, env.Name); err != nil {
-			s.logger.Warn("environment deleted; MCP artifact cleanup had errors",
-				"ouID", ouID, "envID", envID, "envUUID", envUUID, "error", err)
-		}
-	}
-
-	s.tearDownA2AState(ctx, ouID, env.Name, envUUID)
+	s.cleanUpDeletedEnvironment(ctx, ouID, env.Name, envUUID)
 
 	// Local cleanup: gateway↔env mapping rows. The gateway themselves are unaffected.
 	deleted, err := s.gatewayRepo.DeleteEnvironmentMappingsByEnvironmentID(envUUID.String())
@@ -393,20 +381,50 @@ func (s *environmentService) DeleteEnvironment(ctx context.Context, ouID string,
 	return nil
 }
 
-// tearDownA2AState removes the environment name's agent configs and the A2A state of envUUID and of every other environment once recorded under name.
-func (s *environmentService) tearDownA2AState(ctx context.Context, ouID, name string, envUUID uuid.UUID) {
+// envCleanupStep is one idempotent removal of a deleted environment's local state; failed is logged once its retries are spent.
+type envCleanupStep struct {
+	name   string
+	failed string
+	attrs  []any
+	run    func(ctx context.Context) error
+}
+
+// cleanUpDeletedEnvironment runs every cleanup step with retries; envUUID is uuid.Nil once OpenChoreo no longer knows the environment.
+func (s *environmentService) cleanUpDeletedEnvironment(ctx context.Context, ouID, name string, envUUID uuid.UUID) {
 	// The DELETE has committed in OpenChoreo; a disconnecting client must not cut the cleanup short.
 	ctx, cancel := detachedCleanupContext(ctx)
 	defer cancel()
-	if s.agentConfigRepo != nil {
-		err := s.retryA2ACleanup(ctx, func() error { return s.agentConfigRepo.DeleteForEnvironment(ctx, ouID, name) }, "ouID", ouID, "envName", name)
-		if err != nil {
-			s.logger.Error("Environment deleted but its agent configs were not removed; repeat the DELETE before re-creating the environment to retry",
-				"ouID", ouID, "envName", name, "error", err)
+	retry := fixedCleanupRetry(s.cleanupAttempts, s.cleanupBackoff)
+	for _, step := range s.envCleanupSteps(ctx, ouID, name, envUUID) {
+		attrs := append([]any{"ouID", ouID, "envName", name}, step.attrs...)
+		if err := retryCleanup(ctx, s.logger, retry, step.name, func() error { return step.run(ctx) }, attrs...); err != nil {
+			s.logger.Error(step.failed, append(attrs, "step", step.name, "error", err)...)
 		}
 	}
+}
+
+// envCleanupSteps orders MCP artifacts, then agent configs, then the A2A state of envUUID and every environment once recorded under name.
+func (s *environmentService) envCleanupSteps(ctx context.Context, ouID, name string, envUUID uuid.UUID) []envCleanupStep {
+	var steps []envCleanupStep
+	if s.agentConfigService != nil && envUUID != uuid.Nil {
+		steps = append(steps, envCleanupStep{
+			name:   "MCP artifact cleanup",
+			failed: "Environment deleted but its MCP artifacts were not fully removed; repeat the DELETE to retry",
+			attrs:  []any{"envUUID", envUUID},
+			run: func(ctx context.Context) error {
+				return s.agentConfigService.CleanupEnvironmentMCPArtifacts(ctx, ouID, envUUID, name)
+			},
+		})
+	}
+	if s.agentConfigRepo != nil {
+		steps = append(steps, envCleanupStep{
+			name:   "Agent config cleanup",
+			failed: "Environment deleted but its agent configs were not removed; repeat the DELETE before re-creating the environment to retry",
+			run:    func(ctx context.Context) error { return s.agentConfigRepo.DeleteForEnvironment(ctx, ouID, name) },
+		})
+	}
 	if s.a2aCardRepo == nil && s.a2aPublisher == nil {
-		return
+		return steps
 	}
 	ids, err := s.a2aEnvironmentUUIDs(ctx, ouID, name)
 	if err != nil {
@@ -416,11 +434,14 @@ func (s *environmentService) tearDownA2AState(ctx context.Context, ouID, name st
 		ids = append(ids, envUUID)
 	}
 	for _, id := range uniqueUUIDs(ids) {
-		if err := s.retryA2ACleanup(ctx, func() error { return s.tearDownA2AEnvironment(ctx, ouID, id) }, "ouID", ouID, "envName", name, "envUUID", id); err != nil {
-			s.logger.Error("Environment deleted but its A2A state was not fully removed; repeat the DELETE to retry, and any agent artifacts left behind are removed when their agent is deleted",
-				"ouID", ouID, "envName", name, "envUUID", id, "error", err)
-		}
+		steps = append(steps, envCleanupStep{
+			name:   "A2A teardown",
+			failed: "Environment deleted but its A2A state was not fully removed; repeat the DELETE to retry, and any agent artifacts left behind are removed when their agent is deleted",
+			attrs:  []any{"envUUID", id},
+			run:    func(ctx context.Context) error { return s.tearDownA2AEnvironment(ctx, ouID, id) },
+		})
 	}
+	return steps
 }
 
 // a2aEnvironmentUUIDs returns what every listing found, even when another failed.
@@ -458,25 +479,6 @@ func (s *environmentService) tearDownA2AEnvironment(ctx context.Context, ouID st
 		}
 	}
 	return errors.Join(errs...)
-}
-
-func (s *environmentService) retryA2ACleanup(ctx context.Context, fn func() error, logAttrs ...any) error {
-	var err error
-	for attempt := 0; attempt < s.a2aCleanupAttempts; attempt++ {
-		if err = fn(); err == nil {
-			return nil
-		}
-		s.logger.Warn("A2A teardown attempt failed", append([]any{"attempt", attempt + 1, "of", s.a2aCleanupAttempts, "error", err}, logAttrs...)...)
-		if attempt == s.a2aCleanupAttempts-1 {
-			break
-		}
-		select {
-		case <-ctx.Done():
-			return errors.Join(err, ctx.Err())
-		case <-time.After(s.a2aCleanupBackoff):
-		}
-	}
-	return err
 }
 
 func uniqueUUIDs(ids []uuid.UUID) []uuid.UUID {

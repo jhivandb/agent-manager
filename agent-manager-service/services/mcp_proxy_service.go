@@ -19,7 +19,6 @@ package services
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -873,11 +872,10 @@ func (s *MCPProxyService) prepareMCPUpstreamAuthForStorage(existing, updated *mo
 	}
 
 	if auth.Value != nil {
-		encrypted, err := utils.EncryptBytes([]byte(*auth.Value), s.encryptionKey)
+		encoded, err := utils.EncryptSecretRef(*auth.Value, s.encryptionKey)
 		if err != nil {
 			return nil, fmt.Errorf("failed to encrypt upstream auth: %w", err)
 		}
-		encoded := base64.StdEncoding.EncodeToString(encrypted)
 		auth.SecretRef = &encoded
 		auth.Value = nil
 	}

@@ -357,14 +357,24 @@ func (r *a2aAgentCardRepository) DeletePlatformForAgentEnv(ctx context.Context, 
 }
 
 func (r *a2aAgentCardRepository) DeleteForEnvironment(ctx context.Context, ouID string, environmentUUID uuid.UUID) error {
-	return r.db.WithContext(ctx).
-		Where("ou_id = ? AND environment_uuid = ?", ouID, environmentUUID).
-		Delete(&models.A2AAgentCard{}).Error
+	return deleteForEnvironment[models.A2AAgentCard](ctx, r.db, ouID, environmentUUID)
 }
 
 func (r *a2aAgentCardRepository) ListEnvironmentUUIDs(ctx context.Context, ouID, environmentName string) ([]uuid.UUID, error) {
+	return listEnvironmentUUIDs[models.A2AAgentCard](ctx, r.db, ouID, environmentName)
+}
+
+// deleteForEnvironment deletes every T row of the environment.
+func deleteForEnvironment[T any](ctx context.Context, db *gorm.DB, ouID string, environmentUUID uuid.UUID) error {
+	return db.WithContext(ctx).
+		Where("ou_id = ? AND environment_uuid = ?", ouID, environmentUUID).
+		Delete(new(T)).Error
+}
+
+// listEnvironmentUUIDs lists the distinct environment UUIDs of the T rows recorded under environmentName.
+func listEnvironmentUUIDs[T any](ctx context.Context, db *gorm.DB, ouID, environmentName string) ([]uuid.UUID, error) {
 	var ids []uuid.UUID
-	err := r.db.WithContext(ctx).Model(&models.A2AAgentCard{}).
+	err := db.WithContext(ctx).Model(new(T)).
 		Where("ou_id = ? AND environment_name = ?", ouID, environmentName).
 		Distinct().Pluck("environment_uuid", &ids).Error
 	return ids, err
