@@ -69,8 +69,10 @@ func newPublisherMocks(t *testing.T) *publisherMocks {
 				return []*models.Gateway{}, nil
 			},
 		},
-		artifacts: &repomocks.ArtifactRepositoryMock{},
-		hub:       &recordingEventHub{},
+		artifacts: &repomocks.ArtifactRepositoryMock{
+			ListByHandleSuffixFunc: func(string, string, string) ([]*models.Artifact, error) { return []*models.Artifact{}, nil },
+		},
+		hub: &recordingEventHub{},
 	}
 	m.pubs = &repomocks.A2APublicationRepositoryMock{
 		WithTxFunc: func(tx *gorm.DB) repositories.A2APublicationRepository {
@@ -270,6 +272,100 @@ func TestA2APublisherTeardownEnvironmentRemovesEverythingAndTellsTheGateways(t *
 	assert.Len(t, m.proxies.DeleteForEnvironmentCalls(), 1)
 	require.Len(t, m.hub.published, 1)
 	assert.Equal(t, artifactUUID.String(), deletedAgentID(t, m.hub.published[0]))
+}
+
+// A switch to direct drops the publication but keeps the artifact, so only its handle names the environment.
+func TestA2APublisherTeardownEnvironmentDropsTheArtifactOfADirectEnvironment(t *testing.T) {
+	m := newPublisherMocks(t)
+	envUUID := uuid.New()
+	leftover := &models.Artifact{UUID: uuid.New(), Handle: "checkout/weather/" + envUUID.String()}
+	m.pubs.ListForEnvironmentFunc = func(context.Context, string, uuid.UUID) ([]models.A2APublication, error) {
+		return nil, nil
+	}
+	m.pubs.DeleteForEnvironmentFunc = func(context.Context, string, uuid.UUID) error { return nil }
+	m.proxies.DeleteForEnvironmentFunc = func(context.Context, string, uuid.UUID) error { return nil }
+	m.artifacts.ListByHandleSuffixFunc = func(string, string, string) ([]*models.Artifact, error) {
+		return []*models.Artifact{leftover}, nil
+	}
+	m.artifacts.DeleteFunc = func(tx *gorm.DB, _ string) error {
+		assert.Same(t, txSentinel, tx)
+		return nil
+	}
+
+	require.NoError(t, m.publisher().TeardownEnvironment(context.Background(), "org-1", envUUID))
+
+	suffixCalls := m.artifacts.ListByHandleSuffixCalls()
+	require.Len(t, suffixCalls, 1)
+	assert.Equal(t, models.KindAgent, suffixCalls[0].Kind)
+	assert.Equal(t, "/"+envUUID.String(), suffixCalls[0].HandleSuffix)
+	assert.Equal(t, "org-1", suffixCalls[0].OrgUUID)
+	require.Len(t, m.artifacts.DeleteCalls(), 1)
+	assert.Equal(t, leftover.UUID.String(), m.artifacts.DeleteCalls()[0].UUID)
+	require.Len(t, m.hub.published, 1)
+	assert.Equal(t, "gw-1", m.hub.published[0].GatewayID)
+	assert.Equal(t, leftover.UUID.String(), deletedAgentID(t, m.hub.published[0]))
+}
+
+func TestA2APublisherTeardownEnvironmentDoesNotDropAnArtifactTwice(t *testing.T) {
+	m := newPublisherMocks(t)
+	envUUID, artifactUUID := uuid.New(), uuid.New()
+	m.pubs.ListForEnvironmentFunc = func(context.Context, string, uuid.UUID) ([]models.A2APublication, error) {
+		return []models.A2APublication{{
+			OUID: "org-1", AgentName: "weather", EnvironmentUUID: envUUID, ArtifactUUID: artifactUUID,
+		}}, nil
+	}
+	m.pubs.DeleteForEnvironmentFunc = func(context.Context, string, uuid.UUID) error { return nil }
+	m.proxies.DeleteForEnvironmentFunc = func(context.Context, string, uuid.UUID) error { return nil }
+	m.txDeployments.DeleteForArtifactFunc = func(context.Context, uuid.UUID, string) error { return nil }
+	m.txPubs.DeleteForAgentEnvFunc = func(context.Context, string, string, string, uuid.UUID) error { return nil }
+	m.artifacts.ListByHandleSuffixFunc = func(string, string, string) ([]*models.Artifact, error) {
+		return []*models.Artifact{{UUID: artifactUUID}}, nil
+	}
+	m.artifacts.DeleteFunc = func(*gorm.DB, string) error { return nil }
+
+	require.NoError(t, m.publisher().TeardownEnvironment(context.Background(), "org-1", envUUID))
+
+	require.Len(t, m.artifacts.DeleteCalls(), 1)
+	assert.Equal(t, artifactUUID.String(), m.artifacts.DeleteCalls()[0].UUID)
+	assert.Len(t, m.hub.published, 1)
+}
+
+func TestA2APublisherTeardownEnvironmentReportsAnArtifactItCannotListOrDelete(t *testing.T) {
+	envUUID := uuid.New()
+	leftover := &models.Artifact{UUID: uuid.New(), Handle: "checkout/weather/" + envUUID.String()}
+	cases := []struct {
+		name  string
+		setup func(m *publisherMocks)
+	}{
+		{"listing fails", func(m *publisherMocks) {
+			m.artifacts.ListByHandleSuffixFunc = func(string, string, string) ([]*models.Artifact, error) {
+				return nil, assert.AnError
+			}
+		}},
+		{"deleting fails", func(m *publisherMocks) {
+			m.artifacts.ListByHandleSuffixFunc = func(string, string, string) ([]*models.Artifact, error) {
+				return []*models.Artifact{leftover}, nil
+			}
+			m.artifacts.DeleteFunc = func(*gorm.DB, string) error { return assert.AnError }
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newPublisherMocks(t)
+			m.pubs.ListForEnvironmentFunc = func(context.Context, string, uuid.UUID) ([]models.A2APublication, error) {
+				return nil, nil
+			}
+			m.pubs.DeleteForEnvironmentFunc = func(context.Context, string, uuid.UUID) error { return nil }
+			m.proxies.DeleteForEnvironmentFunc = func(context.Context, string, uuid.UUID) error { return nil }
+			tc.setup(m)
+
+			err := m.publisher().TeardownEnvironment(context.Background(), "org-1", envUUID)
+
+			assert.ErrorIs(t, err, assert.AnError)
+			assert.Len(t, m.pubs.DeleteForEnvironmentCalls(), 1, "the rest of the teardown still runs")
+			assert.Len(t, m.proxies.DeleteForEnvironmentCalls(), 1)
+		})
+	}
 }
 
 // One agent's failure does not keep the environment's other rows alive, and its gateways are

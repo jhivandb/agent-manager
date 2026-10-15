@@ -38,6 +38,7 @@ type ArtifactRepository interface {
 	GetByHandle(handle, orgUUID string) (*models.Artifact, error)
 	GetByUUID(artifactUUID, orgUUID string) (*models.Artifact, error)
 	ListByHandlePrefix(kind, handlePrefix, orgUUID string) ([]*models.Artifact, error)
+	ListByHandleSuffix(kind, handleSuffix, orgUUID string) ([]*models.Artifact, error)
 	CountByKindAndOrg(kind, orgUUID string) (int, error)
 }
 
@@ -142,6 +143,14 @@ func (r *ArtifactRepo) GetByUUID(artifactUUID, orgUUID string) (*models.Artifact
 func (r *ArtifactRepo) ListByHandlePrefix(kind, handlePrefix, orgUUID string) ([]*models.Artifact, error) {
 	var artifacts []*models.Artifact
 	err := r.db.Where(`kind = ? AND ou_id = ? AND handle LIKE ? ESCAPE '\'`, kind, orgUUID, escapeLikeWildcards(handlePrefix)+"%").
+		Find(&artifacts).Error
+	return artifacts, err
+}
+
+// ListByHandleSuffix returns the org's artifacts of a kind whose handle ends with handleSuffix.
+func (r *ArtifactRepo) ListByHandleSuffix(kind, handleSuffix, orgUUID string) ([]*models.Artifact, error) {
+	var artifacts []*models.Artifact
+	err := r.db.Where(`kind = ? AND ou_id = ? AND handle LIKE ? ESCAPE '\'`, kind, orgUUID, "%"+escapeLikeWildcards(handleSuffix)).
 		Find(&artifacts).Error
 	return artifacts, err
 }

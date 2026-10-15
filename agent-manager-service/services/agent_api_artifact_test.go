@@ -112,3 +112,30 @@ func TestListByHandlePrefixFindsOnlyThatAgentsArtifacts(t *testing.T) {
 	}
 	assert.ElementsMatch(t, []uuid.UUID{dev.UUID, qa.UUID}, gotUUIDs)
 }
+
+// A suffix names one environment, whichever agent owns the artifact, and must not match a longer UUID or its LIKE wildcards.
+func TestListByHandleSuffixFindsOnlyThatEnvironmentsArtifacts(t *testing.T) {
+	artifacts := repositories.NewArtifactRepo(db.GetDB())
+	ouID := "ou-" + uuid.New().String()[:8]
+	env, otherEnv := uuid.New().String(), uuid.New().String()
+	create := func(agentName, envID string) *models.Artifact {
+		a := &models.Artifact{
+			UUID: uuid.New(), Handle: agentEnvAPIArtifactHandle("checkout", agentName, envID),
+			Name: agentName + "-" + envID[:8], Version: "v1.0", Kind: models.KindAgent, OUID: ouID,
+		}
+		require.NoError(t, artifacts.Create(db.GetDB(), a))
+		t.Cleanup(func() { _ = artifacts.Delete(db.GetDB(), a.UUID.String()) })
+		return a
+	}
+	first, second := create("a", env), create("b", env)
+	create("a", otherEnv)
+
+	got, err := artifacts.ListByHandleSuffix(models.KindAgent, "/"+env, ouID)
+
+	require.NoError(t, err)
+	gotUUIDs := make([]uuid.UUID, 0, len(got))
+	for _, a := range got {
+		gotUUIDs = append(gotUUIDs, a.UUID)
+	}
+	assert.ElementsMatch(t, []uuid.UUID{first.UUID, second.UUID}, gotUUIDs)
+}

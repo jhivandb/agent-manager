@@ -196,8 +196,8 @@ func (p *A2APublisher) DeleteForAgent(ctx context.Context, ouID, projectName, ag
 	return errors.Join(errs...)
 }
 
-// TeardownEnvironment removes every A2A publication, gateway deployment, agent artifact and proxy row
-// of a deleted environment, then tells the gateways. One agent's failure does not stop the rest.
+// TeardownEnvironment removes every A2A publication, gateway deployment, agent artifact (also those only
+// its handle names, left by a switch to direct) and proxy row of a deleted environment, then tells the gateways. One agent's failure does not stop the rest.
 func (p *A2APublisher) TeardownEnvironment(ctx context.Context, ouID string, envUUID uuid.UUID) error {
 	pubs, err := p.pubRepo.ListForEnvironment(ctx, ouID, envUUID)
 	if err != nil {
@@ -212,6 +212,12 @@ func (p *A2APublisher) TeardownEnvironment(ctx context.Context, ouID string, env
 		}
 		teardowns = append(teardowns, teardown)
 	}
+	// A switch to direct drops the publication but keeps the artifact, so find the rest by handle.
+	swept, err := p.dropLeftoverArtifacts(ctx, ouID, envUUID, teardowns)
+	if err != nil {
+		errs = append(errs, err)
+	}
+	teardowns = append(teardowns, swept...)
 	// Rows a failed teardown left, and proxies that never published, go regardless: the environment is gone.
 	if err := p.pubRepo.DeleteForEnvironment(ctx, ouID, envUUID); err != nil {
 		errs = append(errs, fmt.Errorf("failed to delete the environment's A2A publications: %w", err))
@@ -261,6 +267,34 @@ func (p *A2APublisher) teardownDeletedEnv(ctx context.Context, pub models.A2APub
 		}, fmt.Errorf("agent %s: %w", pub.AgentName, err)
 	}
 	return teardown, nil
+}
+
+// dropLeftoverArtifacts deletes the environment's agent artifacts that no publication teardown covered.
+func (p *A2APublisher) dropLeftoverArtifacts(ctx context.Context, ouID string, envUUID uuid.UUID, done []a2aTeardown) ([]a2aTeardown, error) {
+	artifacts, err := p.artifactRepo.ListByHandleSuffix(models.KindAgent, "/"+envUUID.String(), ouID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list the environment's agent artifacts: %w", err)
+	}
+	covered := make(map[uuid.UUID]struct{}, len(done))
+	for _, t := range done {
+		covered[t.artifactUUID] = struct{}{}
+	}
+	var errs []error
+	var teardowns []a2aTeardown
+	for _, artifact := range artifacts {
+		if _, ok := covered[artifact.UUID]; ok {
+			continue
+		}
+		// Read before the delete: the deployment rows cascade with the artifact.
+		gatewayIDs := collectA2AAgentDeletionTargets(p.deploymentRepo, p.gatewayRepo, artifact.UUID, ouID, true, p.logger)
+		err := p.tx(ctx, func(tx *gorm.DB) error { return p.artifactRepo.Delete(tx, artifact.UUID.String()) })
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			errs = append(errs, fmt.Errorf("failed to delete agent artifact %s: %w", artifact.Handle, err))
+			continue
+		}
+		teardowns = append(teardowns, a2aTeardown{artifactUUID: artifact.UUID, gatewayIDs: gatewayIDs, dropsArtifact: true})
+	}
+	return teardowns, errors.Join(errs...)
 }
 
 func (p *A2APublisher) publications(tx *gorm.DB) repositories.A2APublicationRepository {
