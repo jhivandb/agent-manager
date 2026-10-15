@@ -140,10 +140,13 @@ describe("agent card mutations", () => {
     const { result, qc } = await mountWithClient(useDeleteAgentCardSource);
     qc.setQueryData(a2aProxyQueryKey(params), { status: "published" });
     expect(qc.getQueryData(agentCardQueryKey(params))).toBeDefined();
+    // The mounted card query re-reads after removal; the server now answers 404.
+    const notFound = Object.assign(new Error("not found"), { status: 404 });
+    vi.mocked(getAgentCard).mockRejectedValue(notFound);
 
     await act(async () => { await result.current.mutateAsync(params); });
 
-    expect(qc.getQueryState(agentCardQueryKey(params))).toBeUndefined();
+    expect(qc.getQueryData(agentCardQueryKey(params))).toBeUndefined();
     expect(qc.getQueryState(a2aProxyQueryKey(params))).toBeUndefined();
   });
 });
