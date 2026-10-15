@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
+	"github.com/wso2/agent-manager/agent-manager-service/eventhub"
 	"github.com/wso2/agent-manager/agent-manager-service/models"
 	"github.com/wso2/agent-manager/agent-manager-service/repositories"
 	"github.com/wso2/agent-manager/agent-manager-service/repositories/repomocks"
@@ -277,10 +278,15 @@ func TestA2APublisherTeardownEnvironmentRemovesEverythingAndTellsTheGateways(t *
 // A switch to direct drops the publication but keeps the artifact, so only its handle names the environment.
 func TestA2APublisherTeardownEnvironmentDropsTheArtifactOfADirectEnvironment(t *testing.T) {
 	m := newPublisherMocks(t)
-	envUUID := uuid.New()
+	envUUID, gwUUID := uuid.New(), uuid.New()
 	leftover := &models.Artifact{UUID: uuid.New(), Handle: "checkout/weather/" + envUUID.String()}
 	m.pubs.ListForEnvironmentFunc = func(context.Context, string, uuid.UUID) ([]models.A2APublication, error) {
 		return nil, nil
+	}
+	// The switch to direct dropped the deployment rows, so only the org's active gateways name the holder.
+	m.deployments.GetDeployedGatewaysByProviderFunc = func(uuid.UUID, string) ([]string, error) { return []string{}, nil }
+	m.gateways.ListWithFiltersFunc = func(repositories.GatewayFilterOptions) ([]*models.Gateway, error) {
+		return []*models.Gateway{{UUID: gwUUID}}, nil
 	}
 	m.pubs.DeleteForEnvironmentFunc = func(context.Context, string, uuid.UUID) error { return nil }
 	m.proxies.DeleteForEnvironmentFunc = func(context.Context, string, uuid.UUID) error { return nil }
@@ -302,8 +308,14 @@ func TestA2APublisherTeardownEnvironmentDropsTheArtifactOfADirectEnvironment(t *
 	require.Len(t, m.artifacts.DeleteCalls(), 1)
 	assert.Equal(t, leftover.UUID.String(), m.artifacts.DeleteCalls()[0].UUID)
 	require.Len(t, m.hub.published, 1)
-	assert.Equal(t, "gw-1", m.hub.published[0].GatewayID)
+	assert.Equal(t, gwUUID.String(), m.hub.published[0].GatewayID)
+	assert.Equal(t, eventhub.EventType("agent.deleted"), m.hub.published[0].EventType)
 	assert.Equal(t, leftover.UUID.String(), deletedAgentID(t, m.hub.published[0]))
+	filters := m.gateways.ListWithFiltersCalls()
+	require.Len(t, filters, 1)
+	assert.Equal(t, "org-1", filters[0].Filters.OrganizationID)
+	require.NotNil(t, filters[0].Filters.Status)
+	assert.True(t, *filters[0].Filters.Status)
 }
 
 func TestA2APublisherTeardownEnvironmentDoesNotDropAnArtifactTwice(t *testing.T) {

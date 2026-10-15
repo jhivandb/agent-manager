@@ -196,8 +196,9 @@ func (p *A2APublisher) DeleteForAgent(ctx context.Context, ouID, projectName, ag
 	return errors.Join(errs...)
 }
 
-// TeardownEnvironment removes every A2A publication, gateway deployment, agent artifact (also those only
-// its handle names, left by a switch to direct) and proxy row of a deleted environment, then tells the gateways. One agent's failure does not stop the rest.
+// TeardownEnvironment removes every A2A publication, gateway deployment, agent artifact (incl. those left by a
+// switch to direct, found by handle) and proxy row of a deleted environment, then tells the gateways.
+// One agent's failure does not stop the rest.
 func (p *A2APublisher) TeardownEnvironment(ctx context.Context, ouID string, envUUID uuid.UUID) error {
 	pubs, err := p.pubRepo.ListForEnvironment(ctx, ouID, envUUID)
 	if err != nil {

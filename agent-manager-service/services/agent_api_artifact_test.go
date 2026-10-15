@@ -113,7 +113,7 @@ func TestListByHandlePrefixFindsOnlyThatAgentsArtifacts(t *testing.T) {
 	assert.ElementsMatch(t, []uuid.UUID{dev.UUID, qa.UUID}, gotUUIDs)
 }
 
-// A suffix names one environment, whichever agent owns the artifact, and must not match a longer UUID or its LIKE wildcards.
+// A suffix names one environment, whichever agent owns the artifact, and must not match a handle ending in more than it.
 func TestListByHandleSuffixFindsOnlyThatEnvironmentsArtifacts(t *testing.T) {
 	artifacts := repositories.NewArtifactRepo(db.GetDB())
 	ouID := "ou-" + uuid.New().String()[:8]
@@ -129,6 +129,7 @@ func TestListByHandleSuffixFindsOnlyThatEnvironmentsArtifacts(t *testing.T) {
 	}
 	first, second := create("a", env), create("b", env)
 	create("a", otherEnv)
+	create("a", "x"+env)
 
 	got, err := artifacts.ListByHandleSuffix(models.KindAgent, "/"+env, ouID)
 
