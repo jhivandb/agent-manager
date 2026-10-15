@@ -16,7 +16,7 @@
  * under the License.
  */
 
-import { useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { useIsMutating, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useAuthHooks } from "@agent-management-platform/auth";
 import type {
   A2AProxyPathParams,
@@ -25,11 +25,10 @@ import type {
 } from "@agent-management-platform/types";
 import { useApiMutation, useApiQuery } from "./react-query-notifications";
 import { deleteA2AProxy, getA2AProxy, refreshA2AProxy, setA2AProxy } from "../apis/a2a-proxy";
-import { agentCardQueryKey } from "./agent-card";
+import { a2aProxyQueryKey, agentCardQueryKey } from "./a2a-query-keys";
 import { pendingRefetchInterval } from "../utils";
 
-export const a2aProxyQueryKey = (p: A2AProxyPathParams) =>
-  ["a2a-proxy", p.orgName, p.projName, p.agentName, p.envId] as const;
+export { a2aProxyQueryKey } from "./a2a-query-keys";
 
 /** A proxy change also changes the card, so both are refetched. */
 export async function invalidateA2AProxy(
@@ -70,11 +69,26 @@ export function useGetA2AProxy(params: A2AProxyPathParams, options: { enabled?: 
   });
 }
 
+const setA2AProxyMutationKey = ["a2a-proxy", "set"] as const;
+
+/** True while a routing save for this agent environment is in flight, from any component. */
+export function useIsSavingA2AProxy(params: A2AProxyPathParams): boolean {
+  return useIsMutating({
+    mutationKey: setA2AProxyMutationKey,
+    predicate: (m) => {
+      const p = (m.state.variables as { params?: A2AProxyPathParams } | undefined)?.params;
+      return !!p && p.orgName === params.orgName && p.projName === params.projName &&
+        p.agentName === params.agentName && p.envId === params.envId;
+    },
+  }) > 0;
+}
+
 export function useSetA2AProxy() {
   const { getToken } = useAuthHooks();
   const queryClient = useQueryClient();
   type Vars = { params: A2AProxyPathParams; body: SetA2AProxyRequest };
   return useApiMutation<void, unknown, Vars>({
+    mutationKey: setA2AProxyMutationKey,
     action: { verb: "update", target: "gateway routing" },
     // In mutationFn, since useApiMutation does not await onSuccess.
     mutationFn: async ({ params, body }) => {

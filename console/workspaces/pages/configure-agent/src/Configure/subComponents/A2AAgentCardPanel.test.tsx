@@ -24,6 +24,7 @@ vi.mock("@agent-management-platform/api-client", () => ({
   isAgentCardNotFound: (error: unknown) => (error as { status?: number } | null)?.status === 404,
   useGetAgentCard: vi.fn(),
   useGetA2AProxy: vi.fn(),
+  useIsSavingA2AProxy: vi.fn(() => false),
   useSetA2AProxy: vi.fn(),
   useDeleteA2AProxy: vi.fn(),
   useRefreshA2AProxy: vi.fn(),
@@ -40,6 +41,7 @@ import {
   useDeleteAgentCardSource,
   useGetA2AProxy,
   useGetAgentCard,
+  useIsSavingA2AProxy,
   useRefreshA2AProxy,
   useRefreshAgentCard,
   useSetA2AProxy,
@@ -76,6 +78,7 @@ const renderPanel = (external = false) =>
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(useIsSavingA2AProxy).mockReturnValue(false);
   vi.mocked(useRefreshAgentCard).mockReturnValue(
     { mutate: refresh, isPending: false } as unknown as
       ReturnType<typeof useRefreshAgentCard>);
@@ -221,6 +224,29 @@ describe("A2AAgentCardPanel", () => {
     expect(screen.queryByLabelText("Route through gateway")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
     expect(write).not.toHaveBeenCalled();
+  });
+
+  it("keeps the routing section mounted when a background refetch fails", () => {
+    mockCard({ data: registeredCard });
+    mockProxy({
+      data: { status: "published", lastError: "", upstreamAuthHeader: "" },
+      isSuccess: false,
+      isError: true,
+      error: { status: 500 },
+    });
+    renderPanel(true);
+    expect(screen.getByLabelText("Route through gateway")).toBeInTheDocument();
+    expect(screen.queryByText("Couldn't load gateway routing.")).not.toBeInTheDocument();
+  });
+
+  it("shows routing as loading, not direct, while a routing save is in flight", () => {
+    mockCard({ data: registeredCard });
+    mockProxy({ isError: true, error: notFound() });
+    vi.mocked(useIsSavingA2AProxy).mockReturnValue(true);
+    renderPanel(true);
+    expect(screen.queryByLabelText("Route through gateway")).not.toBeInTheDocument();
+    expect(screen.getByText("Loading gateway routing…")).toBeInTheDocument();
+    expect(screen.queryByText("Couldn't load gateway routing.")).not.toBeInTheDocument();
   });
 
   it("offers no routing controls while the gateway routing loads", () => {

@@ -32,8 +32,9 @@ import {
 } from "../apis/agent-card";
 import { pendingRefetchInterval } from "../utils";
 
-export const agentCardQueryKey = (p: AgentCardPathParams) =>
-  ["agent-card", p.orgName, p.projName, p.agentName, p.envId] as const;
+import { a2aProxyQueryKey, agentCardQueryKey } from "./a2a-query-keys";
+
+export { agentCardQueryKey } from "./a2a-query-keys";
 
 /** Drops the cached card so a removed source does not keep showing its old card. */
 export function removeAgentCardFromCache(queryClient: QueryClient, params: AgentCardPathParams) {
@@ -80,9 +81,13 @@ export function useRefreshAgentCard() {
     action: { verb: "update", target: "agent card" },
     successMessage: "Agent card refresh queued",
     // In mutationFn, since useApiMutation does not await onSuccess.
+    // A refresh also republishes the proxy.
     mutationFn: async (params) => {
       await refreshAgentCard(params, getToken);
-      await queryClient.invalidateQueries({ queryKey: agentCardQueryKey(params) });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: agentCardQueryKey(params) }),
+        queryClient.invalidateQueries({ queryKey: a2aProxyQueryKey(params) }),
+      ]);
     },
   });
 }
@@ -94,9 +99,13 @@ export function useSetAgentCardSource() {
   return useApiMutation<void, unknown, Vars>({
     action: { verb: "update", target: "agent card source" },
     // Stays pending until the new URL is shown, so the editor can't close on the old one.
+    // A new URL re-queues the proxy publish.
     mutationFn: async ({ params, body }) => {
       await setAgentCardSource(params, body, getToken);
-      await queryClient.invalidateQueries({ queryKey: agentCardQueryKey(params) });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: agentCardQueryKey(params) }),
+        queryClient.invalidateQueries({ queryKey: a2aProxyQueryKey(params) }),
+      ]);
     },
   });
 }
@@ -106,8 +115,11 @@ export function useDeleteAgentCardSource() {
   const queryClient = useQueryClient();
   return useApiMutation<void, unknown, AgentCardPathParams>({
     action: { verb: "remove", target: "agent card source" },
-    mutationFn: (params) => deleteAgentCardSource(params, getToken),
-    onSuccess: (_d, params) =>
-      removeAgentCardFromCache(queryClient, params),
+    // Removing the source also removes the proxy; a 404 keeps old data cached, so both are dropped.
+    mutationFn: async (params) => {
+      await deleteAgentCardSource(params, getToken);
+      removeAgentCardFromCache(queryClient, params);
+      queryClient.removeQueries({ queryKey: a2aProxyQueryKey(params) });
+    },
   });
 }

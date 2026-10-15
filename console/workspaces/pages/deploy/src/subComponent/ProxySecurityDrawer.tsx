@@ -22,7 +22,6 @@ import { ShieldCheck } from "@wso2/oxygen-ui-icons-react";
 import { DrawerContent, DrawerHeader, DrawerWrapper } from "@agent-management-platform/views";
 import {
   useGetAgentConfigurations,
-  useInvalidateA2AProxy,
   useUpdateAgentDeploySettings,
 } from "@agent-management-platform/api-client";
 import { SecurityConfigSections, type SecurityConfigHandle } from "./SecurityConfigSections";
@@ -51,7 +50,6 @@ export function ProxySecurityDrawer({
 }: ProxySecurityDrawerProps) {
   const securityRef = useRef<SecurityConfigHandle>(null);
   const [valid, setValid] = useState(true);
-  const invalidateA2AProxy = useInvalidateA2AProxy();
   const agent = { orgName, projName, agentName };
   const { data: configurations } = useGetAgentConfigurations(agent, { environment });
   const { mutate: updateDeploySettings, isPending } = useUpdateAgentDeploySettings();
@@ -61,13 +59,7 @@ export function ProxySecurityDrawer({
     if (!security?.validate()) return;
     updateDeploySettings(
       { params: agent, body: { environmentName: environment, ...security.buildBody() } },
-      {
-        onSuccess: () => {
-          // The save republishes, so the gateway status goes back to pending.
-          void invalidateA2AProxy({ ...agent, envId: environment });
-          onClose();
-        },
-      },
+      { onSuccess: onClose },
     );
   };
 

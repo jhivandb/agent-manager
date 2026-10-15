@@ -44,7 +44,8 @@ vi.mock("../apis/agent-card", () => ({
 
 import { getAgentCard } from "../apis/agent-card";
 import { useGetAgentCard } from "./agent-card";
-import { a2aProxyRefetchInterval, useSetA2AProxy } from "./a2a-proxy";
+import { a2aProxyRefetchInterval, useIsSavingA2AProxy, useSetA2AProxy } from "./a2a-proxy";
+import { setA2AProxy } from "../apis/a2a-proxy";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -96,5 +97,38 @@ describe("useSetA2AProxy", () => {
 
     await act(async () => release());
     expect(settled).toBe(true);
+  });
+});
+
+describe("useIsSavingA2AProxy", () => {
+  it("is true only while a save for the same environment is pending", async () => {
+    let finish!: () => void;
+    vi.mocked(setA2AProxy).mockImplementationOnce(
+      () => new Promise<undefined>((resolve) => { finish = () => resolve(undefined); }),
+    );
+    const seen = {} as { save: ReturnType<typeof useSetA2AProxy>; same: boolean; other: boolean };
+    const Probe = () => {
+      seen.save = useSetA2AProxy();
+      seen.same = useIsSavingA2AProxy(params);
+      seen.other = useIsSavingA2AProxy({ ...params, envId: "prod" });
+      return null;
+    };
+    const root = createRoot(document.createElement("div"));
+    const client = new QueryClient();
+    await act(async () =>
+      root.render(createElement(QueryClientProvider, { client }, createElement(Probe))),
+    );
+    unmount = () => act(() => root.unmount());
+    expect(seen.same).toBe(false);
+
+    await act(async () => {
+      void seen.save.mutateAsync({ params, body: {} });
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    expect(seen.same).toBe(true);
+    expect(seen.other).toBe(false);
+
+    await act(async () => { finish(); await new Promise((r) => setTimeout(r, 20)); });
+    expect(seen.same).toBe(false);
   });
 });

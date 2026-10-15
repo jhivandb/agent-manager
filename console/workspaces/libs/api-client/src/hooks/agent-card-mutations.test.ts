@@ -37,7 +37,10 @@ vi.mock("../apis/agent-card", () => ({
 }));
 
 import { getAgentCard } from "../apis/agent-card";
-import { useGetAgentCard, useRefreshAgentCard, useSetAgentCardSource } from "./agent-card";
+import {
+  useDeleteAgentCardSource, useGetAgentCard, useRefreshAgentCard, useSetAgentCardSource,
+} from "./agent-card";
+import { a2aProxyQueryKey, agentCardQueryKey } from "./a2a-query-keys";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -50,6 +53,10 @@ afterEach(() => unmount?.());
 
 /** Mounts the card query beside a mutation hook, as the panel does. */
 async function mountWith<T>(useMutationHook: () => T): Promise<{ current: T }> {
+  return (await mountWithClient(useMutationHook)).result;
+}
+
+async function mountWithClient<T>(useMutationHook: () => T) {
   const result = {} as { current: T };
   const Probe = () => {
     useGetAgentCard(params);
@@ -61,7 +68,7 @@ async function mountWith<T>(useMutationHook: () => T): Promise<{ current: T }> {
   const tree = createElement(QueryClientProvider, { client: qc }, createElement(Probe));
   await act(async () => root.render(tree));
   unmount = () => act(() => root.unmount());
-  return result;
+  return { result, qc };
 }
 
 /** The next card read stays in flight until the returned function is called. */
@@ -110,5 +117,33 @@ describe("agent card mutations", () => {
 
     expect(early).toBe(false);
     expect(late).toBe(true);
+  });
+
+  it.each([
+    ["a source change", useSetAgentCardSource,
+      (h: { mutateAsync: (v: never) => Promise<unknown> }) =>
+        h.mutateAsync({ params, body: { url: "https://n.example/c" } } as never)],
+    ["a refetch request", useRefreshAgentCard,
+      (h: { mutateAsync: (v: never) => Promise<unknown> }) => h.mutateAsync(params as never)],
+  ])("invalidate the gateway routing before %s resolves", async (_n, hook, run) => {
+    vi.mocked(getAgentCard).mockResolvedValue(card("https://a.example/c"));
+    const { result, qc } = await mountWithClient(hook as () => never);
+    qc.setQueryData(a2aProxyQueryKey(params), { status: "published" });
+
+    await act(async () => { await run(result.current as never); });
+
+    expect(qc.getQueryState(a2aProxyQueryKey(params))?.isInvalidated).toBe(true);
+  });
+
+  it("drop the card and gateway routing from the cache when the source is removed", async () => {
+    vi.mocked(getAgentCard).mockResolvedValue(card("https://a.example/c"));
+    const { result, qc } = await mountWithClient(useDeleteAgentCardSource);
+    qc.setQueryData(a2aProxyQueryKey(params), { status: "published" });
+    expect(qc.getQueryData(agentCardQueryKey(params))).toBeDefined();
+
+    await act(async () => { await result.current.mutateAsync(params); });
+
+    expect(qc.getQueryState(agentCardQueryKey(params))).toBeUndefined();
+    expect(qc.getQueryState(a2aProxyQueryKey(params))).toBeUndefined();
   });
 });
