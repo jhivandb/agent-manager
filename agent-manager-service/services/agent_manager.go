@@ -5121,8 +5121,14 @@ func (s *agentManagerService) UpdateAgentDeploySettings(ctx context.Context, ouI
 		return fmt.Errorf("failed to persist agent deploy settings: %w", upsertErr)
 	}
 
-	if err := s.republishA2AAgent(ctx, agent, ouID, projectName, agentName, req.EnvironmentName, targetEnv.UUID, artifact.UUID); err != nil {
+	key, ok, err := s.a2aRepublicationKey(ctx, agent, ouID, projectName, agentName, req.EnvironmentName, targetEnv.UUID)
+	if err != nil {
 		return err
+	}
+	if ok {
+		if err := s.a2aPublisher.Enqueue(ctx, nil, key, a2aPublicationSourceFor(agent), artifact.UUID); err != nil {
+			return fmt.Errorf("deploy settings saved but the gateway was not updated; save them again to retry: %w", err)
+		}
 	}
 
 	s.logger.Info("Agent deploy settings updated successfully", "agentName", agentName, "environment", req.EnvironmentName)
@@ -6312,18 +6318,30 @@ func (s *agentManagerService) republishA2AAgent(
 	ouID, projectName, agentName, environmentName, environmentUUID string,
 	artifactUUID uuid.UUID,
 ) error {
+	key, ok, err := s.a2aRepublicationKey(ctx, agent, ouID, projectName, agentName, environmentName, environmentUUID)
+	if err != nil || !ok {
+		return err
+	}
+	s.enqueueA2APublication(ctx, key, a2aPublicationSourceFor(agent), artifactUUID)
+	return nil
+}
+
+// a2aRepublicationKey returns the publication to re-queue after a config change; ok is false when the agent does not publish here.
+func (s *agentManagerService) a2aRepublicationKey(
+	ctx context.Context,
+	agent *models.AgentResponse,
+	ouID, projectName, agentName, environmentName, environmentUUID string,
+) (a2aPublicationKey, bool, error) {
 	if s.a2aPublisher == nil || !utils.IsA2AAgentSubType(agent.Type.SubType) {
-		return nil
+		return a2aPublicationKey{}, false, nil
 	}
 	envUUID, err := uuid.Parse(environmentUUID)
 	if err != nil {
-		return fmt.Errorf("environment %q has an unparseable UUID %q: %w", environmentName, environmentUUID, err)
+		return a2aPublicationKey{}, false, fmt.Errorf("environment %q has an unparseable UUID %q: %w", environmentName, environmentUUID, err)
 	}
 	publish, err := s.a2aPublisher.ShouldPublish(ctx, agent, ouID, projectName, envUUID)
 	if err != nil || !publish {
-		return err
+		return a2aPublicationKey{}, false, err
 	}
-	key := a2aPublicationKey{OUID: ouID, ProjectName: projectName, AgentName: agentName, EnvironmentName: environmentName, EnvironmentUUID: envUUID, AgentUUID: parseAgentUUID(agent.UUID)}
-	s.enqueueA2APublication(ctx, key, a2aPublicationSourceFor(agent), artifactUUID)
-	return nil
+	return a2aPublicationKey{OUID: ouID, ProjectName: projectName, AgentName: agentName, EnvironmentName: environmentName, EnvironmentUUID: envUUID, AgentUUID: parseAgentUUID(agent.UUID)}, true, nil
 }

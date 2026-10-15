@@ -18,6 +18,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/google/uuid"
@@ -89,6 +90,28 @@ func TestUpdateAgentDeploySettingsRepublishesAProxiedExternalAgent(t *testing.T)
 	assert.False(t, configs.UpsertCalls()[0].Config.EnableApiKeySecurity)
 	require.Len(t, queued, 1, "the gateway picks the new settings up from a republish")
 	assert.Equal(t, models.A2APublicationSourceExternal, queued[0].Source)
+}
+
+func TestUpdateAgentDeploySettingsFailsWhenTheRepublishCannotBeQueued(t *testing.T) {
+	pubs := &repomocks.A2APublicationRepositoryMock{
+		EnqueueFunc: func(context.Context, *models.A2APublication) error { return errors.New("boom") },
+	}
+	proxies := &repomocks.A2AProxyRepositoryMock{
+		GetByEnvUUIDFunc: func(context.Context, string, string, string, uuid.UUID) (*models.A2AProxy, error) {
+			return &models.A2AProxy{}, nil
+		},
+	}
+	configs := savedConfigs()
+	svc := deploySettingsService(configs, NewA2APublisher(nil, pubs, proxies, nil, nil, nil, nil, testLogger()))
+	apiKeys := false
+
+	err := svc.UpdateAgentDeploySettings(tierGrantedCtx(t), "org-1", "checkout", "weather",
+		&spec.UpdateAgentDeploySettingsRequest{EnvironmentName: "dev", EnableApiKeySecurity: &apiKeys})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "saved")
+	assert.Contains(t, err.Error(), "gateway")
+	assert.Len(t, configs.UpsertCalls(), 1, "the settings row is persisted before the republish is attempted")
 }
 
 func TestUpdateAgentDeploySettingsRejectsADirectExternalEnvironment(t *testing.T) {
