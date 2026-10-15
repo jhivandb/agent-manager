@@ -417,7 +417,7 @@ func (s *environmentService) tearDownA2AState(ctx context.Context, ouID, name st
 	}
 	for _, id := range uniqueUUIDs(ids) {
 		if err := s.retryA2ACleanup(ctx, func() error { return s.tearDownA2AEnvironment(ctx, ouID, id) }, "ouID", ouID, "envName", name, "envUUID", id); err != nil {
-			s.logger.Error("Environment deleted but its A2A state was not fully removed; repeat the DELETE before re-creating the environment to retry",
+			s.logger.Error("Environment deleted but its A2A state was not fully removed; repeat the DELETE to retry, and any agent artifacts left behind are removed when their agent is deleted",
 				"ouID", ouID, "envName", name, "envUUID", id, "error", err)
 		}
 	}
