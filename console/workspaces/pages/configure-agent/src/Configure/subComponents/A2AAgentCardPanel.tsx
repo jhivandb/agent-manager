@@ -20,7 +20,6 @@ import { useState } from "react";
 import { Alert, Box, Button, Chip, CircularProgress, IconButton, Stack, Tooltip, Typography } from "@wso2/oxygen-ui";
 import { Edit, RefreshCw, Trash } from "@wso2/oxygen-ui-icons-react";
 import {
-  isAgentCardNotFound,
   useDeleteAgentCardSource,
   useGetA2AProxy,
   useGetAgentCard,
@@ -59,26 +58,23 @@ export function A2AAgentCardPanel({
   orgId, projectId, agentId, envId, external,
 }: A2AAgentCardPanelProps) {
   const params = { orgName: orgId, projName: projectId, agentName: agentId, envId };
-  const { data: proxyData, isError: proxyIsError, error: proxyError } =
+  const { data: proxyData, isError: proxyIsError } =
     useGetA2AProxy(params, { enabled: !!external });
-  const proxyIsDirect = proxyIsError && isAgentCardNotFound(proxyError);
-  // TanStack keeps the previous data on error, so a 404 drops it here.
-  const proxy = proxyIsDirect ? undefined : proxyData;
+  const proxyIsDirect = proxyData === null;
+  const proxy = proxyData ?? undefined;
   const proxySaving = useIsSavingA2AProxy(params);
   // A failed background refetch keeps the last known routing on screen.
-  const proxyKnown = proxy !== undefined || proxyIsDirect;
-  const proxyUnknownFailed = proxyIsError && proxy === undefined;
+  const proxyKnown = proxyData !== undefined;
   const proxyFailed = proxy?.status === "failed";
-  const { data, isLoading, isError, error } = useGetAgentCard(params, { poll: !proxyFailed });
+  const { data, isLoading, isError } = useGetAgentCard(params, { poll: !proxyFailed });
   const { mutate: refresh, isPending: isRefreshing } = useRefreshAgentCard();
   const { mutate: removeSource, isPending: isRemoving } = useDeleteAgentCardSource();
   const { addConfirmation } = useConfirmationDialog();
   const [showJson, setShowJson] = useState(false);
   const [editingUrl, setEditingUrl] = useState(false);
 
-  const noSource = isError && isAgentCardNotFound(error);
-  // A 404 leaves the previous card cached; it no longer exists.
-  const card = noSource ? undefined : data;
+  const noSource = data === null;
+  const card = data ?? undefined;
   // A failed publish parks the card, so "Pending" would never clear; the proxy alert explains.
   const parkedBehindFailedPublish = proxyFailed && card?.status === "pending";
   // Card content is third-party: read it as untyped JSON.
@@ -146,12 +142,12 @@ export function A2AAgentCardPanel({
             currentUrl={sourceUrl}
             offerRouting={proxyIsDirect}
           />
-          {!proxyKnown && <A2AProxyUnknown failed={proxyUnknownFailed} />}
+          {!proxyKnown && <A2AProxyUnknown failed={proxyIsError} />}
         </>
       )}
       {external && sourceUrl && (proxyKnown
         ? <EnvA2AProxySection params={params} proxy={proxy} saving={proxySaving} />
-        : <A2AProxyUnknown failed={proxyUnknownFailed} />)}
+        : <A2AProxyUnknown failed={proxyIsError} />)}
       {isLoading && <CircularProgress size={16} />}
       {noSource && (
         <Typography variant="body2" color="text.secondary">

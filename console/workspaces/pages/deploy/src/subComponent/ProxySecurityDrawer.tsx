@@ -35,11 +35,7 @@ export interface ProxySecurityDrawerProps {
   environment: string;
 }
 
-/**
- * Inbound auth, CORS and card CORS for an external A2A agent routed through one environment's
- * gateway. Unlike EditDeployConfigDrawer it saves only deploy settings: there is no release
- * binding.
- */
+/** Gateway auth and CORS for a proxied external A2A agent; saves deploy settings, no release. */
 export function ProxySecurityDrawer({
   open,
   onClose,

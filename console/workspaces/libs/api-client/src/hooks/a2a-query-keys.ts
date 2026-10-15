@@ -16,10 +16,21 @@
  * under the License.
  */
 
-import type { A2AProxyPathParams, AgentCardPathParams } from "@agent-management-platform/types";
+import type { QueryClient } from "@tanstack/react-query";
+import type { AgentCardPathParams } from "@agent-management-platform/types";
 
-export const agentCardQueryKey = (p: AgentCardPathParams) =>
-  ["agent-card", p.orgName, p.projName, p.agentName, p.envId] as const;
+// Card and proxy share this prefix so one invalidation refetches both.
+const a2aEnvQueryKey = (p: AgentCardPathParams) =>
+  ["a2a", p.orgName, p.projName, p.agentName, p.envId] as const;
 
-export const a2aProxyQueryKey = (p: A2AProxyPathParams) =>
-  ["a2a-proxy", p.orgName, p.projName, p.agentName, p.envId] as const;
+export const agentCardQueryKey = (p: AgentCardPathParams) => [...a2aEnvQueryKey(p), "card"] as const;
+
+export const a2aProxyQueryKey = (p: AgentCardPathParams) => [...a2aEnvQueryKey(p), "proxy"] as const;
+
+/** A card or proxy change also changes the other, so both are refetched. */
+export async function invalidateA2AQueries(
+  queryClient: QueryClient,
+  params: AgentCardPathParams,
+): Promise<void> {
+  await queryClient.invalidateQueries({ queryKey: a2aEnvQueryKey(params) });
+}

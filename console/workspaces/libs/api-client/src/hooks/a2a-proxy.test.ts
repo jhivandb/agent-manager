@@ -20,7 +20,6 @@ import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { A2AProxyResponse, AgentCardResponse } from "@agent-management-platform/types";
 
 vi.mock("@agent-management-platform/views", () => ({ useSnackBar: () => ({ pushSnackBar: vi.fn() }) }));
 vi.mock("@agent-management-platform/auth", () => ({
@@ -35,68 +34,57 @@ vi.mock("../apis/a2a-proxy", () => ({
   deleteA2AProxy: vi.fn(async () => undefined),
   refreshA2AProxy: vi.fn(async () => undefined),
 }));
-vi.mock("../apis/agent-card", () => ({
-  getAgentCard: vi.fn(),
-  setAgentCardSource: vi.fn(async () => undefined),
-  refreshAgentCard: vi.fn(async () => undefined),
-  deleteAgentCardSource: vi.fn(async () => undefined),
-}));
 
-import { getAgentCard } from "../apis/agent-card";
-import { useGetAgentCard } from "./agent-card";
-import { a2aProxyRefetchInterval, useIsSavingA2AProxy, useSetA2AProxy } from "./a2a-proxy";
-import { setA2AProxy } from "../apis/a2a-proxy";
+import { getA2AProxy, setA2AProxy } from "../apis/a2a-proxy";
+import { useGetA2AProxy, useIsSavingA2AProxy, useSetA2AProxy } from "./a2a-proxy";
+import { a2aProxyQueryKey, agentCardQueryKey } from "./a2a-query-keys";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const params = { orgName: "o", projName: "p", agentName: "a", envId: "dev" };
-const proxy = (status: A2AProxyResponse["status"]): A2AProxyResponse => ({ status, lastError: "", upstreamAuthHeader: "" });
-const card: AgentCardResponse = { source: "external", status: "pending", sourceUrl: "https://a/.well-known/agent-card.json", lastError: "" };
+const notFound = () => Object.assign(new Error("nf"), { status: 404 });
 
 let unmount: (() => void) | undefined;
 afterEach(() => unmount?.());
 
-describe("a2aProxyRefetchInterval", () => {
-  it("re-polls while the gateway publish is in flight", () => {
-    expect(a2aProxyRefetchInterval(proxy("pending"))).toBeGreaterThan(0);
-  });
+async function mount<T>(useHook: () => T) {
+  const result = {} as { current: T };
+  const Probe = () => {
+    result.current = useHook();
+    return null;
+  };
+  const qc = new QueryClient();
+  const root = createRoot(document.createElement("div"));
+  await act(async () =>
+    root.render(createElement(QueryClientProvider, { client: qc }, createElement(Probe))),
+  );
+  unmount = () => act(() => root.unmount());
+  return { result, qc };
+}
 
-  it("stops once published, failed, or the environment is direct", () => {
-    expect(a2aProxyRefetchInterval(proxy("published"))).toBe(false);
-    expect(a2aProxyRefetchInterval(proxy("failed"))).toBe(false);
-    expect(a2aProxyRefetchInterval(proxy("pending"), { status: 404 })).toBe(false);
+describe("useGetA2AProxy", () => {
+  it("reads a direct environment as null", async () => {
+    vi.mocked(getA2AProxy).mockRejectedValueOnce(notFound());
+    const { qc } = await mount(() => useGetA2AProxy(params));
+    await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
+    expect(qc.getQueryData(a2aProxyQueryKey(params))).toBeNull();
+    expect(qc.getQueryState(a2aProxyQueryKey(params))?.status).toBe("success");
   });
 });
 
 describe("useSetA2AProxy", () => {
-  // A mode switch changes the card too; the form must not close on the old card.
-  it("settles only after the agent card is refetched", async () => {
-    vi.mocked(getAgentCard).mockResolvedValue(card);
-    const result = {} as { current: ReturnType<typeof useSetA2AProxy> };
-    const Probe = () => {
-      useGetAgentCard(params);
-      result.current = useSetA2AProxy();
-      return null;
-    };
-    const root = createRoot(document.createElement("div"));
-    const client = new QueryClient();
-    await act(async () =>
-      root.render(createElement(QueryClientProvider, { client }, createElement(Probe))),
-    );
-    unmount = () => act(() => root.unmount());
+  it("refetches the card and routing even when the save fails", async () => {
+    vi.mocked(setA2AProxy).mockRejectedValueOnce(new Error("boom"));
+    const { result, qc } = await mount(useSetA2AProxy);
+    qc.setQueryData(a2aProxyQueryKey(params), null);
+    qc.setQueryData(agentCardQueryKey(params), { status: "fetched" });
 
-    let release!: () => void;
-    vi.mocked(getAgentCard).mockImplementationOnce(
-      () => new Promise((resolve) => { release = () => resolve(card); }),
-    );
-    let settled = false;
     await act(async () => {
-      void result.current.mutateAsync({ params, body: {} }).then(() => { settled = true; });
+      await result.current.mutateAsync({ params, body: {} }).catch(() => undefined);
     });
-    expect(settled).toBe(false);
 
-    await act(async () => release());
-    expect(settled).toBe(true);
+    expect(qc.getQueryState(a2aProxyQueryKey(params))?.isInvalidated).toBe(true);
+    expect(qc.getQueryState(agentCardQueryKey(params))?.isInvalidated).toBe(true);
   });
 });
 
@@ -106,29 +94,21 @@ describe("useIsSavingA2AProxy", () => {
     vi.mocked(setA2AProxy).mockImplementationOnce(
       () => new Promise<undefined>((resolve) => { finish = () => resolve(undefined); }),
     );
-    const seen = {} as { save: ReturnType<typeof useSetA2AProxy>; same: boolean; other: boolean };
-    const Probe = () => {
-      seen.save = useSetA2AProxy();
-      seen.same = useIsSavingA2AProxy(params);
-      seen.other = useIsSavingA2AProxy({ ...params, envId: "prod" });
-      return null;
-    };
-    const root = createRoot(document.createElement("div"));
-    const client = new QueryClient();
-    await act(async () =>
-      root.render(createElement(QueryClientProvider, { client }, createElement(Probe))),
-    );
-    unmount = () => act(() => root.unmount());
-    expect(seen.same).toBe(false);
+    const { result: seen } = await mount(() => ({
+      save: useSetA2AProxy(),
+      same: useIsSavingA2AProxy(params),
+      other: useIsSavingA2AProxy({ ...params, envId: "prod" }),
+    }));
+    expect(seen.current.same).toBe(false);
 
     await act(async () => {
-      void seen.save.mutateAsync({ params, body: {} });
+      void seen.current.save.mutateAsync({ params, body: {} });
       await new Promise((r) => setTimeout(r, 20));
     });
-    expect(seen.same).toBe(true);
-    expect(seen.other).toBe(false);
+    expect(seen.current.same).toBe(true);
+    expect(seen.current.other).toBe(false);
 
     await act(async () => { finish(); await new Promise((r) => setTimeout(r, 20)); });
-    expect(seen.same).toBe(false);
+    expect(seen.current.same).toBe(false);
   });
 });

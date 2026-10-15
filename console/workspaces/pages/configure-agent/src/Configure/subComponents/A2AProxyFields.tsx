@@ -16,9 +16,9 @@
  * under the License.
  */
 
-import { useId } from "react";
-import { Box, Button, FormControlLabel, Stack, Switch, TextField, Typography } from "@wso2/oxygen-ui";
-import { type A2AProxyDraft, UPSTREAM_HEADER_MAX } from "./a2aProxyDraft";
+import { Box, Button, FormControlLabel, Stack, Switch, Typography } from "@wso2/oxygen-ui";
+import { TextInput } from "@agent-management-platform/views";
+import { type A2AProxyDraft, UPSTREAM_HEADER_MAX, UPSTREAM_VALUE_MAX_BYTES } from "./a2aProxyDraft";
 
 interface A2AProxyFieldsProps {
   draft: A2AProxyDraft;
@@ -33,7 +33,6 @@ interface A2AProxyFieldsProps {
 export function A2AProxyFields({
   draft, onChange, hasStoredSecret, error, disabled,
 }: A2AProxyFieldsProps) {
-  const id = useId();
   const set = (patch: Partial<A2AProxyDraft>) => onChange({ ...draft, ...patch });
   return (
     <Stack spacing={1.5}>
@@ -53,15 +52,14 @@ export function A2AProxyFields({
             Callers reach the agent through this environment&apos;s gateway, with its API keys,
             CORS and observability. Add a header if the agent itself requires a credential.
           </Typography>
-          <TextField
-            id={`${id}-header`}
+          <TextInput
             size="small"
             label="Upstream header"
             placeholder="X-API-Key"
             value={draft.header}
             disabled={disabled}
             onChange={(e) => set({ header: e.target.value })}
-            inputProps={{ maxLength: UPSTREAM_HEADER_MAX }}
+            maxLength={UPSTREAM_HEADER_MAX}
           />
           {hasStoredSecret && draft.secret === "keep" && (
             <Box display="flex" alignItems="center" gap={1}>
@@ -78,16 +76,17 @@ export function A2AProxyFields({
           )}
           {draft.secret === "replace" && (
             <Box display="flex" alignItems="center" gap={1}>
-              <TextField
-                id={`${id}-value`}
+              <TextInput
                 size="small"
                 type="password"
+                showPasswordToggle
                 autoComplete="new-password"
                 label="Header value"
                 value={draft.value}
                 disabled={disabled}
                 onChange={(e) => set({ value: e.target.value })}
-                sx={{ flex: 1 }}
+                // Chars never exceed bytes, so this cap never blocks a valid value.
+                maxLength={UPSTREAM_VALUE_MAX_BYTES}
               />
               {hasStoredSecret && (
                 <Button

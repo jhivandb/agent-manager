@@ -36,7 +36,8 @@ vi.mock("@agent-management-platform/shared-component", () => ({
   APIKeysManager: () => <div>api keys manager</div>,
   EnvironmentSelector: () => null,
 }));
-vi.mock("@agent-management-platform/views", () => ({
+vi.mock("@agent-management-platform/views", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@agent-management-platform/views")>()),
   PageLayout: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
@@ -83,7 +84,7 @@ describe("SecurityComponent", () => {
   it("explains why a direct external A2A agent has no API keys", () => {
     externalA2A();
     vi.mocked(useGetA2AProxy).mockReturnValue({
-      data: undefined, isLoading: false, isError: true, error: Object.assign(new Error("nf"), { status: 404 }),
+      data: null, isLoading: false, isError: false, error: null,
     } as unknown as ReturnType<typeof useGetA2AProxy>);
     renderPage();
     expect(screen.getByText(/not routed through the gateway/i)).toBeInTheDocument();

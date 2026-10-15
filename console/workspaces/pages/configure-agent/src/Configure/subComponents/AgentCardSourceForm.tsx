@@ -48,18 +48,19 @@ export function AgentCardSourceForm({
 }: AgentCardSourceFormProps) {
   const [url, setUrl] = useState(currentUrl ?? "");
   const { mutateAsync: saveSource, isPending: isSaving } = useSetAgentCardSource();
-  const { mutateAsync: saveProxy } = useSetA2AProxy();
+  const { mutateAsync: saveProxy, isPending: isRouting } = useSetA2AProxy();
   const [proxyDraft, setProxyDraft] = useState(() => draftFromProxy(undefined));
   const routes = !inline && offerRouting && proxyDraft.enabled;
   const proxyError = routes ? upstreamAuthError(proxyDraft) : null;
 
   const trimmed = url.trim();
   const invalid = trimmed !== "" && validateEndpointUrl(trimmed) !== null;
-  const canSave = !!trimmed && !invalid && trimmed !== currentUrl && !isSaving && !proxyError;
+  const busy = isSaving || isRouting;
+  const canSave = !!trimmed && !invalid && trimmed !== currentUrl && !busy && !proxyError;
   // Awaited rather than chained on mutate callbacks: saving the URL unmounts this form.
   const submit = async () => {
     if (!canSave) return;
-    const sourceSaved = await saveSource({ params, body: { url: trimmed } })
+    const sourceSaved = await saveSource({ params, body: { url: trimmed }, routingFollows: routes })
       .then(() => true, () => false);
     if (!sourceSaved) return;
     onDone?.();
@@ -142,7 +143,7 @@ export function AgentCardSourceForm({
             onChange={setProxyDraft}
             hasStoredSecret={false}
             error={proxyError}
-            disabled={isSaving}
+            disabled={busy}
           />
         </Box>
       )}

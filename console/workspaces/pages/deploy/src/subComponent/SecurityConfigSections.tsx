@@ -51,6 +51,7 @@ import {
   Typography,
 } from "@wso2/oxygen-ui";
 import { ChevronDown, Info } from "@wso2/oxygen-ui-icons-react";
+import { isExternalA2AAgent } from "@agent-management-platform/views";
 import {
   forwardRef,
   useEffect,
@@ -125,8 +126,7 @@ export const SecurityConfigSections = forwardRef<SecurityConfigHandle, SecurityC
     // env-scoped `configurations` prop below.
     const { data: agent } = useGetAgent({ orgName, projName, agentName });
     // A proxied external A2A agent takes inbound auth and CORS at the gateway, like an API agent.
-    const hasGatewayPolicies = agent?.agentType?.type === "agent-api" ||
-      (agent?.agentType?.type === "external-agent-api" && agent?.agentType?.subType === "a2a-agent");
+    const hasGatewayPolicies = agent?.agentType?.type === "agent-api" || isExternalA2AAgent(agent);
     const isA2AAgent = agent?.agentType?.subType === "a2a-agent";
 
     const { data: idpResp } = useListEnvironmentIdentityProviders({

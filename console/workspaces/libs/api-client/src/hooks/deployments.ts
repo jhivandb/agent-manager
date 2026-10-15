@@ -93,7 +93,7 @@ import type {
 } from '@agent-management-platform/types';
 import { POLL_INTERVAL } from '../utils';
 import { useApiMutation, useApiQuery } from './react-query-notifications';
-import { invalidateA2AProxy } from './a2a-proxy';
+import { invalidateA2AQueries } from './a2a-query-keys';
 
 export function useDeployAgent() {
   const queryClient = useQueryClient();
@@ -116,11 +116,10 @@ export function useUpdateAgentDeploySettings() {
   return useApiMutation<void, unknown,
   { params: UpdateAgentDeploySettingsPathParams; body: UpdateAgentDeploySettingsRequest }>({
     action: { verb: 'update', target: 'deploy settings' },
-    // In mutationFn, since useApiMutation does not await onSuccess.
-    // A2A settings republish, so the proxy goes back to pending.
+    // In mutationFn, since onSuccess is not awaited; A2A settings re-queue the proxy publish.
     mutationFn: async ({ params, body }) => {
       await updateAgentDeploySettings(params, body, getToken);
-      await invalidateA2AProxy(queryClient, { ...params, envId: body.environmentName });
+      await invalidateA2AQueries(queryClient, { ...params, envId: body.environmentName });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['agent'] });

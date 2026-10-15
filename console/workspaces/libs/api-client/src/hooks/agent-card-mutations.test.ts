@@ -35,11 +35,13 @@ vi.mock("../apis/agent-card", () => ({
   refreshAgentCard: vi.fn(async () => undefined),
   deleteAgentCardSource: vi.fn(async () => undefined),
 }));
+vi.mock("../apis/a2a-proxy", () => ({ setA2AProxy: vi.fn(async () => undefined) }));
 
 import { getAgentCard } from "../apis/agent-card";
 import {
   useDeleteAgentCardSource, useGetAgentCard, useRefreshAgentCard, useSetAgentCardSource,
 } from "./agent-card";
+import { useSetA2AProxy } from "./a2a-proxy";
 import { a2aProxyQueryKey, agentCardQueryKey } from "./a2a-query-keys";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -119,6 +121,41 @@ describe("agent card mutations", () => {
     expect(late).toBe(true);
   });
 
+  // A mode switch changes the card too; the form must not close on the old card.
+  it("resolve a gateway routing change only after the card is re-read", async () => {
+    vi.mocked(getAgentCard).mockResolvedValueOnce(card("https://a.example/c"));
+    const hook = await mountWith(useSetA2AProxy);
+
+    const { early, late } = await settlesBeforeTheRefetch(
+      () => hook.current.mutateAsync({ params, body: {} }),
+      card("https://a.example/c"),
+    );
+
+    expect(early).toBe(false);
+    expect(late).toBe(true);
+  });
+
+  it("leave the refetch to the routing save that follows a source change", async () => {
+    vi.mocked(getAgentCard).mockResolvedValue(card("https://a.example/c"));
+    const { result, qc } = await mountWithClient(useSetAgentCardSource);
+    qc.setQueryData(a2aProxyQueryKey(params), null);
+
+    await act(async () => {
+      await result.current.mutateAsync({ params, body: { url: "https://n.example/c" }, routingFollows: true });
+    });
+
+    expect(qc.getQueryState(a2aProxyQueryKey(params))?.isInvalidated).toBe(false);
+  });
+
+  it("read a missing card source as null", async () => {
+    vi.mocked(getAgentCard).mockRejectedValue(Object.assign(new Error("nf"), { status: 404 }));
+    const { qc } = await mountWithClient(() => null);
+    await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
+
+    expect(qc.getQueryData(agentCardQueryKey(params))).toBeNull();
+    expect(qc.getQueryState(agentCardQueryKey(params))?.status).toBe("success");
+  });
+
   it.each([
     ["a source change", useSetAgentCardSource,
       (h: { mutateAsync: (v: never) => Promise<unknown> }) =>
@@ -135,18 +172,17 @@ describe("agent card mutations", () => {
     expect(qc.getQueryState(a2aProxyQueryKey(params))?.isInvalidated).toBe(true);
   });
 
-  it("drop the card and gateway routing from the cache when the source is removed", async () => {
+  it("read the card and gateway routing as gone once the source is removed", async () => {
     vi.mocked(getAgentCard).mockResolvedValue(card("https://a.example/c"));
     const { result, qc } = await mountWithClient(useDeleteAgentCardSource);
     qc.setQueryData(a2aProxyQueryKey(params), { status: "published" });
     expect(qc.getQueryData(agentCardQueryKey(params))).toBeDefined();
     // The mounted card query re-reads after removal; the server now answers 404.
-    const notFound = Object.assign(new Error("not found"), { status: 404 });
-    vi.mocked(getAgentCard).mockRejectedValue(notFound);
+    vi.mocked(getAgentCard).mockRejectedValue(Object.assign(new Error("not found"), { status: 404 }));
 
     await act(async () => { await result.current.mutateAsync(params); });
 
-    expect(qc.getQueryData(agentCardQueryKey(params))).toBeUndefined();
-    expect(qc.getQueryState(a2aProxyQueryKey(params))).toBeUndefined();
+    expect(qc.getQueryData(agentCardQueryKey(params))).toBeNull();
+    expect(qc.getQueryData(a2aProxyQueryKey(params))).toBeNull();
   });
 });

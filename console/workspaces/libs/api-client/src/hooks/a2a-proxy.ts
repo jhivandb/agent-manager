@@ -16,7 +16,7 @@
  * under the License.
  */
 
-import { useIsMutating, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { hashKey, useIsMutating, useQueryClient } from "@tanstack/react-query";
 import { useAuthHooks } from "@agent-management-platform/auth";
 import type {
   A2AProxyPathParams,
@@ -25,39 +25,18 @@ import type {
 } from "@agent-management-platform/types";
 import { useApiMutation, useApiQuery } from "./react-query-notifications";
 import { deleteA2AProxy, getA2AProxy, refreshA2AProxy, setA2AProxy } from "../apis/a2a-proxy";
-import { a2aProxyQueryKey, agentCardQueryKey } from "./a2a-query-keys";
-import { pendingRefetchInterval } from "../utils";
+import { a2aProxyQueryKey, invalidateA2AQueries } from "./a2a-query-keys";
+import { nullIfNotFound, pendingRefetchInterval } from "../utils";
 
-export { a2aProxyQueryKey } from "./a2a-query-keys";
-
-/** A proxy change also changes the card, so both are refetched. */
-export async function invalidateA2AProxy(
-  queryClient: QueryClient,
-  params: A2AProxyPathParams,
-): Promise<void> {
-  await Promise.all([
-    queryClient.invalidateQueries({ queryKey: a2aProxyQueryKey(params) }),
-    queryClient.invalidateQueries({ queryKey: agentCardQueryKey(params) }),
-  ]);
-}
-
-/** Re-poll while the gateway publish is in flight; a 404 means the environment is direct. */
-export function a2aProxyRefetchInterval(
-  data: A2AProxyResponse | undefined,
-  error?: unknown,
-): number | false {
-  return pendingRefetchInterval(data, error);
-}
-
-/** A 404 (the environment is direct) is expected: it errors silently. */
+/** Resolves to null while the environment is direct (a 404). */
 export function useGetA2AProxy(params: A2AProxyPathParams, options: { enabled?: boolean } = {}) {
   const { getToken } = useAuthHooks();
-  return useApiQuery<A2AProxyResponse>({
+  return useApiQuery<A2AProxyResponse | null>({
     queryKey: a2aProxyQueryKey(params),
-    queryFn: () => getA2AProxy(params, getToken),
+    queryFn: () => nullIfNotFound(getA2AProxy(params, getToken)),
     enabled: (options.enabled ?? true) &&
       !!(params.orgName && params.projName && params.agentName && params.envId),
-    refetchInterval: (q) => a2aProxyRefetchInterval(q.state.data, q.state.error),
+    refetchInterval: (q) => pendingRefetchInterval(q.state.data),
     retry: false,
     silent: true,
   });
@@ -67,12 +46,12 @@ const setA2AProxyMutationKey = ["a2a-proxy", "set"] as const;
 
 /** True while a routing save for this agent environment is in flight, from any component. */
 export function useIsSavingA2AProxy(params: A2AProxyPathParams): boolean {
+  const key = hashKey(a2aProxyQueryKey(params));
   return useIsMutating({
     mutationKey: setA2AProxyMutationKey,
     predicate: (m) => {
       const p = (m.state.variables as { params?: A2AProxyPathParams } | undefined)?.params;
-      return !!p && p.orgName === params.orgName && p.projName === params.projName &&
-        p.agentName === params.agentName && p.envId === params.envId;
+      return !!p && hashKey(a2aProxyQueryKey(p)) === key;
     },
   }) > 0;
 }
@@ -84,10 +63,13 @@ export function useSetA2AProxy() {
   return useApiMutation<void, unknown, Vars>({
     mutationKey: setA2AProxyMutationKey,
     action: { verb: "update", target: "gateway routing" },
-    // In mutationFn, since useApiMutation does not await onSuccess.
+    // In mutationFn (onSuccess is not awaited) and in finally, as a card save may defer to it.
     mutationFn: async ({ params, body }) => {
-      await setA2AProxy(params, body, getToken);
-      await invalidateA2AProxy(queryClient, params);
+      try {
+        await setA2AProxy(params, body, getToken);
+      } finally {
+        await invalidateA2AQueries(queryClient, params);
+      }
     },
   });
 }
@@ -97,11 +79,11 @@ export function useDeleteA2AProxy() {
   const queryClient = useQueryClient();
   return useApiMutation<void, unknown, A2AProxyPathParams>({
     action: { verb: "remove", target: "gateway routing" },
-    // A 404 keeps the old data cached, so the proxy entry is dropped rather than refetched.
+    // Known direct now, so unmounted readers do not briefly show the old routing.
     mutationFn: async (params) => {
       await deleteA2AProxy(params, getToken);
-      queryClient.removeQueries({ queryKey: a2aProxyQueryKey(params) });
-      await queryClient.invalidateQueries({ queryKey: agentCardQueryKey(params) });
+      queryClient.setQueryData(a2aProxyQueryKey(params), null);
+      await invalidateA2AQueries(queryClient, params);
     },
   });
 }
@@ -114,7 +96,7 @@ export function useRefreshA2AProxy() {
     successMessage: "Gateway republish queued",
     mutationFn: async (params) => {
       await refreshA2AProxy(params, getToken);
-      await invalidateA2AProxy(queryClient, params);
+      await invalidateA2AQueries(queryClient, params);
     },
   });
 }

@@ -34,7 +34,11 @@ import {
   EnvironmentSelector,
   type CreateAPIKeyInput,
 } from "@agent-management-platform/shared-component";
-import { PageLayout } from "@agent-management-platform/views";
+import {
+  buildConfigureTabHref,
+  isExternalA2AAgent,
+  PageLayout,
+} from "@agent-management-platform/views";
 import { absoluteRouteMap } from "@agent-management-platform/types";
 
 const agentRoutes = absoluteRouteMap.children.org.children.projects.children.agents;
@@ -59,22 +63,12 @@ export const SecurityComponent: React.FC = () => {
     projName: projectId,
     agentName: agentId,
   });
-  const isExternalA2A =
-    agent?.provisioning?.type === "external" &&
-    agent?.agentType?.subType === "a2a-agent";
-  const {
-    data: proxyData,
-    isError: proxyIsError,
-    error: proxyError,
-    isLoading: isLoadingProxy,
-  } = useGetA2AProxy(
+  const isExternalA2A = isExternalA2AAgent(agent);
+  // Null while the environment is direct.
+  const { data: proxy, isLoading: isLoadingProxy } = useGetA2AProxy(
     { orgName: orgId, projName: projectId, agentName: agentId, envId },
     { enabled: isExternalA2A },
   );
-  // A 404 means direct; the previous data may still be cached.
-  const proxied =
-    !!proxyData &&
-    !(proxyIsError && (proxyError as { status?: number } | null)?.status === 404);
   const { data: deployments, isLoading: isLoadingDeployments } =
     useListAgentDeployments({
       orgName: agent && !isExternalA2A ? orgId : undefined,
@@ -87,7 +81,7 @@ export const SecurityComponent: React.FC = () => {
   const currentDeployment = envId ? deployments?.[envId] : undefined;
   // A proxied external agent is served by the gateway, so its keys work without a deployment.
   const servedByGateway = isExternalA2A
-    ? proxied
+    ? !!proxy
     : currentDeployment?.status === "active";
   const shouldLoadKeys =
     !isLoadingConfig &&
@@ -142,8 +136,7 @@ export const SecurityComponent: React.FC = () => {
   };
 
   const a2aSettingsHref = orgId && projectId && agentId && envId
-    ? `${generatePath(agentRoutes.children.configure.path, { orgId, projectId, agentId })}`
-      + `?tab=a2a&env=${encodeURIComponent(envId)}`
+    ? buildConfigureTabHref(orgId, projectId, agentId, "a2a", envId)
     : undefined;
   const a2aSettingsAction = a2aSettingsHref ? (
     <Button variant="contained" component={Link} to={a2aSettingsHref}>

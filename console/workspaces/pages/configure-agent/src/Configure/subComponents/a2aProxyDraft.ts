@@ -19,7 +19,7 @@
 import type { A2AProxyResponse, SetA2AProxyRequest } from "@agent-management-platform/types";
 
 /** What a save does with a stored upstream secret. */
-export type StoredSecretAction = "keep" | "replace" | "clear";
+type StoredSecretAction = "keep" | "replace" | "clear";
 
 export interface A2AProxyDraft {
   enabled: boolean;

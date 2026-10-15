@@ -21,7 +21,6 @@ import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@agent-management-platform/api-client", () => ({
-  isAgentCardNotFound: (error: unknown) => (error as { status?: number } | null)?.status === 404,
   useGetAgentCard: vi.fn(),
   useGetA2AProxy: vi.fn(),
   useIsSavingA2AProxy: vi.fn(() => false),
@@ -58,7 +57,9 @@ const mockCard = (value: Partial<ReturnType<typeof useGetAgentCard>>) =>
     data: undefined, isLoading: false, isError: false, error: null, ...value,
   } as unknown as ReturnType<typeof useGetAgentCard>);
 
-const notFound = () => Object.assign(new Error("nf"), { status: 404 });
+// The hooks read a 404 (no card source, or a direct environment) as null.
+const noSource = { data: null };
+const direct = { data: null, isSuccess: true };
 
 const mockProxy = (value: Partial<ReturnType<typeof useGetA2AProxy>>) =>
   vi.mocked(useGetA2AProxy).mockReturnValue({
@@ -89,7 +90,7 @@ beforeEach(() => {
     { mutate: vi.fn(), isPending: false } as unknown as
       ReturnType<typeof useDeleteAgentCardSource>);
   setSource.mockResolvedValue(undefined);
-  mockProxy({ isError: true, error: notFound() });
+  mockProxy(direct);
   idleMutation(useSetA2AProxy);
   idleMutation(useDeleteA2AProxy);
   idleMutation(useRefreshA2AProxy);
@@ -132,19 +133,19 @@ describe("A2AAgentCardPanel", () => {
   });
 
   it("asks an external agent with no source for a card URL", () => {
-    mockCard({ isError: true, error: Object.assign(new Error("nf"), { status: 404 }) });
+    mockCard(noSource);
     renderPanel(true);
     fireEvent.change(screen.getByPlaceholderText(/agent-card\.json/), {
       target: { value: "https://agent.example/.well-known/agent-card.json" },
     });
     fireEvent.click(screen.getByRole("button", { name: /save/i }));
     expect(setSource).toHaveBeenCalledWith({
-      params, body: { url: "https://agent.example/.well-known/agent-card.json" },
+      params, body: { url: "https://agent.example/.well-known/agent-card.json" }, routingFollows: false,
     });
   });
 
   const fillNewUrlAndRoute = () => {
-    mockCard({ isError: true, error: notFound() });
+    mockCard(noSource);
     renderPanel(true);
     fireEvent.change(screen.getByPlaceholderText(/agent-card\.json/), {
       target: { value: "https://agent.example/.well-known/agent-card.json" },
@@ -158,8 +159,20 @@ describe("A2AAgentCardPanel", () => {
     vi.mocked(useSetA2AProxy).mockReturnValue(
       { mutateAsync: setProxy, isPending: false } as unknown as ReturnType<typeof useSetA2AProxy>);
     fillNewUrlAndRoute();
-    expect(setSource).toHaveBeenCalledTimes(1);
+    expect(setSource).toHaveBeenCalledWith(expect.objectContaining({ routingFollows: true }));
     await waitFor(() => expect(setProxy).toHaveBeenCalledWith({ params, body: {} }));
+  });
+
+  it("keeps the URL form disabled while the routing save that follows it is in flight", () => {
+    vi.mocked(useSetA2AProxy).mockReturnValue(
+      { mutateAsync: vi.fn(), isPending: true } as unknown as ReturnType<typeof useSetA2AProxy>);
+    mockCard(noSource);
+    renderPanel(true);
+    fireEvent.change(screen.getByPlaceholderText(/agent-card\.json/), {
+      target: { value: "https://agent.example/.well-known/agent-card.json" },
+    });
+    expect(screen.getByRole("button", { name: /save/i })).toBeDisabled();
+    expect(screen.getByLabelText("Route through gateway")).toBeDisabled();
   });
 
   it("does not route a URL that failed to save", async () => {
@@ -177,7 +190,7 @@ describe("A2AAgentCardPanel", () => {
     const setProxy = vi.fn().mockResolvedValue(undefined);
     vi.mocked(useSetA2AProxy).mockReturnValue(
       { mutateAsync: setProxy, isPending: false } as unknown as ReturnType<typeof useSetA2AProxy>);
-    mockCard({ isError: true, error: notFound() });
+    mockCard(noSource);
     renderPanel(true);
     fireEvent.change(screen.getByPlaceholderText(/agent-card\.json/), {
       target: { value: "https://agent.example/.well-known/agent-card.json" },
@@ -241,7 +254,7 @@ describe("A2AAgentCardPanel", () => {
 
   it("keeps the routing section mounted but disabled while a routing save is in flight", () => {
     mockCard({ data: registeredCard });
-    mockProxy({ isError: true, error: notFound() });
+    mockProxy(direct);
     vi.mocked(useIsSavingA2AProxy).mockReturnValue(true);
     renderPanel(true);
     expect(screen.getByLabelText("Route through gateway")).toBeDisabled();
@@ -260,7 +273,7 @@ describe("A2AAgentCardPanel", () => {
 
   it("registers a URL without routing when the gateway routing could not be loaded", async () => {
     const write = spyOnProxyWrites();
-    mockCard({ isError: true, error: notFound() });
+    mockCard(noSource);
     mockProxy({ isError: true, error: Object.assign(new Error("boom"), { status: 500 }) });
     renderPanel(true);
     expect(screen.queryByLabelText("Route through gateway")).not.toBeInTheDocument();
@@ -275,7 +288,7 @@ describe("A2AAgentCardPanel", () => {
   });
 
   it("offers a refetch when a platform agent has no card fetch queued", () => {
-    mockCard({ isError: true, error: Object.assign(new Error("nf"), { status: 404 }) });
+    mockCard(noSource);
     renderPanel();
     expect(screen.getByText(/no agent card has been fetched/i)).toBeInTheDocument();
     expect(screen.queryByText(/register this agent/i)).not.toBeInTheDocument();
@@ -285,7 +298,7 @@ describe("A2AAgentCardPanel", () => {
   });
 
   it("offers no refetch to an external agent with no source", () => {
-    mockCard({ isError: true, error: Object.assign(new Error("nf"), { status: 404 }) });
+    mockCard(noSource);
     renderPanel(true);
     expect(screen.getByText(/register this agent/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Refetch" })).not.toBeInTheDocument();
@@ -325,23 +338,6 @@ describe("A2AAgentCardPanel", () => {
     expect(screen.queryByPlaceholderText(/agent-card\.json/)).not.toBeInTheDocument();
   });
 
-  it("drops the stale card once its source is gone", () => {
-    mockCard({
-      isError: true,
-      error: Object.assign(new Error("nf"), { status: 404 }),
-      data: {
-        source: "external", status: "fetched", sourceUrl: "https://old.example/card.json", lastError: "",
-        card: { name: "Old Agent", supportedInterfaces: [], skills: [] },
-      },
-    });
-    renderPanel(true);
-    expect(screen.queryByText("Old Agent")).not.toBeInTheDocument();
-    expect(screen.queryByText("https://old.example/card.json")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Remove" })).not.toBeInTheDocument();
-    expect(screen.getByText(/register this agent/i)).toBeInTheDocument();
-    expect(screen.getByPlaceholderText(/agent-card\.json/)).toBeInTheDocument();
-  });
-
   it("does not double the v of a version that already has one", () => {
     mockCard({
       data: {
@@ -354,7 +350,7 @@ describe("A2AAgentCardPanel", () => {
   });
 
   it("keeps Save disabled for a URL with no host, and caps its length", () => {
-    mockCard({ isError: true, error: Object.assign(new Error("nf"), { status: 404 }) });
+    mockCard(noSource);
     renderPanel(true);
     const input = screen.getByPlaceholderText(/agent-card\.json/);
     fireEvent.change(input, { target: { value: "https://" } });

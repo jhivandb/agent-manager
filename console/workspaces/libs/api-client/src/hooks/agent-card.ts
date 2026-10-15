@@ -16,7 +16,7 @@
  * under the License.
  */
 
-import { useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { useAuthHooks } from "@agent-management-platform/auth";
 import type {
   AgentCardPathParams,
@@ -30,45 +30,21 @@ import {
   refreshAgentCard,
   setAgentCardSource,
 } from "../apis/agent-card";
-import { pendingRefetchInterval } from "../utils";
+import { nullIfNotFound, pendingRefetchInterval } from "../utils";
+import { a2aProxyQueryKey, agentCardQueryKey, invalidateA2AQueries } from "./a2a-query-keys";
 
-import { a2aProxyQueryKey, agentCardQueryKey } from "./a2a-query-keys";
-
-export { agentCardQueryKey } from "./a2a-query-keys";
-
-/** Drops the cached card so a removed source does not keep showing its old card. */
-export function removeAgentCardFromCache(queryClient: QueryClient, params: AgentCardPathParams) {
-  queryClient.removeQueries({ queryKey: agentCardQueryKey(params) });
-}
-
-/** A 404 means no card source exists for the environment; any card still cached is stale. */
-export const isAgentCardNotFound = (error: unknown) =>
-  (error as { status?: number } | null)?.status === 404;
-
-/** Re-poll while pending; stop on fetched, failed, or a 404 (which keeps stale data cached). */
-export function agentCardRefetchInterval(
-  data: AgentCardResponse | undefined,
-  error?: unknown,
-): number | false {
-  return pendingRefetchInterval(data, error);
-}
-
-/**
- * A 404 (not an A2A agent, or no fetch queued yet) is expected: it errors silently.
- * poll: false stops the re-poll.
- */
+/** Resolves to null when no card source exists (a 404); poll: false stops the re-poll. */
 export function useGetAgentCard(
   params: AgentCardPathParams,
   options: { enabled?: boolean; poll?: boolean } = {},
 ) {
   const { getToken } = useAuthHooks();
-  return useApiQuery<AgentCardResponse>({
+  return useApiQuery<AgentCardResponse | null>({
     queryKey: agentCardQueryKey(params),
-    queryFn: () => getAgentCard(params, getToken),
+    queryFn: () => nullIfNotFound(getAgentCard(params, getToken)),
     enabled: (options.enabled ?? true) &&
       !!(params.orgName && params.projName && params.agentName && params.envId),
-    refetchInterval: (q) =>
-      options.poll === false ? false : agentCardRefetchInterval(q.state.data, q.state.error),
+    refetchInterval: (q) => (options.poll === false ? false : pendingRefetchInterval(q.state.data)),
     retry: false,
     silent: true,
   });
@@ -81,13 +57,9 @@ export function useRefreshAgentCard() {
     action: { verb: "update", target: "agent card" },
     successMessage: "Agent card refresh queued",
     // In mutationFn, since useApiMutation does not await onSuccess.
-    // A refresh also republishes the proxy.
     mutationFn: async (params) => {
       await refreshAgentCard(params, getToken);
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: agentCardQueryKey(params) }),
-        queryClient.invalidateQueries({ queryKey: a2aProxyQueryKey(params) }),
-      ]);
+      await invalidateA2AQueries(queryClient, params);
     },
   });
 }
@@ -95,17 +67,16 @@ export function useRefreshAgentCard() {
 export function useSetAgentCardSource() {
   const { getToken } = useAuthHooks();
   const queryClient = useQueryClient();
-  type Vars = { params: AgentCardPathParams; body: SetAgentCardSourceRequest };
+  // routingFollows: the routing save that follows refetches both instead.
+  type Vars = {
+    params: AgentCardPathParams; body: SetAgentCardSourceRequest; routingFollows?: boolean;
+  };
   return useApiMutation<void, unknown, Vars>({
     action: { verb: "update", target: "agent card source" },
     // Stays pending until the new URL is shown, so the editor can't close on the old one.
-    // A new URL re-queues the proxy publish.
-    mutationFn: async ({ params, body }) => {
+    mutationFn: async ({ params, body, routingFollows }) => {
       await setAgentCardSource(params, body, getToken);
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: agentCardQueryKey(params) }),
-        queryClient.invalidateQueries({ queryKey: a2aProxyQueryKey(params) }),
-      ]);
+      if (!routingFollows) await invalidateA2AQueries(queryClient, params);
     },
   });
 }
@@ -115,11 +86,12 @@ export function useDeleteAgentCardSource() {
   const queryClient = useQueryClient();
   return useApiMutation<void, unknown, AgentCardPathParams>({
     action: { verb: "remove", target: "agent card source" },
-    // Removing the source also removes the proxy; a 404 keeps old data cached, so both are dropped.
+    // The source and its proxy are gone; seeding that keeps unmounted readers off the old data.
     mutationFn: async (params) => {
       await deleteAgentCardSource(params, getToken);
-      removeAgentCardFromCache(queryClient, params);
-      queryClient.removeQueries({ queryKey: a2aProxyQueryKey(params) });
+      queryClient.setQueryData(agentCardQueryKey(params), null);
+      queryClient.setQueryData(a2aProxyQueryKey(params), null);
+      await invalidateA2AQueries(queryClient, params);
     },
   });
 }
