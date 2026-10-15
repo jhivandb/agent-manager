@@ -41,12 +41,6 @@ export async function invalidateA2AProxy(
   ]);
 }
 
-/** Binds `invalidateA2AProxy` to the app's query client, for callers without react-query. */
-export function useInvalidateA2AProxy(): (params: A2AProxyPathParams) => Promise<void> {
-  const queryClient = useQueryClient();
-  return (params) => invalidateA2AProxy(queryClient, params);
-}
-
 /** Re-poll while the gateway publish is in flight; a 404 means the environment is direct. */
 export function a2aProxyRefetchInterval(
   data: A2AProxyResponse | undefined,
