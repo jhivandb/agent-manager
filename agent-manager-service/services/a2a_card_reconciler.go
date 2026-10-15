@@ -28,6 +28,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/wso2/agent-manager/agent-manager-service/clients/openchoreosvc/client"
 	"github.com/wso2/agent-manager/agent-manager-service/models"
 	"github.com/wso2/agent-manager/agent-manager-service/repositories"
@@ -46,6 +47,8 @@ const (
 	a2aCardAttemptBudget = 14
 	// a2aCardUnrecordableError replaces a cause the store refused to record.
 	a2aCardUnrecordableError = "agent card fetch failed; the error could not be recorded"
+	// a2aCardUnstorableError replaces a card the store refuses to take as text.
+	a2aCardUnstorableError = "the agent card contains characters that cannot be stored"
 )
 
 // errA2ACardEndpointNotReady means the agent's environment has no public endpoint URL yet.
@@ -174,9 +177,17 @@ func (s *a2aCardReconcilerService) fetchOne(ctx context.Context, row models.A2AA
 	switch {
 	case errors.Is(err, repositories.ErrA2AAgentCardSuperseded):
 		s.logSuperseded(row)
+	case isUnstorableTextError(err):
+		s.recordAttemptFailure(ctx, row, fetched.releaseName, newA2APublicError(a2aCardUnstorableError, err))
 	case err != nil:
 		s.recordAttemptFailure(ctx, row, fetched.releaseName, fmt.Errorf("failed to store agent card: %w", err))
 	}
+}
+
+// isUnstorableTextError reports Postgres refusing text it cannot represent: a \u0000 escape or invalid UTF-8.
+func isUnstorableTextError(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && (pgErr.Code == "22P05" || pgErr.Code == "22021")
 }
 
 // dropUndeployedCard removes the row as undeploy would; a row re-queued meanwhile is kept.

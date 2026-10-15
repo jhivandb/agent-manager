@@ -19,12 +19,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -257,6 +259,31 @@ func TestCardReconcilerFailsTheRowWhenTheLastCardCannotBeStored(t *testing.T) {
 	h.svc.fetchOne(context.Background(), row)
 
 	require.Len(t, h.repo.MarkFailedCalls(), 1)
+}
+
+func TestCardReconcilerReportsAnUnstorableCard(t *testing.T) {
+	tests := []struct {
+		name string
+		code string
+	}{
+		{name: "unsupported unicode escape", code: "22P05"},
+		{name: "invalid byte sequence", code: "22021"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newCardReconcilerHarness("http://gw.example/a")
+			h.repo.MarkFetchedFunc = func(context.Context, models.A2AAgentCard, json.RawMessage, string, string, string) error {
+				return fmt.Errorf("wrap: %w", &pgconn.PgError{Code: tt.code, Message: "unsupported Unicode escape sequence"})
+			}
+
+			h.svc.fetchOne(context.Background(), pendingCard(models.A2AAgentCardSourcePlatform))
+
+			retries := h.repo.MarkAttemptFailedCalls()
+			require.Len(t, retries, 1)
+			assert.Equal(t, a2aCardUnstorableError, retries[0].LastErr)
+			assert.NotContains(t, retries[0].LastErr, "SQLSTATE")
+		})
+	}
 }
 
 func TestCardReconcilerStoresAValidUTF8LastError(t *testing.T) {
