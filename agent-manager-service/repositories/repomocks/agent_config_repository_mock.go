@@ -24,6 +24,9 @@ import (
 //			DeleteAllByAgentFunc: func(ctx context.Context, ouID string, projectName string, agentName string) error {
 //				panic("mock out the DeleteAllByAgent method")
 //			},
+//			DeleteForEnvironmentFunc: func(ctx context.Context, ouID string, environmentName string) error {
+//				panic("mock out the DeleteForEnvironment method")
+//			},
 //			GetFunc: func(ctx context.Context, ouID string, projectName string, agentName string, environmentName string) (*models.AgentConfig, error) {
 //				panic("mock out the Get method")
 //			},
@@ -45,6 +48,9 @@ type AgentConfigRepositoryMock struct {
 
 	// DeleteAllByAgentFunc mocks the DeleteAllByAgent method.
 	DeleteAllByAgentFunc func(ctx context.Context, ouID string, projectName string, agentName string) error
+
+	// DeleteForEnvironmentFunc mocks the DeleteForEnvironment method.
+	DeleteForEnvironmentFunc func(ctx context.Context, ouID string, environmentName string) error
 
 	// GetFunc mocks the Get method.
 	GetFunc func(ctx context.Context, ouID string, projectName string, agentName string, environmentName string) (*models.AgentConfig, error)
@@ -75,6 +81,15 @@ type AgentConfigRepositoryMock struct {
 			// AgentName is the agentName argument value.
 			AgentName string
 		}
+		// DeleteForEnvironment holds details about calls to the DeleteForEnvironment method.
+		DeleteForEnvironment []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// OuID is the ouID argument value.
+			OuID string
+			// EnvironmentName is the environmentName argument value.
+			EnvironmentName string
+		}
 		// Get holds details about calls to the Get method.
 		Get []struct {
 			// Ctx is the ctx argument value.
@@ -101,11 +116,12 @@ type AgentConfigRepositoryMock struct {
 			Tx *gorm.DB
 		}
 	}
-	lockCreateIfAbsent   sync.RWMutex
-	lockDeleteAllByAgent sync.RWMutex
-	lockGet              sync.RWMutex
-	lockUpsert           sync.RWMutex
-	lockWithTx           sync.RWMutex
+	lockCreateIfAbsent       sync.RWMutex
+	lockDeleteAllByAgent     sync.RWMutex
+	lockDeleteForEnvironment sync.RWMutex
+	lockGet                  sync.RWMutex
+	lockUpsert               sync.RWMutex
+	lockWithTx               sync.RWMutex
 }
 
 // CreateIfAbsent calls CreateIfAbsentFunc.
@@ -185,6 +201,46 @@ func (mock *AgentConfigRepositoryMock) DeleteAllByAgentCalls() []struct {
 	mock.lockDeleteAllByAgent.RLock()
 	calls = mock.calls.DeleteAllByAgent
 	mock.lockDeleteAllByAgent.RUnlock()
+	return calls
+}
+
+// DeleteForEnvironment calls DeleteForEnvironmentFunc.
+func (mock *AgentConfigRepositoryMock) DeleteForEnvironment(ctx context.Context, ouID string, environmentName string) error {
+	if mock.DeleteForEnvironmentFunc == nil {
+		panic("AgentConfigRepositoryMock.DeleteForEnvironmentFunc: method is nil but AgentConfigRepository.DeleteForEnvironment was just called")
+	}
+	callInfo := struct {
+		Ctx             context.Context
+		OuID            string
+		EnvironmentName string
+	}{
+		Ctx:             ctx,
+		OuID:            ouID,
+		EnvironmentName: environmentName,
+	}
+	mock.lockDeleteForEnvironment.Lock()
+	mock.calls.DeleteForEnvironment = append(mock.calls.DeleteForEnvironment, callInfo)
+	mock.lockDeleteForEnvironment.Unlock()
+	return mock.DeleteForEnvironmentFunc(ctx, ouID, environmentName)
+}
+
+// DeleteForEnvironmentCalls gets all the calls that were made to DeleteForEnvironment.
+// Check the length with:
+//
+//	len(mockedAgentConfigRepository.DeleteForEnvironmentCalls())
+func (mock *AgentConfigRepositoryMock) DeleteForEnvironmentCalls() []struct {
+	Ctx             context.Context
+	OuID            string
+	EnvironmentName string
+} {
+	var calls []struct {
+		Ctx             context.Context
+		OuID            string
+		EnvironmentName string
+	}
+	mock.lockDeleteForEnvironment.RLock()
+	calls = mock.calls.DeleteForEnvironment
+	mock.lockDeleteForEnvironment.RUnlock()
 	return calls
 }
 

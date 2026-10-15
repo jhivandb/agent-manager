@@ -72,3 +72,32 @@ func TestAgentConfigCreateIfAbsentInsertsDefaults(t *testing.T) {
 	assert.Equal(t, []string{"*"}, got.CORSAllowOrigins)
 	assert.Nil(t, got.CardCORSEnabled, "the card inherits the agent's CORS")
 }
+
+func TestAgentConfigDeleteForEnvironmentDropsEveryAgentsConfig(t *testing.T) {
+	repo := NewAgentConfigRepo(db.GetDB())
+	ctx := context.Background()
+	ouID := "ou-" + uuid.New().String()[:8]
+	agentA, agentB := "cfg-a-"+uuid.New().String()[:8], "cfg-b-"+uuid.New().String()[:8]
+	newConfig := func(agent, env string) *models.AgentConfig {
+		return &models.AgentConfig{
+			OUID: ouID, ProjectName: "checkout", AgentName: agent, EnvironmentName: env,
+			OAuthHeaderName: models.DefaultOAuthHeaderName, OAuthAuthHeaderPrefix: models.DefaultOAuthAuthHeaderPrefix,
+		}
+	}
+	t.Cleanup(func() {
+		_ = repo.DeleteAllByAgent(ctx, ouID, "checkout", agentA)
+		_ = repo.DeleteAllByAgent(ctx, ouID, "checkout", agentB)
+	})
+	require.NoError(t, repo.Upsert(ctx, newConfig(agentA, "dev")))
+	require.NoError(t, repo.Upsert(ctx, newConfig(agentB, "dev")))
+	require.NoError(t, repo.Upsert(ctx, newConfig(agentA, "prod")))
+
+	require.NoError(t, repo.DeleteForEnvironment(ctx, ouID, "dev"))
+
+	_, err := repo.Get(ctx, ouID, "checkout", agentA, "dev")
+	assert.ErrorIs(t, err, ErrAgentConfigNotFound)
+	_, err = repo.Get(ctx, ouID, "checkout", agentB, "dev")
+	assert.ErrorIs(t, err, ErrAgentConfigNotFound)
+	_, err = repo.Get(ctx, ouID, "checkout", agentA, "prod")
+	assert.NoError(t, err, "other environments keep their configs")
+}

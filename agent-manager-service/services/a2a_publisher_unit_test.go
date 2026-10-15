@@ -18,6 +18,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/google/uuid"
@@ -291,4 +292,20 @@ func TestA2APublisherTeardownEnvironmentStillDropsTheRowsAfterAFailure(t *testin
 	require.Len(t, m.hub.published, 1)
 	assert.Equal(t, "gw-1", m.hub.published[0].GatewayID)
 	assert.Equal(t, artifactUUID.String(), deletedAgentID(t, m.hub.published[0]))
+}
+
+func TestA2APublisherEnvironmentUUIDsListsProxiesWhenPublicationsFail(t *testing.T) {
+	id := uuid.MustParse("55555555-5555-5555-5555-555555555555")
+	m := newPublisherMocks(t)
+	m.pubs.ListEnvironmentUUIDsFunc = func(context.Context, string, string) ([]uuid.UUID, error) {
+		return nil, errors.New("publication listing down")
+	}
+	m.proxies.ListEnvironmentUUIDsFunc = func(context.Context, string, string) ([]uuid.UUID, error) {
+		return []uuid.UUID{id}, nil
+	}
+
+	ids, err := m.publisher().EnvironmentUUIDs(context.Background(), "acme", "dev")
+
+	require.Error(t, err)
+	assert.Contains(t, ids, id)
 }

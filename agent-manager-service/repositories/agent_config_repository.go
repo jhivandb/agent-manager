@@ -48,6 +48,8 @@ type AgentConfigRepository interface {
 
 	// DeleteAllByAgent removes all configs for an agent (used when agent is deleted)
 	DeleteAllByAgent(ctx context.Context, ouID, projectName, agentName string) error
+	// DeleteForEnvironment removes every agent's config for a deleted environment.
+	DeleteForEnvironment(ctx context.Context, ouID, environmentName string) error
 }
 
 // AgentConfigRepo implements AgentConfigRepository using GORM
@@ -140,4 +142,10 @@ func (r *AgentConfigRepo) Get(ctx context.Context, ouID, projectName, agentName,
 func (r *AgentConfigRepo) DeleteAllByAgent(ctx context.Context, ouID, projectName, agentName string) error {
 	return r.db.WithContext(ctx).Where("ou_id = ? AND project_name = ? AND agent_name = ?",
 		ouID, projectName, agentName).Delete(&models.AgentConfig{}).Error
+}
+
+// DeleteForEnvironment removes every agent's config for a deleted environment.
+func (r *AgentConfigRepo) DeleteForEnvironment(ctx context.Context, ouID, environmentName string) error {
+	return r.db.WithContext(ctx).Where("ou_id = ? AND environment_name = ?", ouID, environmentName).
+		Delete(&models.AgentConfig{}).Error
 }
