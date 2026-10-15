@@ -63,6 +63,8 @@ const externalA2A = () =>
     isLoading: false,
   } as unknown as ReturnType<typeof useGetAgent>);
 
+const A2A_SETTINGS_HREF = "/org/o/project/p/agents/a/configure?tab=a2a&env=dev";
+
 beforeEach(() => vi.clearAllMocks());
 
 describe("SecurityComponent", () => {
@@ -85,6 +87,8 @@ describe("SecurityComponent", () => {
     } as unknown as ReturnType<typeof useGetA2AProxy>);
     renderPage();
     expect(screen.getByText(/not routed through the gateway/i)).toBeInTheDocument();
+    expect(screen.getByText(/under Configure → A2A/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Go to A2A settings" })).toHaveAttribute("href", A2A_SETTINGS_HREF);
   });
 
   const securityDisabled = () =>
@@ -99,9 +103,9 @@ describe("SecurityComponent", () => {
       data: { status: "published", lastError: "", upstreamAuthHeader: "" }, isLoading: false, isError: false, error: null,
     } as unknown as ReturnType<typeof useGetA2AProxy>);
     renderPage();
-    expect(screen.getByText(/gateway security settings on the agent's/i)).toBeInTheDocument();
+    expect(screen.getByText(/gateway security settings under Configure → A2A/)).toBeInTheDocument();
     expect(screen.queryByText(/redeploy/i)).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Go to overview" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Go to A2A settings" })).toHaveAttribute("href", A2A_SETTINGS_HREF);
   });
 
   it("points a deployed agent with security off to its deployment settings", () => {

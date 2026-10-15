@@ -141,12 +141,23 @@ export const SecurityComponent: React.FC = () => {
     });
   };
 
+  const a2aSettingsHref = orgId && projectId && agentId && envId
+    ? `${generatePath(agentRoutes.children.configure.path, { orgId, projectId, agentId })}`
+      + `?tab=a2a&env=${encodeURIComponent(envId)}`
+    : undefined;
+  const a2aSettingsAction = a2aSettingsHref ? (
+    <Button variant="contained" component={Link} to={a2aSettingsHref}>
+      Go to A2A settings
+    </Button>
+  ) : undefined;
+
   const emptyState = !servedByGateway
     ? isExternalA2A
       ? {
           illustration: <Rocket size={48} />,
           title: "Agent is not routed through the gateway",
-          description: "Turn on Route through gateway for this environment on the agent's overview to manage its API keys.",
+          description: "Turn on Route through gateway for this environment under Configure → A2A to manage its API keys.",
+          action: a2aSettingsAction,
         }
       : {
           illustration: <Rocket size={48} />,
@@ -164,26 +175,24 @@ export const SecurityComponent: React.FC = () => {
         illustration: <ShieldOff size={48} />,
         title: "Agent security is disabled",
         description: isExternalA2A
-          ? "Enable API Key Security in the gateway security settings on the agent's overview to manage API keys."
+          ? "Enable API Key Security in the gateway security settings under Configure → A2A to manage API keys."
           : "Enable API Key Security from the deployment settings and redeploy to manage API keys.",
-        action: orgId && projectId && agentId && envId ? (
-          <Button
-            variant="contained"
-            component={Link}
-            to={
-              isExternalA2A
-                ? generatePath(agentRoutes.path, { orgId, projectId, agentId })
-                : generatePath(agentRoutes.children.environment.children.deploy.path, {
-                    orgId,
-                    projectId,
-                    agentId,
-                    envId,
-                  })
-            }
-          >
-            {isExternalA2A ? "Go to overview" : "Go to Deployment Settings"}
-          </Button>
-        ) : undefined,
+        action: isExternalA2A
+          ? a2aSettingsAction
+          : orgId && projectId && agentId && envId ? (
+            <Button
+              variant="contained"
+              component={Link}
+              to={generatePath(agentRoutes.children.environment.children.deploy.path, {
+                orgId,
+                projectId,
+                agentId,
+                envId,
+              })}
+            >
+              Go to Deployment Settings
+            </Button>
+          ) : undefined,
       }
     : null;
 

@@ -77,16 +77,28 @@ export function A2AProxyFields({
             </Box>
           )}
           {draft.secret === "replace" && (
-            <TextField
-              id={`${id}-value`}
-              size="small"
-              type="password"
-              autoComplete="new-password"
-              label="Header value"
-              value={draft.value}
-              disabled={disabled}
-              onChange={(e) => set({ value: e.target.value })}
-            />
+            <Box display="flex" alignItems="center" gap={1}>
+              <TextField
+                id={`${id}-value`}
+                size="small"
+                type="password"
+                autoComplete="new-password"
+                label="Header value"
+                value={draft.value}
+                disabled={disabled}
+                onChange={(e) => set({ value: e.target.value })}
+                sx={{ flex: 1 }}
+              />
+              {hasStoredSecret && (
+                <Button
+                  size="small"
+                  disabled={disabled}
+                  onClick={() => set({ secret: "keep", value: "" })}
+                >
+                  Keep stored value
+                </Button>
+              )}
+            </Box>
           )}
           {error && <Typography variant="caption" color="error">{error}</Typography>}
         </>
