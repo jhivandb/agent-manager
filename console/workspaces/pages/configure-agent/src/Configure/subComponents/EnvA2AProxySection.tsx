@@ -46,6 +46,8 @@ interface EnvA2AProxySectionProps {
   params: AgentCardPathParams;
   /** Undefined while the environment is direct; render only once that is known. */
   proxy?: A2AProxyResponse;
+  /** A routing save for this environment is in flight, from this section or another form. */
+  saving?: boolean;
 }
 
 /** Stands in for the routing controls until the environment's routing is known. */
@@ -58,7 +60,7 @@ export function A2AProxyUnknown({ failed }: { failed: boolean }) {
 }
 
 /** Gateway routing for one environment of an external A2A agent that has a registered card URL. */
-export function EnvA2AProxySection({ params, proxy }: EnvA2AProxySectionProps) {
+export function EnvA2AProxySection({ params, proxy, saving = false }: EnvA2AProxySectionProps) {
   const [draft, setDraft] = useState(() => draftFromProxy(proxy));
   const [securityOpen, setSecurityOpen] = useState(false);
   const { mutate: saveProxy, isPending: isSaving } = useSetA2AProxy();
@@ -73,7 +75,7 @@ export function EnvA2AProxySection({ params, proxy }: EnvA2AProxySectionProps) {
   useEffect(() => setDraft(draftFromProxy(proxy)), [proxied, savedHeader]);
 
   const error = upstreamAuthError(draft, proxy);
-  const busy = isSaving || isRemoving;
+  const busy = isSaving || isRemoving || saving;
   const canSave = draftChanged(draft, proxy) && !error && !busy;
 
   // The secret is write-only: once saved it is forgotten here, so the field cannot resubmit it.

@@ -54,6 +54,15 @@ describe("EnvA2AProxySection", () => {
     expect(setProxy).toHaveBeenCalledWith({ params, body: {} }, expect.anything());
   });
 
+  it("disables the controls while a routing save is in flight", () => {
+    const { rerender } = render(<EnvA2AProxySection params={params} />);
+    fireEvent.click(screen.getByLabelText("Route through gateway"));
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+    rerender(<EnvA2AProxySection params={params} saving />);
+    expect(screen.getByLabelText("Route through gateway")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+  });
+
   it("keeps the stored secret when only the header changes", () => {
     render(<EnvA2AProxySection params={params} proxy={stored} />);
     expect(screen.getByText("A value is stored.")).toBeInTheDocument();

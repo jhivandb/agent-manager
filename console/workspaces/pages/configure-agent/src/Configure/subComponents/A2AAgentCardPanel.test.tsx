@@ -239,13 +239,14 @@ describe("A2AAgentCardPanel", () => {
     expect(screen.queryByText("Couldn't load gateway routing.")).not.toBeInTheDocument();
   });
 
-  it("shows routing as loading, not direct, while a routing save is in flight", () => {
+  it("keeps the routing section mounted but disabled while a routing save is in flight", () => {
     mockCard({ data: registeredCard });
     mockProxy({ isError: true, error: notFound() });
     vi.mocked(useIsSavingA2AProxy).mockReturnValue(true);
     renderPanel(true);
-    expect(screen.queryByLabelText("Route through gateway")).not.toBeInTheDocument();
-    expect(screen.getByText("Loading gateway routing…")).toBeInTheDocument();
+    expect(screen.getByLabelText("Route through gateway")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    expect(screen.queryByText("Loading gateway routing…")).not.toBeInTheDocument();
     expect(screen.queryByText("Couldn't load gateway routing.")).not.toBeInTheDocument();
   });
 

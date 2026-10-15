@@ -64,12 +64,10 @@ export function A2AAgentCardPanel({
   const proxyIsDirect = proxyIsError && isAgentCardNotFound(proxyError);
   // TanStack keeps the previous data on error, so a 404 drops it here.
   const proxy = proxyIsDirect ? undefined : proxyData;
-  // A save in flight may be leaving direct; showing direct then would let a re-save
-  // drop the stored secret.
   const proxySaving = useIsSavingA2AProxy(params);
   // A failed background refetch keeps the last known routing on screen.
-  const proxyKnown = proxy !== undefined || (proxyIsDirect && !proxySaving);
-  const proxyUnknownFailed = proxyIsError && !proxySaving && proxy === undefined;
+  const proxyKnown = proxy !== undefined || proxyIsDirect;
+  const proxyUnknownFailed = proxyIsError && proxy === undefined;
   const proxyFailed = proxy?.status === "failed";
   const { data, isLoading, isError, error } = useGetAgentCard(params, { poll: !proxyFailed });
   const { mutate: refresh, isPending: isRefreshing } = useRefreshAgentCard();
@@ -152,7 +150,7 @@ export function A2AAgentCardPanel({
         </>
       )}
       {external && sourceUrl && (proxyKnown
-        ? <EnvA2AProxySection params={params} proxy={proxy} />
+        ? <EnvA2AProxySection params={params} proxy={proxy} saving={proxySaving} />
         : <A2AProxyUnknown failed={proxyUnknownFailed} />)}
       {isLoading && <CircularProgress size={16} />}
       {noSource && (
