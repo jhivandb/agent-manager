@@ -8,7 +8,8 @@ One ``SendMessage`` produces one trace:
 
 The server span carries the A2A protocol details: the operation, the binding it
 arrived on, the ``A2A-Version`` and ``A2A-Extensions`` service parameters, and
-the message, task and context IDs with the task's final state. It also continues
+the message, task and context IDs with the task's final state. Its input and
+output are the operation's request and result as A2A JSON. It also continues
 the caller's W3C trace context, which is how the A2A spec's observability
 guidance asks clients and servers to take part in distributed tracing, so a
 calling agent's trace and this one join up.
@@ -23,11 +24,13 @@ from __future__ import annotations
 import json
 import logging
 import os
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any, Iterator
 
+from google.protobuf.json_format import MessageToDict
+from google.protobuf.message import Message as ProtoMessage
 from opentelemetry import propagate, trace
 from opentelemetry.trace import Span, SpanKind, Status, StatusCode
 
@@ -90,6 +93,32 @@ def _state_name(state: int) -> str:
     return TaskState.Name(state)
 
 
+CONTENT_PART_FIELDS = {"text", "data", "raw", "url"}
+
+
+def _redact_parts(value: Any) -> Any:
+    """Redact the content of every A2A ``Part`` inside ``value``, keeping the
+    IDs, states and structure around it.
+    """
+    if isinstance(value, list):
+        return [_redact_parts(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+    redacted = {key: _redact_parts(item) for key, item in value.items()}
+    for part in redacted.get("parts", []):
+        for key in CONTENT_PART_FIELDS & part.keys():
+            part[key] = "[redacted]"
+    return redacted
+
+
+def _a2a_json(message: ProtoMessage) -> str:
+    """``message`` in the A2A JSON form the wire uses, redacted when
+    ``AMP_TRACE_CONTENT`` is false.
+    """
+    value = MessageToDict(message)
+    return json.dumps(value if _trace_content_enabled() else _redact_parts(value))
+
+
 # --- server span: one per A2A operation -------------------------------------
 
 
@@ -98,7 +127,9 @@ def _binding(context: ServerCallContext) -> str:
     return BINDING_JSONRPC if "method" in context.state else BINDING_HTTP_JSON
 
 
-def start_server_span(method: str, context: ServerCallContext) -> Span:
+def start_server_span(
+    method: str, params: ProtoMessage, context: ServerCallContext
+) -> Span:
     """Start, without making current, the server span for one A2A operation,
     parented to the caller's trace when the request carries ``traceparent``.
     """
@@ -106,6 +137,10 @@ def start_server_span(method: str, context: ServerCallContext) -> Span:
     span = _tracer().start_span(
         f"A2A {method}", context=propagate.extract(headers), kind=SpanKind.SERVER
     )
+    # AMP reads a span's input and output, and so its Overview, only for the
+    # span kinds it recognises; an A2A operation wrapping the agent is a workflow.
+    span.set_attribute("traceloop.span.kind", "workflow")
+    span.set_attribute("traceloop.entity.input", _a2a_json(params))
     binding = _binding(context)
     span.set_attribute("a2a.method", method)
     span.set_attribute("a2a.protocol.binding", binding)
@@ -122,22 +157,30 @@ def start_server_span(method: str, context: ServerCallContext) -> Span:
 
 
 async def _stream_in_span(
-    span: Span, events: AsyncGenerator[Any, None]
+    span: Span,
+    events: AsyncGenerator[Any, None],
+    load_task: Callable[[str], Awaitable[Task | None]],
 ) -> AsyncGenerator[Any, None]:
     """Relay ``events``, with ``span`` current only while each one is produced.
 
     The SSE response pulls events from more than one task, so a span held
     current across a ``yield`` is detached in a context it was never attached
     in, and OpenTelemetry logs "Failed to detach context".
+
+    A stream delivers its result in pieces, so the span's output is the task as
+    the task store holds it once the stream ends.
     """
+    task_id = ""
     try:
         while True:
             with trace.use_span(span, end_on_exit=False):
                 try:
                     event = await anext(events)
                 except StopAsyncIteration:
+                    if task_id and (task := await load_task(task_id)):
+                        _record_output(span, task)
                     return
-                _record_stream_event(span, event)
+                task_id = _record_stream_event(span, event) or task_id
             yield event
     finally:
         span.end()
@@ -165,21 +208,35 @@ def _record_task(span: Span, task_id: str, context_id: str, state: int) -> None:
         span.set_status(Status(StatusCode.ERROR, "task failed"))
 
 
+def _record_output(span: Span, result: Task | Message) -> None:
+    span.set_attribute("traceloop.entity.output", _a2a_json(result))
+
+
 def _record_result(span: Span, result: Task | Message | None) -> None:
     if isinstance(result, Task):
         _record_task(span, result.id, result.context_id, result.status.state)
+        _record_output(span, result)
     elif isinstance(result, Message):
         span.set_attribute("a2a.response.message.id", result.message_id)
+        _record_output(span, result)
 
 
-def _record_stream_event(span: Span, event: Any) -> None:
-    """Keep the span's task fields at the latest state the stream reported."""
+def _record_stream_event(span: Span, event: Any) -> str | None:
+    """Keep the span's task fields at the latest state the stream reported.
+    Returns the event's task ID.
+    """
     if isinstance(event, Task):
-        _record_result(span, event)
-    elif isinstance(event, TaskStatusUpdateEvent):
+        _record_task(span, event.id, event.context_id, event.status.state)
+        return event.id
+    if isinstance(event, TaskStatusUpdateEvent):
         _record_task(span, event.task_id, event.context_id, event.status.state)
-    elif isinstance(event, TaskArtifactUpdateEvent):
+        return event.task_id
+    if isinstance(event, TaskArtifactUpdateEvent):
         span.set_attribute("a2a.task.id", event.task_id)
+        return event.task_id
+    if isinstance(event, Message):
+        _record_result(span, event)
+    return None
 
 
 class TracedRequestHandler(DefaultRequestHandler):
@@ -195,7 +252,7 @@ class TracedRequestHandler(DefaultRequestHandler):
     async def on_message_send(
         self, params: SendMessageRequest, context: ServerCallContext
     ) -> Task | Message:
-        span = start_server_span("SendMessage", context)
+        span = start_server_span("SendMessage", params, context)
         with trace.use_span(span, end_on_exit=True):
             _record_message(span, params.message)
             result = await super().on_message_send(params, context)
@@ -205,17 +262,17 @@ class TracedRequestHandler(DefaultRequestHandler):
     async def on_message_send_stream(
         self, params: SendMessageRequest, context: ServerCallContext
     ) -> AsyncGenerator[Any, None]:
-        span = start_server_span("SendStreamingMessage", context)
+        span = start_server_span("SendStreamingMessage", params, context)
         _record_message(span, params.message)
         async for event in _stream_in_span(
-            span, super().on_message_send_stream(params, context)
+            span, super().on_message_send_stream(params, context), self._load_task(context)
         ):
             yield event
 
     async def on_cancel_task(
         self, params: CancelTaskRequest, context: ServerCallContext
     ) -> Task | None:
-        span = start_server_span("CancelTask", context)
+        span = start_server_span("CancelTask", params, context)
         with trace.use_span(span, end_on_exit=True):
             span.set_attribute("a2a.task.id", params.id)
             result = await super().on_cancel_task(params, context)
@@ -225,12 +282,17 @@ class TracedRequestHandler(DefaultRequestHandler):
     async def on_subscribe_to_task(
         self, params: SubscribeToTaskRequest, context: ServerCallContext
     ) -> AsyncGenerator[Any, None]:
-        span = start_server_span("SubscribeToTask", context)
+        span = start_server_span("SubscribeToTask", params, context)
         span.set_attribute("a2a.task.id", params.id)
         async for event in _stream_in_span(
-            span, super().on_subscribe_to_task(params, context)
+            span, super().on_subscribe_to_task(params, context), self._load_task(context)
         ):
             yield event
+
+    def _load_task(
+        self, context: ServerCallContext
+    ) -> Callable[[str], Awaitable[Task | None]]:
+        return lambda task_id: self.task_store.get(task_id, context)
 
 
 # --- agent span: the task the executor runs ---------------------------------

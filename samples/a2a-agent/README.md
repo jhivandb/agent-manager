@@ -241,12 +241,19 @@ the protocol details sit under `a2a.*`, named after the spec's fields:
 A `TASK_STATE_FAILED` task, or an operation that answers with an A2A error such
 as `TaskNotCancelableError`, marks its span as an error.
 
+**The server span's Overview.** Its input is the operation's request and its
+output the resulting `Task` (or `Message`), both in the A2A JSON form the wire
+uses, so the Console shows exactly what crossed the protocol. A streamed
+operation's output is the task as it stands when the stream ends. The span is
+marked `traceloop.span.kind=workflow`: AMP reads input and output only for span
+kinds it recognises, and an A2A operation wrapping the agent is a workflow.
+
 **GenAI attributes.** The agent and LLM spans follow the OpenTelemetry GenAI
 semantic conventions AMP's observer reads: `gen_ai.operation.name`
 (`invoke_agent`, `chat`), the agent's name and description, the model,
 `gen_ai.input.messages` and `gen_ai.output.messages`, the response ID, finish
-reason and token usage. Set `AMP_TRACE_CONTENT=false` to redact message text and
-the system prompt while keeping the spans.
+reason and token usage. Set `AMP_TRACE_CONTENT=false` to redact message text,
+part content and the system prompt while keeping the spans and their IDs.
 
 **The SDK's own spans are off.** With OpenTelemetry installed, `a2a-sdk` wraps
 its internal methods in spans named after the Python method, with no A2A
