@@ -252,8 +252,13 @@ kinds it recognises, and an A2A operation wrapping the agent is a workflow.
 semantic conventions AMP's observer reads: `gen_ai.operation.name`
 (`invoke_agent`, `chat`), the agent's name and description, the model,
 `gen_ai.input.messages` and `gen_ai.output.messages`, the response ID, finish
-reason and token usage. Set `AMP_TRACE_CONTENT=false` to redact message text,
-part content and the system prompt while keeping the spans and their IDs.
+reason and token usage.
+
+**Message content.** Like AMP's own instrumentation, the sample records message
+content by default, so anyone who can read the agent's traces can read the
+notes it was sent. Set `AMP_TRACE_CONTENT=false` when that content may be
+sensitive. The spans then redact message text, part content, the system prompt
+and exception messages, and keep the spans, their IDs and their states.
 
 **The SDK's own spans are off.** With OpenTelemetry installed, `a2a-sdk` wraps
 its internal methods in spans named after the Python method, with no A2A
