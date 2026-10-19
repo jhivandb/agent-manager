@@ -43,7 +43,7 @@ AGENT_DESCRIPTION = "Summarizes meeting notes and extracts their action items."
 SKILL_SUMMARIZE = "summarize-notes"
 SKILL_ACTION_ITEMS = "extract-action-items"
 
-DEFAULT_MODEL = "gpt-4o-mini"
+DEFAULT_MODEL = "gpt-5.6-luna"
 
 # A streaming summary is flushed to the task every this many characters, so a
 # client sees the text arrive in pieces instead of in one lump at the end.

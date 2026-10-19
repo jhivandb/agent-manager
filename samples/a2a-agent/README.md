@@ -110,7 +110,7 @@ Optional, with defaults:
 
 | Key | Default | Purpose |
 |---|---|---|
-| `OPENAI_MODEL` | `gpt-4o-mini` | Model used by both skills |
+| `OPENAI_MODEL` | `gpt-5.6-luna` | Model used by both skills |
 | `AGENT_PUBLIC_BASE_URL` | `http://localhost:9099` | The address the agent advertises in its own card. The gateway rewrites the card it serves, so leave this unset for deployed agents. |
 
 ### Step 5: Deploy
@@ -208,7 +208,7 @@ The agent emits its own OpenTelemetry spans — no Traceloop, no `amp-instrument
 ```text
 A2A SendMessage                     server span: the A2A operation
 └── invoke_agent a2a-notes-agent    agent span: the task the executor ran
-    └── chat gpt-4o-mini            LLM span: the OpenAI call
+    └── chat gpt-5.6-luna           LLM span: the OpenAI call
 ```
 
 `SendStreamingMessage`, `CancelTask` and `SubscribeToTask` get the same server

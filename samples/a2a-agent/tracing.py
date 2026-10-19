@@ -4,7 +4,7 @@ One ``SendMessage`` produces one trace:
 
     A2A SendMessage                 server span: the A2A operation
     └── invoke_agent a2a-notes-agent    agent span: the task the executor ran
-        └── chat gpt-4o-mini                LLM span: the OpenAI call
+        └── chat gpt-5.6-luna               LLM span: the OpenAI call
 
 The server span carries the A2A protocol details: the operation, the binding it
 arrived on, the ``A2A-Version`` and ``A2A-Extensions`` service parameters, and
