@@ -89,10 +89,6 @@ def model() -> str:
     return os.getenv("OPENAI_MODEL") or DEFAULT_MODEL
 
 
-SUMMARY_TEMPERATURE = 0.2
-ACTION_ITEMS_TEMPERATURE = 0.0
-
-
 async def stream_summary(
     notes: str, on_chunk: Callable[[str], Awaitable[None]], run: AgentRun
 ) -> str:
@@ -105,7 +101,6 @@ async def stream_summary(
         model=model(),
         system_instructions=SUMMARY_PROMPT,
         user_input=notes,
-        temperature=SUMMARY_TEMPERATURE,
     ) as (_, call):
         stream = await client().chat.completions.create(
             model=model(),
@@ -113,7 +108,6 @@ async def stream_summary(
                 {"role": "system", "content": SUMMARY_PROMPT},
                 {"role": "user", "content": notes},
             ],
-            temperature=SUMMARY_TEMPERATURE,
             stream=True,
             # A stream reports token usage only when asked, in a final chunk with no choices.
             stream_options={"include_usage": True},
@@ -148,7 +142,6 @@ async def extract_action_items(notes: str, run: AgentRun) -> dict[str, Any]:
         model=model(),
         system_instructions=ACTION_ITEMS_PROMPT,
         user_input=notes,
-        temperature=ACTION_ITEMS_TEMPERATURE,
     ) as (_, call):
         response = await client().chat.completions.create(
             model=model(),
@@ -156,7 +149,6 @@ async def extract_action_items(notes: str, run: AgentRun) -> dict[str, Any]:
                 {"role": "system", "content": ACTION_ITEMS_PROMPT},
                 {"role": "user", "content": notes},
             ],
-            temperature=ACTION_ITEMS_TEMPERATURE,
             response_format={"type": "json_object"},
         )
         choice = response.choices[0]

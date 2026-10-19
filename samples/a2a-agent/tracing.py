@@ -387,14 +387,12 @@ def llm_span(
     model: str,
     system_instructions: str,
     user_input: str,
-    temperature: float,
 ) -> Iterator[tuple[Span, LLMCall]]:
     with _tracer().start_as_current_span(f"chat {model}", kind=SpanKind.CLIENT) as span:
         span.set_attribute("gen_ai.operation.name", "chat")
         span.set_attribute("gen_ai.system", LLM_PROVIDER)
         span.set_attribute("gen_ai.provider.name", LLM_PROVIDER)
         span.set_attribute("gen_ai.request.model", model)
-        span.set_attribute("gen_ai.request.temperature", temperature)
         span.set_attribute(
             "gen_ai.system_instructions",
             system_instructions if _trace_content_enabled() else "[redacted]",
