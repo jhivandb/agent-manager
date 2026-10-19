@@ -89,6 +89,17 @@ def _text_messages(role: str, text: str, **extra: Any) -> str:
     return json.dumps([{"role": role, "parts": [{"type": "text", "content": content}], **extra}])
 
 
+def record_exception(span: Span, exc: BaseException) -> None:
+    """Record ``exc`` on ``span``, keeping only its type when
+    ``AMP_TRACE_CONTENT`` is false: an exception's message can quote the model
+    output or the notes.
+    """
+    if _trace_content_enabled():
+        span.record_exception(exc)
+    else:
+        span.add_event("exception", {"exception.type": type(exc).__name__})
+
+
 def _state_name(state: int) -> str:
     return TaskState.Name(state)
 
@@ -105,9 +116,13 @@ def _redact_parts(value: Any) -> Any:
     if not isinstance(value, dict):
         return value
     redacted = {key: _redact_parts(item) for key, item in value.items()}
-    for part in redacted.get("parts", []):
-        for key in CONTENT_PART_FIELDS & part.keys():
-            part[key] = "[redacted]"
+    # Caller-supplied metadata can hold a "parts" key that is not a Part list.
+    parts = redacted.get("parts")
+    if isinstance(parts, list):
+        for part in parts:
+            if isinstance(part, dict):
+                for key in CONTENT_PART_FIELDS & part.keys():
+                    part[key] = "[redacted]"
     return redacted
 
 

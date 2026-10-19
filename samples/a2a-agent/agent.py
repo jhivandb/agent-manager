@@ -33,7 +33,7 @@ from google.protobuf.json_format import MessageToDict
 from openai import AsyncOpenAI
 from opentelemetry.trace import Span
 
-from tracing import AgentRun, agent_span, llm_span
+from tracing import AgentRun, agent_span, llm_span, record_exception
 
 log = logging.getLogger("a2a-agent")
 
@@ -269,7 +269,7 @@ class NotesAgentExecutor(AgentExecutor):
                 await self._summarize(updater, notes, run)
         except Exception as exc:  # noqa: BLE001 - report any failure on the task
             log.exception("task %s failed", context.task_id)
-            span.record_exception(exc)
+            record_exception(span, exc)
             run.state = TaskState.TASK_STATE_FAILED
             await updater.failed(
                 updater.new_agent_message(
