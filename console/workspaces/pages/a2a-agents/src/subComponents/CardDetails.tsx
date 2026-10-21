@@ -39,7 +39,7 @@ import type { AgentCardResponse } from "@agent-management-platform/types";
 export interface CardDetailsProps {
   card: AgentCardResponse | null | undefined;
   isLoading?: boolean;
-  compareEnvOptions: string[];
+  compareEnvOptions: { value: string; label: string }[];
   compareEnv: string;
   compareCard: AgentCardResponse | null | undefined;
   onCompareEnvChange: (env: string) => void;
@@ -177,9 +177,9 @@ export function CardDetails({
               onChange={(event) => onCompareEnvChange(String(event.target.value))}
             >
               <MenuItem value="">None</MenuItem>
-              {compareEnvOptions.map((name) => (
-                <MenuItem key={name} value={name}>
-                  {name}
+              {compareEnvOptions.map(({ value, label }) => (
+                <MenuItem key={value} value={value}>
+                  {label}
                 </MenuItem>
               ))}
             </Select>

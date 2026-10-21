@@ -46,7 +46,7 @@ vi.mock("@agent-management-platform/shared-component", () => ({
   ),
 }));
 
-import { useListA2AAgents } from "@agent-management-platform/api-client";
+import { useListA2AAgents, useListEnvironments } from "@agent-management-platform/api-client";
 import { CatalogueGrid } from "./CatalogueGrid";
 
 const agentWith = (
@@ -91,6 +91,7 @@ const lastQuery = () => vi.mocked(useListA2AAgents).mock.lastCall?.[1];
 describe("CatalogueGrid", () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    vi.mocked(useListEnvironments).mockReturnValue({ data: [] } as never);
     vi.mocked(useListA2AAgents).mockReturnValue({
       data: { agents, total: 2, limit: 24, offset: 0 },
       isLoading: false,
@@ -107,6 +108,16 @@ describe("CatalogueGrid", () => {
     renderGrid();
     expect(screen.getByText("card differs")).toBeInTheDocument();
     expect(screen.getByText("proxied")).toBeInTheDocument();
+  });
+
+  it("labels environments with their display names", () => {
+    vi.mocked(useListEnvironments).mockReturnValue({
+      data: [{ name: "prod", displayName: "Production" }],
+    } as never);
+    renderGrid();
+    expect(screen.getByText("Production")).toBeInTheDocument();
+    expect(screen.queryByText("prod")).toBeNull();
+    expect(screen.getAllByText("dev")).toHaveLength(2);
   });
 
   it("links each tile to its agent's page in its own project", () => {

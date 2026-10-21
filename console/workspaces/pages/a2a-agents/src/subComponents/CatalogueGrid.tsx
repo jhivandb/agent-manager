@@ -29,6 +29,7 @@ import {
   type CatalogueFilterValues,
 } from "./CatalogueFilterBar";
 import { CatalogueTile } from "./CatalogueTile";
+import { useEnvironmentLabel } from "../utils/useEnvironmentLabel";
 import { useReplaceSearchParams } from "../utils/useReplaceSearchParams";
 
 const PAGE_SIZE = 24;
@@ -112,6 +113,8 @@ export function CatalogueGrid({ orgName }: CatalogueGridProps) {
     buildQuery(debouncedSearch, filters, page),
   );
 
+  const environmentLabel = useEnvironmentLabel(orgName);
+
   const agents = data?.agents ?? [];
   const total = data?.total ?? 0;
   const isFiltering = Object.values(filters).some(Boolean) || debouncedSearch !== "";
@@ -166,6 +169,7 @@ export function CatalogueGrid({ orgName }: CatalogueGridProps) {
           <CatalogueTile
             key={`${agent.projectName}/${agent.agentName}`}
             agent={agent}
+            environmentLabel={environmentLabel}
             to={generatePath(absoluteRouteMap.children.org.children.a2aAgents.children.view.path, {
               orgId: orgName,
               projectName: agent.projectName,

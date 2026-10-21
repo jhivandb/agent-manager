@@ -35,6 +35,7 @@ const SMALL_CHIP_SX = { height: 20, fontSize: "0.7rem", "& .MuiChip-label": { px
 
 export interface CatalogueTileProps {
   agent: A2ACatalogAgent;
+  environmentLabel: (name: string) => string;
   to: string;
   /** Outlines the tile when one of its environments matched the search. */
   emphasised: boolean;
@@ -47,7 +48,13 @@ function leadCardLabel(agent: A2ACatalogAgent): string | null {
   return null;
 }
 
-function EnvironmentStatus({ environment }: { environment: A2ACatalogEnvironment }) {
+function EnvironmentStatus({
+  environment,
+  label,
+}: {
+  environment: A2ACatalogEnvironment;
+  label: string;
+}) {
   return (
     <Stack direction="row" spacing={0.5} alignItems="center" sx={{ flexShrink: 0 }}>
       <Box
@@ -61,7 +68,7 @@ function EnvironmentStatus({ environment }: { environment: A2ACatalogEnvironment
         }}
       />
       <Typography variant="caption" color="text.secondary">
-        {environment.name}
+        {label}
       </Typography>
       {environment.proxied && <Chip size="small" label="proxied" sx={SMALL_CHIP_SX} />}
       {environment.cardDiffers && (
@@ -71,7 +78,7 @@ function EnvironmentStatus({ environment }: { environment: A2ACatalogEnvironment
   );
 }
 
-export function CatalogueTile({ agent, to, emphasised }: CatalogueTileProps) {
+export function CatalogueTile({ agent, environmentLabel, to, emphasised }: CatalogueTileProps) {
   const name = agent.name || agent.agentName;
   const cardLabel = leadCardLabel(agent);
   const extraSkills = agent.skills.length - MAX_SKILL_CHIPS;
@@ -162,7 +169,11 @@ export function CatalogueTile({ agent, to, emphasised }: CatalogueTileProps) {
             )}
             <Stack direction="row" spacing={1.5} flexWrap="wrap" useFlexGap>
               {agent.environments.map((environment) => (
-                <EnvironmentStatus key={environment.name} environment={environment} />
+                <EnvironmentStatus
+                  key={environment.name}
+                  environment={environment}
+                  label={environmentLabel(environment.name)}
+                />
               ))}
             </Stack>
           </Stack>

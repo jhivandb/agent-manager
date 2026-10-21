@@ -33,6 +33,7 @@ import {
   type A2ACatalogAgent,
   type AgentCardResponse,
 } from "@agent-management-platform/types";
+import { useEnvironmentLabel } from "../utils/useEnvironmentLabel";
 import { useReplaceSearchParams } from "../utils/useReplaceSearchParams";
 import { CardDetails } from "./CardDetails";
 import { ConnectSection } from "./ConnectSection";
@@ -58,6 +59,7 @@ function AgentDetails({
   onEnvChange,
 }: AgentDetailsProps) {
   const [compareEnv, setCompareEnv] = useState("");
+  const environmentLabel = useEnvironmentLabel(orgName);
   const [connectOpen, setConnectOpen] = useState(false);
   // Stays mounted once opened, so closing the drawer keeps an issued test key.
   const [connectMounted, setConnectMounted] = useState(false);
@@ -78,7 +80,7 @@ function AgentDetails({
           {agent.environments.map((environment) => (
             <Chip
               key={environment.name}
-              label={environment.name}
+              label={environmentLabel(environment.name)}
               color={environment.name === env ? "primary" : "default"}
               variant={environment.name === env ? "filled" : "outlined"}
               onClick={() => onEnvChange(environment.name)}
@@ -97,7 +99,9 @@ function AgentDetails({
       <CardDetails
         card={card}
         isLoading={isCardLoading}
-        compareEnvOptions={agent.environments.map((e) => e.name).filter((n) => n !== env)}
+        compareEnvOptions={agent.environments
+          .filter((e) => e.name !== env)
+          .map((e) => ({ value: e.name, label: environmentLabel(e.name) }))}
         compareEnv={compareEnv}
         compareCard={compareCard}
         onCompareEnvChange={setCompareEnv}
@@ -110,7 +114,7 @@ function AgentDetails({
       >
         <DrawerHeader
           icon={<Plug size={24} />}
-          title={`Connect · ${env}`}
+          title={`Connect · ${environmentLabel(env)}`}
           onClose={() => setConnectOpen(false)}
         />
         <DrawerContent>

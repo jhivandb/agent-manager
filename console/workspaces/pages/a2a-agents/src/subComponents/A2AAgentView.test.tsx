@@ -24,6 +24,7 @@ import type { A2ACatalogAgent } from "@agent-management-platform/types";
 vi.mock("@agent-management-platform/api-client", () => ({
   useGetA2ACatalogEntry: vi.fn(),
   useGetAgentCard: vi.fn(),
+  useListEnvironments: vi.fn(),
   useGetA2AConnect: vi.fn(() => ({ data: undefined, isLoading: true })),
   useIssueTestAgentAPIKey: vi.fn(() => ({ isIdle: true })),
 }));
@@ -67,7 +68,11 @@ vi.mock("@agent-management-platform/views", () => ({
   buildConfigureTabHref: () => "/configure",
 }));
 
-import { useGetA2ACatalogEntry, useGetAgentCard } from "@agent-management-platform/api-client";
+import {
+  useGetA2ACatalogEntry,
+  useGetAgentCard,
+  useListEnvironments,
+} from "@agent-management-platform/api-client";
 import { A2AAgentView } from "./A2AAgentView";
 
 const env = (name: string) => ({
@@ -139,6 +144,12 @@ describe("A2AAgentView", () => {
   beforeEach(() => {
     vi.mocked(useGetAgentCard).mockReset();
     mockEntry({ data: agent });
+    vi.mocked(useListEnvironments).mockReturnValue({
+      data: [
+        { name: "dev", displayName: "Development" },
+        { name: "prod", displayName: "Production" },
+      ],
+    } as never);
   });
 
   it("reads the agent named in the URL", () => {
@@ -203,7 +214,7 @@ describe("A2AAgentView", () => {
     renderView();
     expect(screen.queryByTestId("connect-section")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Connect" }));
-    expect(screen.getByRole("heading", { name: "Connect · dev" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Connect · Development" })).toBeTruthy();
     expect(screen.getByTestId("connect-section")).toBeTruthy();
   });
 
@@ -219,7 +230,7 @@ describe("A2AAgentView", () => {
     mockCards({ dev: devCard, prod: prodCard });
     renderView("/org/acme/a2a-agents/view/p1/orders?env=prod");
     expect(screen.getByText("issue-refund")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "dev" }));
+    fireEvent.click(screen.getByRole("button", { name: "Development" }));
     expect(screen.queryByText("issue-refund")).toBeNull();
   });
 
@@ -249,7 +260,7 @@ describe("A2AAgentView", () => {
     mockCards({ dev: devCard, prod: { ...devCard, card: { ...devCard.card, version: "2" } } });
     renderView();
     fireEvent.mouseDown(screen.getByRole("combobox", { name: "Compare with" }));
-    fireEvent.click(screen.getByRole("option", { name: "prod" }));
+    fireEvent.click(screen.getByRole("option", { name: "Production" }));
     expect(screen.getByText("Also differs in: version")).toBeTruthy();
   });
 
@@ -257,7 +268,7 @@ describe("A2AAgentView", () => {
     mockCards({ dev: devCard, prod: prodCard });
     renderView();
     fireEvent.mouseDown(screen.getByRole("combobox", { name: "Compare with" }));
-    fireEvent.click(screen.getByRole("option", { name: "prod" }));
+    fireEvent.click(screen.getByRole("option", { name: "Production" }));
     expect(screen.getByText("Added: issue-refund")).toBeTruthy();
   });
 });
