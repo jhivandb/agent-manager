@@ -386,6 +386,7 @@ var repositoryProviderSet = wire.NewSet(
 	ProvideA2APublicationRepository,
 	ProvideA2AAgentCardRepository,
 	ProvideA2AProxyRepository,
+	ProvideA2ACatalogRepository,
 	ProvideArtifactRepository,
 	ProvideScoreRepository,
 	ProvideCatalogRepository,
@@ -501,6 +502,10 @@ func ProvideDeploymentRepository(db *gorm.DB) repositories.DeploymentRepository 
 
 func ProvideA2AAgentCardRepository(db *gorm.DB) repositories.A2AAgentCardRepository {
 	return repositories.NewA2AAgentCardRepository(db)
+}
+
+func ProvideA2ACatalogRepository(db *gorm.DB) repositories.A2ACatalogRepository {
+	return repositories.NewA2ACatalogRepository(db)
 }
 
 func ProvideA2AProxyRepository(db *gorm.DB) repositories.A2AProxyRepository {
