@@ -18,8 +18,14 @@
 
 import { useState } from "react";
 import { generatePath, useParams } from "react-router-dom";
-import { Alert, Box, Chip, Stack, Typography } from "@wso2/oxygen-ui";
-import { PageLayout } from "@agent-management-platform/views";
+import { Alert, Button, Chip, Stack, Typography } from "@wso2/oxygen-ui";
+import { Plug } from "@wso2/oxygen-ui-icons-react";
+import {
+  DrawerContent,
+  DrawerHeader,
+  DrawerWrapper,
+  PageLayout,
+} from "@agent-management-platform/views";
 import { normalizeVersion, parseA2ACard } from "@agent-management-platform/shared-component";
 import { useGetA2ACatalogEntry, useGetAgentCard } from "@agent-management-platform/api-client";
 import {
@@ -42,7 +48,7 @@ interface AgentDetailsProps {
   onEnvChange: (env: string) => void;
 }
 
-/** One environment's card and connection; keyed by env, so no state outlives a switch. */
+/** One environment's card and connect drawer; keyed by env, so no state outlives a switch. */
 function AgentDetails({
   orgName,
   agent,
@@ -52,6 +58,13 @@ function AgentDetails({
   onEnvChange,
 }: AgentDetailsProps) {
   const [compareEnv, setCompareEnv] = useState("");
+  const [connectOpen, setConnectOpen] = useState(false);
+  // Stays mounted once opened, so closing the drawer keeps an issued test key.
+  const [connectMounted, setConnectMounted] = useState(false);
+  const openConnect = () => {
+    setConnectOpen(true);
+    setConnectMounted(true);
+  };
 
   const { data: compareCard } = useGetAgentCard(
     { orgName, projName: agent.projectName, agentName: agent.agentName, envId: compareEnv },
@@ -60,28 +73,50 @@ function AgentDetails({
 
   return (
     <Stack spacing={2}>
-      <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-        {agent.environments.map((environment) => (
-          <Chip
-            key={environment.name}
-            label={environment.name}
-            color={environment.name === env ? "primary" : "default"}
-            variant={environment.name === env ? "filled" : "outlined"}
-            onClick={() => onEnvChange(environment.name)}
-          />
-        ))}
+      <Stack direction="row" spacing={2} alignItems="center" justifyContent="space-between">
+        <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+          {agent.environments.map((environment) => (
+            <Chip
+              key={environment.name}
+              label={environment.name}
+              color={environment.name === env ? "primary" : "default"}
+              variant={environment.name === env ? "filled" : "outlined"}
+              onClick={() => onEnvChange(environment.name)}
+            />
+          ))}
+        </Stack>
+        <Button
+          variant="contained"
+          size="small"
+          startIcon={<Plug size={16} />}
+          onClick={openConnect}
+        >
+          Connect
+        </Button>
       </Stack>
-      <Box sx={{ display: "grid", gap: 3, gridTemplateColumns: { xs: "1fr", lg: "3fr 2fr" } }}>
-        <CardDetails
-          card={card}
-          isLoading={isCardLoading}
-          compareEnvOptions={agent.environments.map((e) => e.name).filter((n) => n !== env)}
-          compareEnv={compareEnv}
-          compareCard={compareCard}
-          onCompareEnvChange={setCompareEnv}
+      <CardDetails
+        card={card}
+        isLoading={isCardLoading}
+        compareEnvOptions={agent.environments.map((e) => e.name).filter((n) => n !== env)}
+        compareEnv={compareEnv}
+        compareCard={compareCard}
+        onCompareEnvChange={setCompareEnv}
+      />
+      <DrawerWrapper
+        open={connectOpen}
+        keepMounted={connectMounted}
+        onClose={() => setConnectOpen(false)}
+        maxWidth={700}
+      >
+        <DrawerHeader
+          icon={<Plug size={24} />}
+          title={`Connect · ${env}`}
+          onClose={() => setConnectOpen(false)}
         />
-        <ConnectSection orgName={orgName} agent={agent} env={env} card={card} />
-      </Box>
+        <DrawerContent>
+          <ConnectSection orgName={orgName} agent={agent} env={env} card={card} />
+        </DrawerContent>
+      </DrawerWrapper>
     </Stack>
   );
 }

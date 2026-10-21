@@ -321,8 +321,7 @@ export function ConnectSection({ orgName, agent, env, card }: ConnectSectionProp
 
   return (
     <Stack spacing={1.5} data-testid="connect-section" sx={{ minWidth: 0 }}>
-      <Stack direction="row" alignItems="center" justifyContent="space-between">
-        <Typography variant="subtitle1">Connect</Typography>
+      <Stack direction="row" justifyContent="flex-end">
         <Button size="small" component={Link} to={manageSecurityHref(orgName, agent, env)}>
           Manage security
         </Button>

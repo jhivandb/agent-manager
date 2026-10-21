@@ -54,6 +54,15 @@ vi.mock("@agent-management-platform/views", () => ({
       {props.isLoading ? "Loading…" : props.children}
     </div>
   ),
+  DrawerWrapper: (props: { open: boolean; keepMounted?: boolean; children: React.ReactNode }) =>
+    props.open || props.keepMounted ? <div hidden={!props.open}>{props.children}</div> : null,
+  DrawerHeader: (props: { title: string; onClose: () => void }) => (
+    <>
+      <h2>{props.title}</h2>
+      <button onClick={props.onClose}>Close</button>
+    </>
+  ),
+  DrawerContent: (props: { children: React.ReactNode }) => <div>{props.children}</div>,
   TextInput: () => null,
   buildConfigureTabHref: () => "/configure",
 }));
@@ -189,9 +198,20 @@ describe("A2AAgentView", () => {
     expect(screen.getByText(/no agent card is configured/i)).toBeTruthy();
   });
 
-  it("shows how to connect next to the card", () => {
+  it("shows how to connect only once Connect is clicked", () => {
     mockCards({ dev: devCard });
     renderView();
+    expect(screen.queryByTestId("connect-section")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+    expect(screen.getByRole("heading", { name: "Connect · dev" })).toBeTruthy();
+    expect(screen.getByTestId("connect-section")).toBeTruthy();
+  });
+
+  it("keeps the connect details, and any issued key, mounted after closing", () => {
+    mockCards({ dev: devCard });
+    renderView();
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close", hidden: true }));
     expect(screen.getByTestId("connect-section")).toBeTruthy();
   });
 
