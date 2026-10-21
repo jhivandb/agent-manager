@@ -140,6 +140,7 @@ var controllerProviderSet = wire.NewSet(
 	controllers.NewAgentAPIKeyController,
 	controllers.NewA2AAgentCardController,
 	controllers.NewA2AProxyController,
+	controllers.NewA2ACatalogController,
 	controllers.NewLLMProxyDeploymentController,
 	controllers.NewMCPProxyController,
 	ProvideWebSocketController,
