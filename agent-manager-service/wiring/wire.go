@@ -89,6 +89,7 @@ var serviceProviderSet = wire.NewSet(
 	ProvideTxRunner,
 	services.NewA2APublisher,
 	services.NewA2AProxyService,
+	services.NewA2ACatalogService,
 	ProvideA2AProxyHooks,
 	services.NewEvaluatorManagerService,
 	services.NewEnvironmentService,
