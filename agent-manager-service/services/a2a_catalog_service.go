@@ -33,6 +33,8 @@ type A2ACatalogService interface {
 	ListA2ACatalog(ctx context.Context, filter models.A2ACatalogFilter) (*models.A2ACatalogPage, error)
 	// GetA2ACatalogEntry returns utils.ErrAgentNotInA2ACatalog when the agent has no card rows.
 	GetA2ACatalogEntry(ctx context.Context, ouID, projectName, agentName string) (*models.A2ACatalogEntry, error)
+	// GetA2AConnectDetails returns the card service's and utils.ErrEnvironmentNotFound sentinels unchanged.
+	GetA2AConnectDetails(ctx context.Context, ouID, projectName, agentName, envName string) (*models.A2AConnectDetails, error)
 }
 
 type a2aCatalogService struct {
