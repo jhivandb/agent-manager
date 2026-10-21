@@ -174,6 +174,40 @@ func (p *A2APublisher) GatewayURL(ouID string, envUUID uuid.UUID, agentName stri
 	return a2aGatewayURL(gateway, agentName), nil
 }
 
+// a2aMissingPublicationMsg says what queues a publication again, since a missing one never resolves on its own.
+var a2aMissingPublicationMsg = map[models.A2APublicationSource]string{
+	models.A2APublicationSourceExternal: "no gateway publication is queued for this environment; refresh to publish it again",
+	models.A2APublicationSourcePlatform: "no gateway publication is queued for this environment; " +
+		"redeploy the agent or save its deploy settings to publish it again",
+}
+
+// A2AGatewayStatus is where the environment's gateway serves the agent and how far its publication got.
+type A2AGatewayStatus struct {
+	// URL is empty while no gateway is mapped to the environment.
+	URL       string
+	Status    models.A2APublicationStatus
+	LastError string
+}
+
+// GatewayStatus reads the agent's gateway URL and publication; a missing publication reads as failed.
+func (p *A2APublisher) GatewayStatus(
+	ctx context.Context, ouID, projectName, agentName string, envUUID uuid.UUID, source models.A2APublicationSource,
+) (A2AGatewayStatus, error) {
+	url, err := p.GatewayURL(ouID, envUUID, agentName)
+	if err != nil {
+		return A2AGatewayStatus{}, err
+	}
+	pub, err := p.Publication(ctx, ouID, projectName, agentName, envUUID)
+	switch {
+	case errors.Is(err, repositories.ErrA2APublicationNotFound):
+		return A2AGatewayStatus{URL: url, Status: models.A2APublicationStatusFailed, LastError: a2aMissingPublicationMsg[source]}, nil
+	case err != nil:
+		return A2AGatewayStatus{}, fmt.Errorf("failed to read the A2A publication: %w", err)
+	default:
+		return A2AGatewayStatus{URL: url, Status: pub.Status, LastError: pub.LastError}, nil
+	}
+}
+
 // Publication returns the environment's publication row.
 func (p *A2APublisher) Publication(ctx context.Context, ouID, projectName, agentName string, envUUID uuid.UUID) (*models.A2APublication, error) {
 	return p.pubRepo.Get(ctx, ouID, projectName, agentName, envUUID)

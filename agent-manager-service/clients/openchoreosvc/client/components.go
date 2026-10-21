@@ -2491,13 +2491,16 @@ func WithResilienceTimeout(seconds int32) TraitOption {
 	}
 }
 
+// APIKeyHeader is the request header the gateway's API key policy reads the key from.
+const APIKeyHeader = "X-API-Key"
+
 // APIKeyAuthPolicy returns the policy map for API key authentication.
 func APIKeyAuthPolicy() map[string]interface{} {
 	return map[string]interface{}{
 		"name":    "api-key-auth",
 		"version": "v1",
 		"params": map[string]interface{}{
-			"key": "X-API-Key",
+			"key": APIKeyHeader,
 			"in":  "header",
 		},
 	}

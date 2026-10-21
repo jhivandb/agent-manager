@@ -24,8 +24,10 @@ import (
 
 const a2aConnectPath = "/orgs/{orgName}/projects/{projName}/agents/{agentName}/environments/{envID}/a2a-connect"
 
-// registerA2ACatalogRoutes serves reads only, so neither route is audited.
+// registerA2ACatalogRoutes serves reads only, so none of its routes is audited.
 func registerA2ACatalogRoutes(rr *middleware.RouteRegistrar, ctrl controllers.A2ACatalogController) {
 	rr.HandleFuncWithValidationAndAuthz("GET /orgs/{orgName}/a2a-agents", rbac.AgentRead, ctrl.ListA2AAgents)
+	rr.HandleFuncWithValidationAndAuthz("GET /orgs/{orgName}/projects/{projName}/agents/{agentName}/a2a-catalog-entry",
+		rbac.AgentRead, ctrl.GetA2ACatalogEntry)
 	rr.HandleFuncWithValidationAndAuthz("GET "+a2aConnectPath, rbac.AgentRead, ctrl.GetA2AConnect)
 }

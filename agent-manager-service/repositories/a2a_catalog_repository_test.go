@@ -112,6 +112,35 @@ func TestA2ACatalogRepository_GroupsAndPaginatesByAgent(t *testing.T) {
 	assert.Equal(t, []string{"p/c/dev"}, rowKeys(rows))
 }
 
+func TestA2ACatalogRepository_CountsPastTheLastPage(t *testing.T) {
+	f := newCatalogFixture(t)
+	f.addCard("p", "a", catalogDev, models.A2AAgentCardSourcePlatform, namedCard("a"))
+
+	rows, total := f.list(models.A2ACatalogFilter{Limit: 2, Offset: 4})
+	assert.Equal(t, int64(1), total)
+	assert.Empty(t, rows)
+}
+
+func TestA2ACatalogRepository_GetAgent(t *testing.T) {
+	f := newCatalogFixture(t)
+	for _, env := range []string{catalogDev, catalogProd} {
+		f.addCard("p1", "orders", env, models.A2AAgentCardSourceExternal, namedCard("orders"))
+	}
+	f.addCard("p2", "orders", catalogDev, models.A2AAgentCardSourcePlatform, namedCard("orders"))
+	f.addProxy("p1", "orders", catalogProd)
+	repo := NewA2ACatalogRepository(db.GetDB())
+
+	rows, err := repo.GetAgent(context.Background(), f.ouID, "p1", "orders")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"p1/orders/dev", "p1/orders/prod"}, rowKeys(rows))
+	assert.False(t, rows[0].Proxied)
+	assert.True(t, rows[1].Proxied)
+
+	rows, err = repo.GetAgent(context.Background(), f.ouID, "p1", "missing")
+	require.NoError(t, err)
+	assert.Empty(t, rows)
+}
+
 func TestA2ACatalogRepository_SameAgentNameInTwoProjects(t *testing.T) {
 	f := newCatalogFixture(t)
 	f.addCard("p1", "orders", catalogDev, models.A2AAgentCardSourcePlatform, namedCard("orders"))

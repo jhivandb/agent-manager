@@ -35,7 +35,12 @@ import (
 
 type catalogServiceStub struct {
 	ListFunc    func(ctx context.Context, ouID string, filter models.A2ACatalogFilter) (*models.A2ACatalogPage, error)
+	GetFunc     func(ctx context.Context, ouID, projectName, agentName string) (*models.A2ACatalogEntry, error)
 	ConnectFunc func(ctx context.Context, ouID, projectName, agentName, envName string) (*models.A2AConnectInfo, error)
+}
+
+func (s *catalogServiceStub) GetA2ACatalogEntry(ctx context.Context, ouID, projectName, agentName string) (*models.A2ACatalogEntry, error) {
+	return s.GetFunc(ctx, ouID, projectName, agentName)
 }
 
 func (s *catalogServiceStub) ListA2AAgents(ctx context.Context, ouID string, filter models.A2ACatalogFilter) (*models.A2ACatalogPage, error) {
@@ -137,6 +142,8 @@ func TestGetA2AConnect_WritesResponse(t *testing.T) {
 		return &models.A2AConnectInfo{
 			Kind: models.A2AAgentCardSourceExternal, Proxied: true, IsProduction: false,
 			GatewayURL: "https://gw.example.com/weather",
+			CardURL:    "https://gw.example.com/weather/.well-known/agent-card.json",
+			JSONRPCURL: "https://gw.example.com/weather/rpc",
 			Security:   models.A2AConnectSecurity{Mode: models.A2ASecurityModeAPIKey, APIKeyHeader: "X-API-Key"},
 			Publication: models.A2AConnectPublication{
 				Status: models.A2AConnectPublicationPublished,
@@ -151,6 +158,8 @@ func TestGetA2AConnect_WritesResponse(t *testing.T) {
 	assert.JSONEq(t, `{
 		"kind": "external", "proxied": true, "isProduction": false,
 		"gatewayUrl": "https://gw.example.com/weather",
+		"cardUrl": "https://gw.example.com/weather/.well-known/agent-card.json",
+		"jsonRpcUrl": "https://gw.example.com/weather/rpc",
 		"security": {"mode": "apiKey", "apiKeyHeader": "X-API-Key"},
 		"publication": {"status": "published", "lastError": ""}
 	}`, rec.Body.String())
@@ -174,7 +183,7 @@ func TestGetA2AConnect_WritesOAuth(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	assert.JSONEq(t, `{
-		"kind": "platform", "proxied": false, "isProduction": false, "gatewayUrl": "",
+		"kind": "platform", "proxied": false, "isProduction": false, "gatewayUrl": "", "cardUrl": "", "jsonRpcUrl": "",
 		"security": {"mode": "oauth", "oauth": {
 			"issuers": [{"name": "thunder", "issuer": "https://idp.example.com"}],
 			"audiences": ["aud"], "headerName": "Authorization", "authHeaderPrefix": "Bearer "}},
@@ -189,6 +198,47 @@ func TestGetA2AConnect_NotFound(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	NewA2ACatalogController(stub).GetA2AConnect(rec, agentEnvRequest(http.MethodGet, "a2a-connect", ""))
+
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+}
+
+func catalogEntryRequest() *http.Request {
+	req := httptest.NewRequest(http.MethodGet, "/orgs/default/projects/checkout/agents/weather/a2a-catalog-entry", nil)
+	req.SetPathValue(utils.PathParamProjName, "checkout")
+	req.SetPathValue(utils.PathParamAgentName, "weather")
+	return req.WithContext(middleware.WithResolvedOrg(req.Context(), middleware.ResolvedOrg{OUID: "ou-org"}))
+}
+
+func TestGetA2ACatalogEntry_ReturnsTheAgent(t *testing.T) {
+	var got []string
+	stub := &catalogServiceStub{GetFunc: func(_ context.Context, ouID, project, agent string) (*models.A2ACatalogEntry, error) {
+		got = []string{ouID, project, agent}
+		return &models.A2ACatalogEntry{
+			ProjectName: project, AgentName: agent, Kind: models.A2AAgentCardSourcePlatform, Name: "Weather",
+			LeadEnvironment: "dev",
+			Environments:    []models.A2ACatalogEnvironment{{Name: "dev", Status: models.A2AAgentCardStatusPending}},
+		}, nil
+	}}
+	rec := httptest.NewRecorder()
+
+	NewA2ACatalogController(stub).GetA2ACatalogEntry(rec, catalogEntryRequest())
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, []string{"ou-org", "checkout", "weather"}, got)
+	assert.JSONEq(t, `{
+		"projectName": "checkout", "agentName": "weather", "kind": "platform", "name": "Weather",
+		"description": "", "version": "", "skills": [], "leadEnvironment": "dev",
+		"environments": [{"name": "dev", "status": "pending", "proxied": false, "cardDiffers": false, "matched": false}]
+	}`, rec.Body.String())
+}
+
+func TestGetA2ACatalogEntry_NotInCatalogueIs404(t *testing.T) {
+	stub := &catalogServiceStub{GetFunc: func(context.Context, string, string, string) (*models.A2ACatalogEntry, error) {
+		return nil, utils.ErrA2ACatalogEntryNotFound
+	}}
+	rec := httptest.NewRecorder()
+
+	NewA2ACatalogController(stub).GetA2ACatalogEntry(rec, catalogEntryRequest())
 
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 }

@@ -23,7 +23,11 @@ type A2AConnectResponse struct {
 	Proxied      bool   `json:"proxied"`
 	IsProduction bool   `json:"isProduction"`
 	// Where the environment's gateway serves the agent. Empty for a direct external agent or while no gateway is mapped. This is the endpoint clients must use for platform and proxied agents.
-	GatewayUrl  string                `json:"gatewayUrl"`
+	GatewayUrl string `json:"gatewayUrl"`
+	// Where clients fetch the agent card: the gateway's copy when the gateway fronts the agent, otherwise the card's own URL. Empty when neither is known.
+	CardUrl string `json:"cardUrl"`
+	// The JSON-RPC endpoint clients should call: the gateway's when it fronts the agent, otherwise the card's declared JSON-RPC interface. Empty when there is none.
+	JsonRpcUrl  string                `json:"jsonRpcUrl"`
 	Security    A2AConnectSecurity    `json:"security"`
 	Publication A2AConnectPublication `json:"publication"`
 }
@@ -32,12 +36,14 @@ type A2AConnectResponse struct {
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewA2AConnectResponse(kind string, proxied bool, isProduction bool, gatewayUrl string, security A2AConnectSecurity, publication A2AConnectPublication) *A2AConnectResponse {
+func NewA2AConnectResponse(kind string, proxied bool, isProduction bool, gatewayUrl string, cardUrl string, jsonRpcUrl string, security A2AConnectSecurity, publication A2AConnectPublication) *A2AConnectResponse {
 	this := A2AConnectResponse{}
 	this.Kind = kind
 	this.Proxied = proxied
 	this.IsProduction = isProduction
 	this.GatewayUrl = gatewayUrl
+	this.CardUrl = cardUrl
+	this.JsonRpcUrl = jsonRpcUrl
 	this.Security = security
 	this.Publication = publication
 	return &this
@@ -147,6 +153,54 @@ func (o *A2AConnectResponse) SetGatewayUrl(v string) {
 	o.GatewayUrl = v
 }
 
+// GetCardUrl returns the CardUrl field value
+func (o *A2AConnectResponse) GetCardUrl() string {
+	if o == nil {
+		var ret string
+		return ret
+	}
+
+	return o.CardUrl
+}
+
+// GetCardUrlOk returns a tuple with the CardUrl field value
+// and a boolean to check if the value has been set.
+func (o *A2AConnectResponse) GetCardUrlOk() (*string, bool) {
+	if o == nil {
+		return nil, false
+	}
+	return &o.CardUrl, true
+}
+
+// SetCardUrl sets field value
+func (o *A2AConnectResponse) SetCardUrl(v string) {
+	o.CardUrl = v
+}
+
+// GetJsonRpcUrl returns the JsonRpcUrl field value
+func (o *A2AConnectResponse) GetJsonRpcUrl() string {
+	if o == nil {
+		var ret string
+		return ret
+	}
+
+	return o.JsonRpcUrl
+}
+
+// GetJsonRpcUrlOk returns a tuple with the JsonRpcUrl field value
+// and a boolean to check if the value has been set.
+func (o *A2AConnectResponse) GetJsonRpcUrlOk() (*string, bool) {
+	if o == nil {
+		return nil, false
+	}
+	return &o.JsonRpcUrl, true
+}
+
+// SetJsonRpcUrl sets field value
+func (o *A2AConnectResponse) SetJsonRpcUrl(v string) {
+	o.JsonRpcUrl = v
+}
+
 // GetSecurity returns the Security field value
 func (o *A2AConnectResponse) GetSecurity() A2AConnectSecurity {
 	if o == nil {
@@ -209,6 +263,8 @@ func (o A2AConnectResponse) ToMap() (map[string]interface{}, error) {
 	toSerialize["proxied"] = o.Proxied
 	toSerialize["isProduction"] = o.IsProduction
 	toSerialize["gatewayUrl"] = o.GatewayUrl
+	toSerialize["cardUrl"] = o.CardUrl
+	toSerialize["jsonRpcUrl"] = o.JsonRpcUrl
 	toSerialize["security"] = o.Security
 	toSerialize["publication"] = o.Publication
 	return toSerialize, nil

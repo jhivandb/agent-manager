@@ -33,7 +33,11 @@ import (
 type A2ACatalogRepository interface {
 	// ListAgents returns every card row of the agents on the requested page, plus the number of matching agents.
 	ListAgents(ctx context.Context, ouID string, f models.A2ACatalogFilter) ([]models.A2ACatalogRow, int64, error)
+	// GetAgent returns every card row of one agent; none when it is not in the catalogue.
+	GetAgent(ctx context.Context, ouID, projectName, agentName string) ([]models.A2ACatalogRow, error)
 }
+
+type a2aCatalogAgentKey struct{ ProjectName, AgentName string }
 
 type A2ACatalogRepo struct {
 	db *gorm.DB
@@ -97,35 +101,53 @@ func (r *A2ACatalogRepo) ListAgents(ctx context.Context, ouID string, f models.A
 	}
 	where := strings.Join(conditions, " AND ")
 
-	var total int64
-	countSQL := fmt.Sprintf(`SELECT COUNT(*) FROM (
-		SELECT 1 FROM a2a_agent_cards c WHERE %s GROUP BY c.project_name, c.agent_name) agents`, where)
-	if err := r.db.WithContext(ctx).Raw(countSQL, args...).Scan(&total).Error; err != nil {
-		return nil, 0, fmt.Errorf("count a2a catalogue agents: %w", err)
-	}
-
-	pageSQL := fmt.Sprintf(`SELECT c.project_name, c.agent_name FROM a2a_agent_cards c WHERE %s
+	// The window counts the matching agents before LIMIT applies, so one scan yields the page and the total.
+	pageSQL := fmt.Sprintf(`SELECT c.project_name, c.agent_name, COUNT(*) OVER () AS total
+		FROM a2a_agent_cards c WHERE %s
 		GROUP BY c.project_name, c.agent_name ORDER BY c.project_name, c.agent_name`, where)
 	if f.Limit > 0 {
 		pageSQL += " LIMIT @limit OFFSET @offset"
 		args = append(args, sql.Named("limit", f.Limit), sql.Named("offset", f.Offset))
 	}
-	var pageAgents []struct{ ProjectName, AgentName string }
-	if err := r.db.WithContext(ctx).Raw(pageSQL, args...).Scan(&pageAgents).Error; err != nil {
+	var page []struct {
+		a2aCatalogAgentKey
+		Total int64
+	}
+	if err := r.db.WithContext(ctx).Raw(pageSQL, args...).Scan(&page).Error; err != nil {
 		return nil, 0, fmt.Errorf("list a2a catalogue agents: %w", err)
 	}
-	if len(pageAgents) == 0 {
-		return []models.A2ACatalogRow{}, total, nil
+	if len(page) == 0 {
+		total, err := r.countAgents(ctx, where, args)
+		return []models.A2ACatalogRow{}, total, err
 	}
 
-	rows, err := r.rowsOfAgents(ctx, ouID, pageAgents, f.Query, matchedExpr)
+	agents := make([]a2aCatalogAgentKey, 0, len(page))
+	for _, p := range page {
+		agents = append(agents, p.a2aCatalogAgentKey)
+	}
+	rows, err := r.rowsOfAgents(ctx, ouID, agents, f.Query, matchedExpr)
 	if err != nil {
 		return nil, 0, err
 	}
-	return rows, total, nil
+	return rows, page[0].Total, nil
 }
 
-func (r *A2ACatalogRepo) rowsOfAgents(ctx context.Context, ouID string, agents []struct{ ProjectName, AgentName string },
+// countAgents counts the matching agents for a page past the last one, which has no row to carry the total.
+func (r *A2ACatalogRepo) countAgents(ctx context.Context, where string, args []any) (int64, error) {
+	var total int64
+	countSQL := fmt.Sprintf(`SELECT COUNT(*) FROM (
+		SELECT 1 FROM a2a_agent_cards c WHERE %s GROUP BY c.project_name, c.agent_name) agents`, where)
+	if err := r.db.WithContext(ctx).Raw(countSQL, args...).Scan(&total).Error; err != nil {
+		return 0, fmt.Errorf("count a2a catalogue agents: %w", err)
+	}
+	return total, nil
+}
+
+func (r *A2ACatalogRepo) GetAgent(ctx context.Context, ouID, projectName, agentName string) ([]models.A2ACatalogRow, error) {
+	return r.rowsOfAgents(ctx, ouID, []a2aCatalogAgentKey{{ProjectName: projectName, AgentName: agentName}}, "", "FALSE")
+}
+
+func (r *A2ACatalogRepo) rowsOfAgents(ctx context.Context, ouID string, agents []a2aCatalogAgentKey,
 	query, matchedExpr string,
 ) ([]models.A2ACatalogRow, error) {
 	pairs := make([][]any, 0, len(agents))

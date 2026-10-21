@@ -17,6 +17,7 @@
 package controllers
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -34,6 +35,7 @@ const maxCatalogQueryRunes = 255
 // A2ACatalogController serves the org-wide A2A agent catalogue and the per-environment connect details.
 type A2ACatalogController interface {
 	ListA2AAgents(w http.ResponseWriter, r *http.Request)
+	GetA2ACatalogEntry(w http.ResponseWriter, r *http.Request)
 	GetA2AConnect(w http.ResponseWriter, r *http.Request)
 }
 
@@ -58,6 +60,20 @@ func (c *a2aCatalogController) ListA2AAgents(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	utils.WriteSuccessResponse(w, http.StatusOK, toA2ACatalogListResponse(page))
+}
+
+func (c *a2aCatalogController) GetA2ACatalogEntry(w http.ResponseWriter, r *http.Request) {
+	entry, err := c.catalogService.GetA2ACatalogEntry(r.Context(), middleware.OUIDFromRequest(r),
+		r.PathValue(utils.PathParamProjName), r.PathValue(utils.PathParamAgentName))
+	if errors.Is(err, utils.ErrA2ACatalogEntryNotFound) {
+		utils.WriteErrorResponse(w, http.StatusNotFound, "The agent is not in the A2A catalogue")
+		return
+	}
+	if err != nil {
+		handleCommonErrors(w, err, "Failed to get the A2A catalogue entry")
+		return
+	}
+	utils.WriteSuccessResponse(w, http.StatusOK, toA2ACatalogAgent(*entry))
 }
 
 func (c *a2aCatalogController) GetA2AConnect(w http.ResponseWriter, r *http.Request) {
@@ -123,20 +139,24 @@ func parseA2ACatalogFilter(r *http.Request) (models.A2ACatalogFilter, string) {
 func toA2ACatalogListResponse(page *models.A2ACatalogPage) *spec.A2ACatalogListResponse {
 	agents := make([]spec.A2ACatalogAgent, 0, len(page.Entries))
 	for _, entry := range page.Entries {
-		environments := make([]spec.A2ACatalogEnvironment, 0, len(entry.Environments))
-		for _, env := range entry.Environments {
-			wire := spec.NewA2ACatalogEnvironment(env.Name, string(env.Status), env.Proxied, env.CardDiffers, env.Matched)
-			wire.FetchedAt = env.FetchedAt
-			environments = append(environments, *wire)
-		}
-		skills := entry.Skills
-		if skills == nil {
-			skills = []string{}
-		}
-		agents = append(agents, *spec.NewA2ACatalogAgent(entry.ProjectName, entry.AgentName, string(entry.Kind),
-			entry.Name, entry.Description, entry.Version, skills, entry.LeadEnvironment, environments))
+		agents = append(agents, toA2ACatalogAgent(entry))
 	}
 	return spec.NewA2ACatalogListResponse(agents, int32(page.Total), int32(page.Limit), int32(page.Offset)) //nolint:gosec // catalogue counts fit int32
+}
+
+func toA2ACatalogAgent(entry models.A2ACatalogEntry) spec.A2ACatalogAgent {
+	environments := make([]spec.A2ACatalogEnvironment, 0, len(entry.Environments))
+	for _, env := range entry.Environments {
+		wire := spec.NewA2ACatalogEnvironment(env.Name, string(env.Status), env.Proxied, env.CardDiffers, env.Matched)
+		wire.FetchedAt = env.FetchedAt
+		environments = append(environments, *wire)
+	}
+	skills := entry.Skills
+	if skills == nil {
+		skills = []string{}
+	}
+	return *spec.NewA2ACatalogAgent(entry.ProjectName, entry.AgentName, string(entry.Kind),
+		entry.Name, entry.Description, entry.Version, skills, entry.LeadEnvironment, environments)
 }
 
 func toA2AConnectResponse(info *models.A2AConnectInfo) *spec.A2AConnectResponse {
@@ -148,7 +168,8 @@ func toA2AConnectResponse(info *models.A2AConnectInfo) *spec.A2AConnectResponse 
 		security.SetOauth(toA2AConnectOAuth(info.Security.OAuth, info.Security.Issuers))
 	}
 	publication := spec.NewA2AConnectPublication(info.Publication.Status, info.Publication.LastError)
-	return spec.NewA2AConnectResponse(string(info.Kind), info.Proxied, info.IsProduction, info.GatewayURL, *security, *publication)
+	return spec.NewA2AConnectResponse(string(info.Kind), info.Proxied, info.IsProduction, info.GatewayURL,
+		info.CardURL, info.JSONRPCURL, *security, *publication)
 }
 
 func toA2AConnectOAuth(oauth *models.OAuthConfig, issuers []models.A2AConnectIssuer) spec.A2AConnectOAuth {

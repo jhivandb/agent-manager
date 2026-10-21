@@ -8012,6 +8012,60 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /orgs/{orgName}/projects/{projName}/agents/{agentName}/a2a-catalog-entry:
+    get:
+      tags:
+        - Agent Card
+      summary: Get one agent's A2A catalogue entry
+      description: >-
+        Returns the agent's entry in the organization's A2A agent catalogue, with the
+        per-environment state of its agent card.
+      operationId: getA2ACatalogEntry
+      parameters:
+        - name: orgName
+          in: path
+          required: true
+          description: Organization name/handle
+          schema:
+            type: string
+        - name: projName
+          in: path
+          required: true
+          description: Project name
+          schema:
+            type: string
+        - name: agentName
+          in: path
+          required: true
+          description: Agent name
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The agent's catalogue entry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/A2ACatalogAgent"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: The agent is not in the A2A catalogue
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /orgs/{orgName}/projects/{projName}/agents/{agentName}/environments/{envID}/agent-card:
     parameters: &agentCardPathParams
       - name: orgName
@@ -12492,7 +12546,7 @@ components:
           description: True only when q was given and this environment's card matched it
     A2AConnectResponse:
       type: object
-      required: [kind, proxied, isProduction, gatewayUrl, security, publication]
+      required: [kind, proxied, isProduction, gatewayUrl, cardUrl, jsonRpcUrl, security, publication]
       properties:
         kind:
           type: string
@@ -12507,6 +12561,16 @@ components:
             Where the environment's gateway serves the agent. Empty for a direct external agent or
             while no gateway is mapped. This is the endpoint clients must use for platform and
             proxied agents.
+        cardUrl:
+          type: string
+          description: >-
+            Where clients fetch the agent card: the gateway's copy when the gateway fronts the
+            agent, otherwise the card's own URL. Empty when neither is known.
+        jsonRpcUrl:
+          type: string
+          description: >-
+            The JSON-RPC endpoint clients should call: the gateway's when it fronts the agent,
+            otherwise the card's declared JSON-RPC interface. Empty when there is none.
         security:
           $ref: "#/components/schemas/A2AConnectSecurity"
         publication:

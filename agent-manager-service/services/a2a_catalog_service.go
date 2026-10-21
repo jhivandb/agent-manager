@@ -17,14 +17,16 @@ package services
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
+	"strings"
 	"sync"
-	"time"
 
 	"github.com/google/uuid"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/wso2/agent-manager/agent-manager-service/clients/openchoreosvc/client"
 	"github.com/wso2/agent-manager/agent-manager-service/models"
@@ -32,40 +34,30 @@ import (
 	"github.com/wso2/agent-manager/agent-manager-service/utils"
 )
 
-const (
-	a2aCatalogPipelineTTL = 30 * time.Second
-	a2aAPIKeyHeader       = "X-API-Key"
-)
+// a2aCatalogPipelineFetches bounds the concurrent pipeline reads one catalogue page makes.
+const a2aCatalogPipelineFetches = 8
 
 type A2ACatalogService interface {
 	ListA2AAgents(ctx context.Context, ouID string, f models.A2ACatalogFilter) (*models.A2ACatalogPage, error)
+	GetA2ACatalogEntry(ctx context.Context, ouID, projectName, agentName string) (*models.A2ACatalogEntry, error)
 	GetA2AConnect(ctx context.Context, ouID, projectName, agentName, envName string) (*models.A2AConnectInfo, error)
-}
-
-type pipelineOrder struct {
-	order   []string
-	expires time.Time
 }
 
 type a2aCatalogService struct {
 	catalogRepo     repositories.A2ACatalogRepository
 	cardService     A2AAgentCardService
-	proxyService    A2AProxyService
+	proxyRepo       repositories.A2AProxyRepository
 	publisher       *A2APublisher
 	agentConfigRepo repositories.AgentConfigRepository
 	gatewayRepo     repositories.GatewayRepository
 	ocClient        client.OpenChoreoClient
 	logger          *slog.Logger
-
-	now           func() time.Time
-	pipelineMu    sync.Mutex
-	pipelineCache map[string]pipelineOrder
 }
 
 func NewA2ACatalogService(
 	catalogRepo repositories.A2ACatalogRepository,
 	cardService A2AAgentCardService,
-	proxyService A2AProxyService,
+	proxyRepo repositories.A2AProxyRepository,
 	publisher *A2APublisher,
 	agentConfigRepo repositories.AgentConfigRepository,
 	gatewayRepo repositories.GatewayRepository,
@@ -75,14 +67,12 @@ func NewA2ACatalogService(
 	return &a2aCatalogService{
 		catalogRepo:     catalogRepo,
 		cardService:     cardService,
-		proxyService:    proxyService,
+		proxyRepo:       proxyRepo,
 		publisher:       publisher,
 		agentConfigRepo: agentConfigRepo,
 		gatewayRepo:     gatewayRepo,
 		ocClient:        ocClient,
 		logger:          logger,
-		now:             time.Now,
-		pipelineCache:   make(map[string]pipelineOrder),
 	}
 }
 
@@ -96,18 +86,25 @@ func (s *a2aCatalogService) ListA2AAgents(ctx context.Context, ouID string, f mo
 	if err != nil {
 		return nil, fmt.Errorf("list a2a catalogue agents: %w", err)
 	}
-	entries := make([]models.A2ACatalogEntry, 0)
-	orders := make(map[string][]string)
-	for _, group := range groupByAgent(rows) {
-		project := group[0].Card.ProjectName
-		order, seen := orders[project]
-		if !seen {
-			order = s.environmentOrder(ctx, ouID, project)
-			orders[project] = order
-		}
-		entries = append(entries, s.buildEntry(sortByEnvironmentOrder(group, order)))
+	groups := groupByAgent(rows)
+	orders := s.environmentOrders(ctx, ouID, groups)
+	entries := make([]models.A2ACatalogEntry, 0, len(groups))
+	for _, group := range groups {
+		entries = append(entries, s.buildEntry(sortByEnvironmentOrder(group, orders[group[0].Card.ProjectName])))
 	}
 	return &models.A2ACatalogPage{Entries: entries, Total: total, Limit: f.Limit, Offset: f.Offset}, nil
+}
+
+func (s *a2aCatalogService) GetA2ACatalogEntry(ctx context.Context, ouID, projectName, agentName string) (*models.A2ACatalogEntry, error) {
+	rows, err := s.catalogRepo.GetAgent(ctx, ouID, projectName, agentName)
+	if err != nil {
+		return nil, fmt.Errorf("get a2a catalogue agent: %w", err)
+	}
+	if len(rows) == 0 {
+		return nil, utils.ErrA2ACatalogEntryNotFound
+	}
+	entry := s.buildEntry(sortByEnvironmentOrder(rows, s.environmentOrder(ctx, ouID, projectName)))
+	return &entry, nil
 }
 
 // a2aEnvRef names one agent in one environment.
@@ -128,52 +125,90 @@ func (s *a2aCatalogService) GetA2AConnect(ctx context.Context, ouID, projectName
 	ref := a2aEnvRef{ouID: ouID, project: projectName, agent: agentName, env: envName, envUUID: card.EnvironmentUUID}
 	info := &models.A2AConnectInfo{Kind: card.Source, IsProduction: env.IsProduction}
 	if card.Source == models.A2AAgentCardSourceExternal {
-		proxied, err := s.applyProxyStatus(ctx, info, ref)
-		if err != nil {
+		if info.Proxied, err = s.isProxied(ctx, ref); err != nil {
 			return nil, err
 		}
-		if !proxied {
+		if !info.Proxied {
+			info.Security.Mode = models.A2ASecurityModeUnmanaged
+			info.Publication.Status = models.A2AConnectPublicationNone
+			info.CardURL, info.JSONRPCURL = connectURLs("", card)
 			return info, nil
 		}
-	} else if err := s.applyPlatformGateway(ctx, info, ref); err != nil {
+	}
+	if err := s.applyGateway(ctx, info, ref); err != nil {
 		return nil, err
 	}
+	info.CardURL, info.JSONRPCURL = connectURLs(info.GatewayURL, card)
 	if info.Security, err = s.connectSecurity(ctx, ref); err != nil {
 		return nil, err
 	}
 	return info, nil
 }
 
-// applyProxyStatus fills info from the environment's proxy; false means the external agent is reached directly.
-func (s *a2aCatalogService) applyProxyStatus(ctx context.Context, info *models.A2AConnectInfo, ref a2aEnvRef) (bool, error) {
-	status, err := s.proxyService.GetA2AProxy(ctx, ref.ouID, ref.project, ref.agent, ref.env)
-	if errors.Is(err, utils.ErrEnvironmentNotProxied) {
-		info.Security.Mode = models.A2ASecurityModeUnmanaged
-		info.Publication.Status = models.A2AConnectPublicationNone
+// isProxied is false while the external agent is reached directly.
+func (s *a2aCatalogService) isProxied(ctx context.Context, ref a2aEnvRef) (bool, error) {
+	_, err := s.proxyRepo.GetByEnvUUID(ctx, ref.ouID, ref.project, ref.agent, ref.envUUID)
+	if errors.Is(err, repositories.ErrA2AProxyNotFound) {
 		return false, nil
 	}
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("failed to read the A2A proxy: %w", err)
 	}
-	info.Proxied = true
-	info.GatewayURL = status.GatewayURL
-	info.Publication = models.A2AConnectPublication{Status: string(status.Status), LastError: status.LastError}
 	return true, nil
 }
 
-func (s *a2aCatalogService) applyPlatformGateway(ctx context.Context, info *models.A2AConnectInfo, ref a2aEnvRef) error {
-	gatewayURL, err := s.publisher.GatewayURL(ref.ouID, ref.envUUID, ref.agent)
+// applyGateway fills in where the environment's gateway serves the agent and how far its publication got.
+func (s *a2aCatalogService) applyGateway(ctx context.Context, info *models.A2AConnectInfo, ref a2aEnvRef) error {
+	source := models.A2APublicationSourcePlatform
+	if info.Kind == models.A2AAgentCardSourceExternal {
+		source = models.A2APublicationSourceExternal
+	}
+	gateway, err := s.publisher.GatewayStatus(ctx, ref.ouID, ref.project, ref.agent, ref.envUUID, source)
 	if err != nil {
 		return err
 	}
-	pub, err := s.publisher.Publication(ctx, ref.ouID, ref.project, ref.agent, ref.envUUID)
-	status, lastError, err := a2aPublicationStatus(pub, err)
-	if err != nil {
-		return err
-	}
-	info.GatewayURL = gatewayURL
-	info.Publication = models.A2AConnectPublication{Status: string(status), LastError: lastError}
+	info.GatewayURL = gateway.URL
+	info.Publication = models.A2AConnectPublication{Status: string(gateway.Status), LastError: gateway.LastError}
 	return nil
+}
+
+// connectURLs prefers the gateway's card and JSON-RPC endpoint; without one, the card's own.
+// A gateway-fetched card (proxied external agent) already declares the gateway's JSON-RPC URL.
+func connectURLs(gatewayURL string, card *models.A2AAgentCard) (cardURL, jsonRPCURL string) {
+	declared := declaredJSONRPCURLs(card.Card)
+	if gatewayURL == "" {
+		if len(declared) > 0 {
+			jsonRPCURL = declared[0]
+		}
+		return card.SourceURL, jsonRPCURL
+	}
+	base := strings.TrimRight(gatewayURL, "/")
+	for _, link := range declared {
+		if link == base || strings.HasPrefix(link, base+"/") {
+			return base + a2aAgentCardPath, link
+		}
+	}
+	return base + a2aAgentCardPath, base + a2aPathPrefixJSONRPC
+}
+
+// declaredJSONRPCURLs reads the card's JSON-RPC interfaces leniently; a malformed card declares none.
+func declaredJSONRPCURLs(card json.RawMessage) []string {
+	var doc struct {
+		SupportedInterfaces []struct {
+			URL             string `json:"url"`
+			ProtocolBinding string `json:"protocolBinding"`
+		} `json:"supportedInterfaces"`
+	}
+	if len(card) == 0 || json.Unmarshal(card, &doc) != nil {
+		return nil
+	}
+	var urls []string
+	for _, iface := range doc.SupportedInterfaces {
+		if iface.ProtocolBinding == a2aTransportJSONRPC && iface.URL != "" {
+			urls = append(urls, iface.URL)
+		}
+	}
+	return urls
 }
 
 func (s *a2aCatalogService) connectSecurity(ctx context.Context, ref a2aEnvRef) (models.A2AConnectSecurity, error) {
@@ -192,7 +227,7 @@ func (s *a2aCatalogService) connectSecurity(ctx context.Context, ref a2aEnvRef) 
 		}
 		return models.A2AConnectSecurity{Mode: models.A2ASecurityModeOAuth, OAuth: oauthConfigFromAgentConfig(cfg), Issuers: issuers}, nil
 	case cfg.EnableApiKeySecurity:
-		return models.A2AConnectSecurity{Mode: models.A2ASecurityModeAPIKey, APIKeyHeader: a2aAPIKeyHeader}, nil
+		return models.A2AConnectSecurity{Mode: models.A2ASecurityModeAPIKey, APIKeyHeader: client.APIKeyHeader}, nil
 	default:
 		return models.A2AConnectSecurity{Mode: models.A2ASecurityModeNone}, nil
 	}
@@ -271,9 +306,13 @@ func (s *a2aCatalogService) buildEntry(rows []models.A2ACatalogRow) models.A2ACa
 			entry.Name = summary.Name
 		}
 	}
-	leadFingerprint := s.fingerprint(lead)
-	for _, row := range rows {
-		fingerprint := s.fingerprint(row)
+	fingerprints := make([]string, len(rows))
+	for i, row := range rows {
+		fingerprints[i] = s.fingerprint(row)
+	}
+	leadFingerprint := fingerprints[0]
+	for i, row := range rows {
+		fingerprint := fingerprints[i]
 		entry.Environments = append(entry.Environments, models.A2ACatalogEnvironment{
 			Name:        row.Card.EnvironmentName,
 			Status:      row.Card.Status,
@@ -306,30 +345,40 @@ func (s *a2aCatalogService) fingerprint(row models.A2ACatalogRow) string {
 	return fingerprint
 }
 
-func (s *a2aCatalogService) environmentOrder(ctx context.Context, ouID, project string) []string {
-	key := ouID + "/" + project
-	if order, ok := s.cachedOrder(key); ok {
-		return order
+// environmentOrders reads each project's pipeline once, concurrently.
+func (s *a2aCatalogService) environmentOrders(ctx context.Context, ouID string, groups [][]models.A2ACatalogRow) map[string][]string {
+	var projects []string
+	seen := make(map[string]bool)
+	for _, group := range groups {
+		if project := group[0].Card.ProjectName; !seen[project] {
+			seen[project] = true
+			projects = append(projects, project)
+		}
 	}
+	orders := make(map[string][]string, len(projects))
+	var mu sync.Mutex
+	var g errgroup.Group
+	g.SetLimit(a2aCatalogPipelineFetches)
+	for _, project := range projects {
+		g.Go(func() error {
+			order := s.environmentOrder(ctx, ouID, project)
+			mu.Lock()
+			orders[project] = order
+			mu.Unlock()
+			return nil
+		})
+	}
+	_ = g.Wait() // Never fails: an unavailable pipeline falls back to name order.
+	return orders
+}
+
+// environmentOrder is nil when the pipeline is unavailable, which orders the environments by name.
+func (s *a2aCatalogService) environmentOrder(ctx context.Context, ouID, project string) []string {
 	pipeline, err := s.ocClient.GetProjectDeploymentPipeline(ctx, ouID, project)
 	if err != nil || pipeline == nil {
 		s.logger.Warn("a2a catalogue: deployment pipeline unavailable, ordering environments by name",
 			"project", project, "error", err)
 		return nil
 	}
-	order := client.BuildEnvironmentOrder(pipeline.PromotionPaths)
-	s.pipelineMu.Lock()
-	s.pipelineCache[key] = pipelineOrder{order: order, expires: s.now().Add(a2aCatalogPipelineTTL)}
-	s.pipelineMu.Unlock()
-	return order
-}
-
-func (s *a2aCatalogService) cachedOrder(key string) ([]string, bool) {
-	s.pipelineMu.Lock()
-	defer s.pipelineMu.Unlock()
-	cached, ok := s.pipelineCache[key]
-	if !ok || !s.now().Before(cached.expires) {
-		return nil, false
-	}
-	return cached.order, true
+	return client.BuildEnvironmentOrder(pipeline.PromotionPaths)
 }

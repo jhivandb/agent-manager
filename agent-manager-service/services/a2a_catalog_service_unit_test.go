@@ -20,8 +20,8 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"sync"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -39,29 +39,38 @@ type catalogHarness struct {
 	repo     *repomocks.A2ACatalogRepositoryMock
 	oc       *clientmocks.OpenChoreoClientMock
 	pipeline map[string]*models.DeploymentPipelineResponse
+	mu       sync.Mutex // Pipelines are read concurrently.
 	calls    map[string]int
-	clock    time.Time
 }
 
 func newCatalogHarness(rows ...models.A2ACatalogRow) *catalogHarness {
 	h := &catalogHarness{
 		pipeline: map[string]*models.DeploymentPipelineResponse{},
 		calls:    map[string]int{},
-		clock:    time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 	}
 	h.repo = &repomocks.A2ACatalogRepositoryMock{
 		ListAgentsFunc: func(context.Context, string, models.A2ACatalogFilter) ([]models.A2ACatalogRow, int64, error) {
 			return rows, int64(len(rows)), nil
 		},
+		GetAgentFunc: func(_ context.Context, _, project, agent string) ([]models.A2ACatalogRow, error) {
+			var matching []models.A2ACatalogRow
+			for _, row := range rows {
+				if row.Card.ProjectName == project && row.Card.AgentName == agent {
+					matching = append(matching, row)
+				}
+			}
+			return matching, nil
+		},
 	}
 	h.oc = &clientmocks.OpenChoreoClientMock{
 		GetProjectDeploymentPipelineFunc: func(_ context.Context, _, project string) (*models.DeploymentPipelineResponse, error) {
+			h.mu.Lock()
+			defer h.mu.Unlock()
 			h.calls[project]++
 			return h.pipeline[project], nil
 		},
 	}
 	h.svc = NewA2ACatalogService(h.repo, nil, nil, nil, nil, nil, h.oc, slog.Default()).(*a2aCatalogService)
-	h.svc.now = func() time.Time { return h.clock }
 	return h
 }
 
@@ -220,21 +229,7 @@ func TestListA2AAgents_FetchesPipelineOncePerProject(t *testing.T) {
 	assert.Equal(t, 1, h.calls["p2"])
 }
 
-func TestListA2AAgents_CachesPipelineOrderWithinTTL(t *testing.T) {
-	h := newCatalogHarness(catalogRow("p", "a", "dev", `{}`))
-	h.pipeline["p"] = pipelineOf("dev")
-
-	list(t, h)
-	h.clock = h.clock.Add(10 * time.Second)
-	list(t, h)
-	assert.Equal(t, 1, h.calls["p"])
-
-	h.clock = h.clock.Add(a2aCatalogPipelineTTL)
-	list(t, h)
-	assert.Equal(t, 2, h.calls["p"])
-}
-
-func TestListA2AAgents_DoesNotCachePipelineFailures(t *testing.T) {
+func TestListA2AAgents_ReadsPipelinesAfreshEachRequest(t *testing.T) {
 	h := newCatalogHarness(catalogRow("p", "a", "dev", `{}`))
 	calls := 0
 	h.oc.GetProjectDeploymentPipelineFunc = func(context.Context, string, string) (*models.DeploymentPipelineResponse, error) {
@@ -307,13 +302,41 @@ func (f *fakeCardService) GetA2AAgentCard(ctx context.Context, ouID, project, ag
 	return f.getFunc(ctx, ouID, project, agent, env)
 }
 
-type fakeProxyService struct {
-	A2AProxyService
-	getFunc func(ctx context.Context, ouID, project, agent, env string) (*models.A2AProxyStatus, error)
+func TestGetA2ACatalogEntry_OrdersByPipeline(t *testing.T) {
+	h := newCatalogHarness(
+		catalogRow("p", "a", "prod", `{"name":"n"}`),
+		catalogRow("p", "a", "dev", `{"name":"n"}`),
+		catalogRow("other", "a", "dev", `{"name":"elsewhere"}`),
+	)
+	h.pipeline["p"] = pipelineOf("dev", "prod")
+
+	entry, err := h.svc.GetA2ACatalogEntry(context.Background(), "ou", "p", "a")
+
+	require.NoError(t, err)
+	assert.Equal(t, "p", entry.ProjectName)
+	assert.Equal(t, []string{"dev", "prod"}, envNames(*entry))
+	assert.Equal(t, "dev", entry.LeadEnvironment)
 }
 
-func (f *fakeProxyService) GetA2AProxy(ctx context.Context, ouID, project, agent, env string) (*models.A2AProxyStatus, error) {
-	return f.getFunc(ctx, ouID, project, agent, env)
+func TestGetA2ACatalogEntry_NotInCatalogue(t *testing.T) {
+	h := newCatalogHarness()
+
+	_, err := h.svc.GetA2ACatalogEntry(context.Background(), "ou", "p", "missing")
+
+	assert.ErrorIs(t, err, utils.ErrA2ACatalogEntryNotFound)
+}
+
+func TestGetA2ACatalogEntry_RepoErrorIsReturnedWrapped(t *testing.T) {
+	repoErr := errors.New("db down")
+	h := newCatalogHarness()
+	h.repo.GetAgentFunc = func(context.Context, string, string, string) ([]models.A2ACatalogRow, error) {
+		return nil, repoErr
+	}
+
+	_, err := h.svc.GetA2ACatalogEntry(context.Background(), "ou", "p", "a")
+
+	assert.ErrorIs(t, err, repoErr)
+	assert.NotErrorIs(t, err, utils.ErrA2ACatalogEntryNotFound)
 }
 
 const connectEnvUUID = "55555555-5555-5555-5555-555555555555"
@@ -322,7 +345,6 @@ type connectHarness struct {
 	svc         *a2aCatalogService
 	card        *models.A2AAgentCard
 	cardErr     error
-	proxyStatus *models.A2AProxyStatus
 	proxyErr    error
 	env         *models.EnvironmentResponse
 	envErr      error
@@ -356,9 +378,11 @@ func newConnectHarness(source models.A2AAgentCardSource) *connectHarness {
 	cards := &fakeCardService{getFunc: func(context.Context, string, string, string, string) (*models.A2AAgentCard, error) {
 		return h.card, h.cardErr
 	}}
-	proxies := &fakeProxyService{getFunc: func(context.Context, string, string, string, string) (*models.A2AProxyStatus, error) {
-		return h.proxyStatus, h.proxyErr
-	}}
+	proxies := &repomocks.A2AProxyRepositoryMock{
+		GetByEnvUUIDFunc: func(context.Context, string, string, string, uuid.UUID) (*models.A2AProxy, error) {
+			return &models.A2AProxy{}, h.proxyErr
+		},
+	}
 	oc := &clientmocks.OpenChoreoClientMock{
 		GetEnvironmentFunc: func(context.Context, string, string) (*models.EnvironmentResponse, error) {
 			return h.env, h.envErr
@@ -436,7 +460,7 @@ func TestGetA2AConnect_NoSecurity(t *testing.T) {
 
 func TestGetA2AConnect_DirectExternalIsUnmanaged(t *testing.T) {
 	h := newConnectHarness(models.A2AAgentCardSourceExternal)
-	h.proxyErr = utils.ErrEnvironmentNotProxied
+	h.proxyErr = repositories.ErrA2AProxyNotFound
 
 	info, err := h.connect()
 
@@ -448,18 +472,73 @@ func TestGetA2AConnect_DirectExternalIsUnmanaged(t *testing.T) {
 	assert.Equal(t, models.A2AConnectPublication{Status: models.A2AConnectPublicationNone}, info.Publication)
 }
 
-func TestGetA2AConnect_ProxiedExternalUsesProxyStatus(t *testing.T) {
+func TestGetA2AConnect_ProxiedExternalIsServedByTheGateway(t *testing.T) {
 	h := newConnectHarness(models.A2AAgentCardSourceExternal)
-	h.proxyStatus = &models.A2AProxyStatus{Status: models.A2APublicationStatusPublished, GatewayURL: "https://gw/agents/x"}
 	h.withConfig(models.AgentConfig{EnableApiKeySecurity: true})
 
 	info, err := h.connect()
 
 	require.NoError(t, err)
 	assert.True(t, info.Proxied)
-	assert.Equal(t, "https://gw/agents/x", info.GatewayURL)
+	assert.Equal(t, platformGatewayURL(), info.GatewayURL)
 	assert.Equal(t, models.A2AConnectPublication{Status: "published"}, info.Publication)
 	assert.Equal(t, models.A2ASecurityModeAPIKey, info.Security.Mode)
+}
+
+func TestGetA2AConnect_URLs(t *testing.T) {
+	gateway := platformGatewayURL()
+	cardWith := func(urls ...string) json.RawMessage {
+		interfaces := make([]map[string]string, 0, len(urls))
+		for _, u := range urls {
+			interfaces = append(interfaces, map[string]string{"url": u, "protocolBinding": "JSONRPC"})
+		}
+		raw, _ := json.Marshal(map[string]any{"supportedInterfaces": interfaces})
+		return raw
+	}
+	cases := []struct {
+		name        string
+		source      models.A2AAgentCardSource
+		proxyErr    error
+		card        json.RawMessage
+		wantCard    string
+		wantJSONRPC string
+	}{
+		{
+			name: "platform agent at the gateway's JSON-RPC path", source: models.A2AAgentCardSourcePlatform,
+			card:     cardWith("http://weather.internal:8080/"),
+			wantCard: gateway + a2aAgentCardPath, wantJSONRPC: gateway + a2aPathPrefixJSONRPC,
+		},
+		{
+			name: "proxied agent at the gateway URL its card declares", source: models.A2AAgentCardSourceExternal,
+			card:     cardWith(gateway + "/v1/jsonrpc"),
+			wantCard: gateway + a2aAgentCardPath, wantJSONRPC: gateway + "/v1/jsonrpc",
+		},
+		{
+			name: "direct agent at its own card and interface", source: models.A2AAgentCardSourceExternal,
+			proxyErr: repositories.ErrA2AProxyNotFound, card: cardWith("https://agent.example/rpc"),
+			wantCard: "https://agent.example/.well-known/agent-card.json", wantJSONRPC: "https://agent.example/rpc",
+		},
+		{
+			name: "direct agent with an unreadable card", source: models.A2AAgentCardSourceExternal,
+			proxyErr: repositories.ErrA2AProxyNotFound, card: json.RawMessage(`not json`),
+			wantCard: "https://agent.example/.well-known/agent-card.json",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newConnectHarness(tc.source)
+			h.withConfig(models.AgentConfig{})
+			h.proxyErr = tc.proxyErr
+			h.card.Card = tc.card
+			h.card.SourceURL = "https://agent.example/.well-known/agent-card.json"
+
+			info, err := h.connect()
+
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantCard, info.CardURL)
+			assert.Equal(t, tc.wantJSONRPC, info.JSONRPCURL)
+		})
+	}
 }
 
 func TestGetA2AConnect_MissingConfigIsUnknown(t *testing.T) {
@@ -484,7 +563,7 @@ func TestGetA2AConnect_PlatformMissingPublicationIsFailed(t *testing.T) {
 	info, err := h.connect()
 
 	require.NoError(t, err)
-	assert.Equal(t, models.A2AConnectPublication{Status: "failed", LastError: a2aProxyNoPublicationMsg}, info.Publication)
+	assert.Equal(t, models.A2AConnectPublication{Status: "failed", LastError: a2aMissingPublicationMsg[models.A2APublicationSourcePlatform]}, info.Publication)
 }
 
 func TestGetA2AConnect_ProductionFlag(t *testing.T) {

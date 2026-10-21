@@ -111,7 +111,10 @@ type A2AConnectInfo struct {
 	Proxied      bool
 	IsProduction bool
 	// GatewayURL is empty for a direct external agent or while no gateway is mapped.
-	GatewayURL  string
+	GatewayURL string
+	// CardURL and JSONRPCURL are the gateway's when it fronts the agent, otherwise the card's own; empty when unknown.
+	CardURL     string
+	JSONRPCURL  string
 	Security    A2AConnectSecurity
 	Publication A2AConnectPublication
 }

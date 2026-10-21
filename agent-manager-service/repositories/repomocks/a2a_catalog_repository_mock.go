@@ -16,6 +16,9 @@ import (
 //
 //		// make and configure a mocked repositories.A2ACatalogRepository
 //		mockedA2ACatalogRepository := &A2ACatalogRepositoryMock{
+//			GetAgentFunc: func(ctx context.Context, ouID string, projectName string, agentName string) ([]models.A2ACatalogRow, error) {
+//				panic("mock out the GetAgent method")
+//			},
 //			ListAgentsFunc: func(ctx context.Context, ouID string, f models.A2ACatalogFilter) ([]models.A2ACatalogRow, int64, error) {
 //				panic("mock out the ListAgents method")
 //			},
@@ -26,11 +29,25 @@ import (
 //
 //	}
 type A2ACatalogRepositoryMock struct {
+	// GetAgentFunc mocks the GetAgent method.
+	GetAgentFunc func(ctx context.Context, ouID string, projectName string, agentName string) ([]models.A2ACatalogRow, error)
+
 	// ListAgentsFunc mocks the ListAgents method.
 	ListAgentsFunc func(ctx context.Context, ouID string, f models.A2ACatalogFilter) ([]models.A2ACatalogRow, int64, error)
 
 	// calls tracks calls to the methods.
 	calls struct {
+		// GetAgent holds details about calls to the GetAgent method.
+		GetAgent []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// OuID is the ouID argument value.
+			OuID string
+			// ProjectName is the projectName argument value.
+			ProjectName string
+			// AgentName is the agentName argument value.
+			AgentName string
+		}
 		// ListAgents holds details about calls to the ListAgents method.
 		ListAgents []struct {
 			// Ctx is the ctx argument value.
@@ -41,7 +58,52 @@ type A2ACatalogRepositoryMock struct {
 			F models.A2ACatalogFilter
 		}
 	}
+	lockGetAgent   sync.RWMutex
 	lockListAgents sync.RWMutex
+}
+
+// GetAgent calls GetAgentFunc.
+func (mock *A2ACatalogRepositoryMock) GetAgent(ctx context.Context, ouID string, projectName string, agentName string) ([]models.A2ACatalogRow, error) {
+	if mock.GetAgentFunc == nil {
+		panic("A2ACatalogRepositoryMock.GetAgentFunc: method is nil but A2ACatalogRepository.GetAgent was just called")
+	}
+	callInfo := struct {
+		Ctx         context.Context
+		OuID        string
+		ProjectName string
+		AgentName   string
+	}{
+		Ctx:         ctx,
+		OuID:        ouID,
+		ProjectName: projectName,
+		AgentName:   agentName,
+	}
+	mock.lockGetAgent.Lock()
+	mock.calls.GetAgent = append(mock.calls.GetAgent, callInfo)
+	mock.lockGetAgent.Unlock()
+	return mock.GetAgentFunc(ctx, ouID, projectName, agentName)
+}
+
+// GetAgentCalls gets all the calls that were made to GetAgent.
+// Check the length with:
+//
+//	len(mockedA2ACatalogRepository.GetAgentCalls())
+func (mock *A2ACatalogRepositoryMock) GetAgentCalls() []struct {
+	Ctx         context.Context
+	OuID        string
+	ProjectName string
+	AgentName   string
+} {
+	var calls []struct {
+		Ctx         context.Context
+		OuID        string
+		ProjectName string
+		AgentName   string
+	}
+	mock.lockGetAgent.RLock()
+	calls = mock.calls.GetAgent
+	mock.lockGetAgent.RUnlock()
+	return calls
 }
 
 // ListAgents calls ListAgentsFunc.
