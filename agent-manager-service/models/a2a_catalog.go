@@ -16,6 +16,8 @@
 
 package models
 
+import "time"
+
 // A2ACatalogKind narrows the catalogue to one way an agent is reached.
 type A2ACatalogKind string
 
@@ -47,4 +49,37 @@ type A2ACatalogRow struct {
 	Proxied bool `gorm:"column:proxied"`
 	// Matched says the row itself satisfies the search query; always false without one.
 	Matched bool `gorm:"column:matched"`
+}
+
+// A2ACatalogEnvironment is one environment of a catalogue entry.
+type A2ACatalogEnvironment struct {
+	Name      string
+	Status    A2AAgentCardStatus
+	FetchedAt *time.Time
+	Proxied   bool
+	// CardDiffers says this environment's stored card fingerprint differs from the lead environment's.
+	CardDiffers bool
+	Matched     bool
+}
+
+// A2ACatalogEntry is one agent in the catalogue, summarised from its lead environment's card.
+type A2ACatalogEntry struct {
+	ProjectName     string
+	AgentName       string
+	Kind            A2AAgentCardSource
+	Name            string
+	Description     string
+	Version         string
+	Skills          []string
+	LeadEnvironment string
+	// Environments are in the project's pipeline order.
+	Environments []A2ACatalogEnvironment
+}
+
+// A2ACatalogPage is one page of catalogue entries; Total counts every matching agent.
+type A2ACatalogPage struct {
+	Entries []A2ACatalogEntry
+	Total   int
+	Limit   int
+	Offset  int
 }
