@@ -23,12 +23,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/wso2/agent-manager/agent-manager-service/clients/clientmocks"
 	"github.com/wso2/agent-manager/agent-manager-service/models"
+	"github.com/wso2/agent-manager/agent-manager-service/repositories"
 	"github.com/wso2/agent-manager/agent-manager-service/repositories/repomocks"
+	"github.com/wso2/agent-manager/agent-manager-service/utils"
 )
 
 type catalogHarness struct {
@@ -276,4 +279,258 @@ func TestListA2AAgents_RepoErrorIsReturnedWrapped(t *testing.T) {
 	_, err := h.svc.ListA2AAgents(context.Background(), "ou", models.A2ACatalogFilter{})
 
 	assert.ErrorIs(t, err, repoErr)
+}
+
+type fakeCardService struct {
+	A2AAgentCardService
+	getFunc func(ctx context.Context, ouID, project, agent, env string) (*models.A2AAgentCard, error)
+}
+
+func (f *fakeCardService) GetA2AAgentCard(ctx context.Context, ouID, project, agent, env string) (*models.A2AAgentCard, error) {
+	return f.getFunc(ctx, ouID, project, agent, env)
+}
+
+type fakeProxyService struct {
+	A2AProxyService
+	getFunc func(ctx context.Context, ouID, project, agent, env string) (*models.A2AProxyStatus, error)
+}
+
+func (f *fakeProxyService) GetA2AProxy(ctx context.Context, ouID, project, agent, env string) (*models.A2AProxyStatus, error) {
+	return f.getFunc(ctx, ouID, project, agent, env)
+}
+
+const connectEnvUUID = "55555555-5555-5555-5555-555555555555"
+
+type connectHarness struct {
+	svc         *a2aCatalogService
+	card        *models.A2AAgentCard
+	cardErr     error
+	proxyStatus *models.A2AProxyStatus
+	proxyErr    error
+	env         *models.EnvironmentResponse
+	envErr      error
+	configs     *repomocks.AgentConfigRepositoryMock
+	pubs        *repomocks.A2APublicationRepositoryMock
+	gateways    *repomocks.GatewayRepositoryMock
+	providers   []models.GatewayIdentityProvider
+	providerErr error
+}
+
+func newConnectHarness(source models.A2AAgentCardSource) *connectHarness {
+	h := &connectHarness{
+		card: &models.A2AAgentCard{Source: source, EnvironmentUUID: uuid.MustParse(connectEnvUUID)},
+		env:  &models.EnvironmentResponse{Name: "dev"},
+	}
+	h.configs = &repomocks.AgentConfigRepositoryMock{}
+	h.pubs = &repomocks.A2APublicationRepositoryMock{
+		GetFunc: func(context.Context, string, string, string, uuid.UUID) (*models.A2APublication, error) {
+			return &models.A2APublication{Status: models.A2APublicationStatusPublished}, nil
+		},
+	}
+	h.gateways = &repomocks.GatewayRepositoryMock{
+		ListWithFiltersFunc: func(repositories.GatewayFilterOptions) ([]*models.Gateway, error) {
+			return []*models.Gateway{{Vhost: "gw.example.com"}}, nil
+		},
+		ListIdentityProvidersByEnvironmentFunc: func(string) ([]models.GatewayIdentityProvider, error) {
+			return h.providers, h.providerErr
+		},
+	}
+	publisher := NewA2APublisher(nil, h.pubs, nil, nil, nil, nil, h.gateways, nil, slog.Default())
+	cards := &fakeCardService{getFunc: func(context.Context, string, string, string, string) (*models.A2AAgentCard, error) {
+		return h.card, h.cardErr
+	}}
+	proxies := &fakeProxyService{getFunc: func(context.Context, string, string, string, string) (*models.A2AProxyStatus, error) {
+		return h.proxyStatus, h.proxyErr
+	}}
+	oc := &clientmocks.OpenChoreoClientMock{
+		GetEnvironmentFunc: func(context.Context, string, string) (*models.EnvironmentResponse, error) {
+			return h.env, h.envErr
+		},
+	}
+	h.svc = NewA2ACatalogService(nil, cards, proxies, publisher, h.configs, h.gateways, oc, slog.Default()).(*a2aCatalogService)
+	return h
+}
+
+func (h *connectHarness) withConfig(cfg models.AgentConfig) {
+	h.configs.GetFunc = func(context.Context, string, string, string, string) (*models.AgentConfig, error) {
+		return &cfg, nil
+	}
+}
+
+func (h *connectHarness) connect() (*models.A2AConnectInfo, error) {
+	return h.svc.GetA2AConnect(context.Background(), "ou", "p", "weather", "dev")
+}
+
+func platformGatewayURL() string {
+	return a2aGatewayURL(&models.Gateway{Vhost: "gw.example.com"}, "weather")
+}
+
+func TestGetA2AConnect_PlatformAPIKey(t *testing.T) {
+	h := newConnectHarness(models.A2AAgentCardSourcePlatform)
+	h.withConfig(models.AgentConfig{EnableApiKeySecurity: true})
+
+	info, err := h.connect()
+
+	require.NoError(t, err)
+	assert.Equal(t, models.A2AAgentCardSourcePlatform, info.Kind)
+	assert.False(t, info.Proxied)
+	assert.Equal(t, platformGatewayURL(), info.GatewayURL)
+	assert.Equal(t, models.A2AConnectSecurity{Mode: models.A2ASecurityModeAPIKey, APIKeyHeader: "X-API-Key"}, info.Security)
+	assert.Equal(t, models.A2AConnectPublication{Status: "published"}, info.Publication)
+}
+
+func TestGetA2AConnect_PlatformPublicationErrorIsCopied(t *testing.T) {
+	h := newConnectHarness(models.A2AAgentCardSourcePlatform)
+	h.withConfig(models.AgentConfig{})
+	h.pubs.GetFunc = func(context.Context, string, string, string, uuid.UUID) (*models.A2APublication, error) {
+		return &models.A2APublication{Status: models.A2APublicationStatusFailed, LastError: "boom"}, nil
+	}
+
+	info, err := h.connect()
+
+	require.NoError(t, err)
+	assert.Equal(t, models.A2AConnectPublication{Status: "failed", LastError: "boom"}, info.Publication)
+}
+
+func TestGetA2AConnect_OAuthResolvesIssuers(t *testing.T) {
+	h := newConnectHarness(models.A2AAgentCardSourcePlatform)
+	h.withConfig(models.AgentConfig{EnableOAuthSecurity: true, OAuthIssuers: []string{"thunder", "gone"}})
+	h.providers = []models.GatewayIdentityProvider{{Name: "thunder", Issuer: "https://idp/x"}}
+
+	info, err := h.connect()
+
+	require.NoError(t, err)
+	assert.Equal(t, models.A2ASecurityModeOAuth, info.Security.Mode)
+	assert.Equal(t, []models.A2AConnectIssuer{{Name: "thunder", Issuer: "https://idp/x"}, {Name: "gone"}}, info.Security.Issuers)
+	require.NotNil(t, info.Security.OAuth)
+	assert.Equal(t, "Authorization", info.Security.OAuth.HeaderName)
+	assert.Equal(t, "Bearer", info.Security.OAuth.AuthHeaderPrefix)
+}
+
+func TestGetA2AConnect_NoSecurity(t *testing.T) {
+	h := newConnectHarness(models.A2AAgentCardSourcePlatform)
+	h.withConfig(models.AgentConfig{})
+
+	info, err := h.connect()
+
+	require.NoError(t, err)
+	assert.Equal(t, models.A2ASecurityModeNone, info.Security.Mode)
+}
+
+func TestGetA2AConnect_DirectExternalIsUnmanaged(t *testing.T) {
+	h := newConnectHarness(models.A2AAgentCardSourceExternal)
+	h.proxyErr = utils.ErrEnvironmentNotProxied
+
+	info, err := h.connect()
+
+	require.NoError(t, err)
+	assert.Equal(t, models.A2AAgentCardSourceExternal, info.Kind)
+	assert.False(t, info.Proxied)
+	assert.Empty(t, info.GatewayURL)
+	assert.Equal(t, models.A2ASecurityModeUnmanaged, info.Security.Mode)
+	assert.Equal(t, models.A2AConnectPublication{Status: models.A2AConnectPublicationNone}, info.Publication)
+}
+
+func TestGetA2AConnect_ProxiedExternalUsesProxyStatus(t *testing.T) {
+	h := newConnectHarness(models.A2AAgentCardSourceExternal)
+	h.proxyStatus = &models.A2AProxyStatus{Status: models.A2APublicationStatusPublished, GatewayURL: "https://gw/agents/x"}
+	h.withConfig(models.AgentConfig{EnableApiKeySecurity: true})
+
+	info, err := h.connect()
+
+	require.NoError(t, err)
+	assert.True(t, info.Proxied)
+	assert.Equal(t, "https://gw/agents/x", info.GatewayURL)
+	assert.Equal(t, models.A2AConnectPublication{Status: "published"}, info.Publication)
+	assert.Equal(t, models.A2ASecurityModeAPIKey, info.Security.Mode)
+}
+
+func TestGetA2AConnect_MissingConfigIsUnknown(t *testing.T) {
+	h := newConnectHarness(models.A2AAgentCardSourcePlatform)
+	h.configs.GetFunc = func(context.Context, string, string, string, string) (*models.AgentConfig, error) {
+		return nil, repositories.ErrAgentConfigNotFound
+	}
+
+	info, err := h.connect()
+
+	require.NoError(t, err)
+	assert.Equal(t, models.A2ASecurityModeUnknown, info.Security.Mode)
+}
+
+func TestGetA2AConnect_PlatformMissingPublicationIsFailed(t *testing.T) {
+	h := newConnectHarness(models.A2AAgentCardSourcePlatform)
+	h.withConfig(models.AgentConfig{})
+	h.pubs.GetFunc = func(context.Context, string, string, string, uuid.UUID) (*models.A2APublication, error) {
+		return nil, repositories.ErrA2APublicationNotFound
+	}
+
+	info, err := h.connect()
+
+	require.NoError(t, err)
+	assert.Equal(t, models.A2AConnectPublication{Status: "failed", LastError: a2aProxyNoPublicationMsg}, info.Publication)
+}
+
+func TestGetA2AConnect_ProductionFlag(t *testing.T) {
+	h := newConnectHarness(models.A2AAgentCardSourcePlatform)
+	h.withConfig(models.AgentConfig{})
+	h.env = &models.EnvironmentResponse{Name: "prod", IsProduction: true}
+
+	info, err := h.connect()
+
+	require.NoError(t, err)
+	assert.True(t, info.IsProduction)
+}
+
+func TestGetA2AConnect_NoCardRowIs404(t *testing.T) {
+	h := newConnectHarness(models.A2AAgentCardSourcePlatform)
+	h.cardErr = utils.ErrAgentCardNotFound
+
+	_, err := h.connect()
+
+	require.ErrorIs(t, err, utils.ErrAgentCardNotFound)
+}
+
+func TestGetA2AConnect_UnknownEnvironmentIsTranslated(t *testing.T) {
+	h := newConnectHarness(models.A2AAgentCardSourcePlatform)
+	h.envErr = utils.ErrNotFound
+
+	_, err := h.connect()
+
+	require.ErrorIs(t, err, utils.ErrEnvironmentNotFound)
+}
+
+func TestGetA2AConnect_DoesNotMaskRealErrors(t *testing.T) {
+	dbErr := errors.New("db down")
+	t.Run("config read", func(t *testing.T) {
+		h := newConnectHarness(models.A2AAgentCardSourcePlatform)
+		h.configs.GetFunc = func(context.Context, string, string, string, string) (*models.AgentConfig, error) {
+			return nil, dbErr
+		}
+		info, err := h.connect()
+		require.ErrorIs(t, err, dbErr)
+		assert.NotErrorIs(t, err, utils.ErrAgentCardNotFound)
+		assert.Nil(t, info)
+	})
+	t.Run("proxy read", func(t *testing.T) {
+		h := newConnectHarness(models.A2AAgentCardSourceExternal)
+		h.proxyErr = dbErr
+		info, err := h.connect()
+		require.ErrorIs(t, err, dbErr)
+		assert.Nil(t, info)
+	})
+	t.Run("publication read", func(t *testing.T) {
+		h := newConnectHarness(models.A2AAgentCardSourcePlatform)
+		h.pubs.GetFunc = func(context.Context, string, string, string, uuid.UUID) (*models.A2APublication, error) {
+			return nil, dbErr
+		}
+		_, err := h.connect()
+		require.ErrorIs(t, err, dbErr)
+	})
+	t.Run("identity providers", func(t *testing.T) {
+		h := newConnectHarness(models.A2AAgentCardSourcePlatform)
+		h.withConfig(models.AgentConfig{EnableOAuthSecurity: true, OAuthIssuers: []string{"x"}})
+		h.providerErr = dbErr
+		_, err := h.connect()
+		require.ErrorIs(t, err, dbErr)
+	})
 }

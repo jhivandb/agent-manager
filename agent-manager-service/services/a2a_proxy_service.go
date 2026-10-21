@@ -153,16 +153,24 @@ func (s *a2aProxyService) GetA2AProxy(ctx context.Context, ouID, projectName, ag
 	}
 	status := &models.A2AProxyStatus{UpstreamAuthHeader: proxy.UpstreamAuthHeader, GatewayURL: gatewayURL}
 	pub, err := s.publisher.Publication(ctx, t.key.OUID, t.key.ProjectName, t.key.AgentName, t.key.EnvironmentUUID)
+	status.Status, status.LastError, err = a2aPublicationStatus(pub, err)
+	if err != nil {
+		return nil, err
+	}
+	return status, nil
+}
+
+// a2aPublicationStatus reads a publication lookup as the status and error text shown to users.
+func a2aPublicationStatus(pub *models.A2APublication, err error) (models.A2APublicationStatus, string, error) {
 	switch {
 	case errors.Is(err, repositories.ErrA2APublicationNotFound):
 		// Enabling writes both rows together, so a missing publication never resolves on its own.
-		status.Status, status.LastError = models.A2APublicationStatusFailed, a2aProxyNoPublicationMsg
+		return models.A2APublicationStatusFailed, a2aProxyNoPublicationMsg, nil
 	case err != nil:
-		return nil, fmt.Errorf("failed to read the A2A publication: %w", err)
+		return "", "", fmt.Errorf("failed to read the A2A publication: %w", err)
 	default:
-		status.Status, status.LastError = pub.Status, pub.LastError
+		return pub.Status, pub.LastError, nil
 	}
-	return status, nil
 }
 
 func (s *a2aProxyService) SetA2AProxy(

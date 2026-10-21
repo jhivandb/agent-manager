@@ -24,12 +24,18 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/wso2/agent-manager/agent-manager-service/clients/openchoreosvc/client"
 	"github.com/wso2/agent-manager/agent-manager-service/models"
 	"github.com/wso2/agent-manager/agent-manager-service/repositories"
+	"github.com/wso2/agent-manager/agent-manager-service/utils"
 )
 
-const a2aCatalogPipelineTTL = 30 * time.Second
+const (
+	a2aCatalogPipelineTTL = 30 * time.Second
+	a2aAPIKeyHeader       = "X-API-Key"
+)
 
 type A2ACatalogService interface {
 	ListA2AAgents(ctx context.Context, ouID string, f models.A2ACatalogFilter) (*models.A2ACatalogPage, error)
@@ -98,8 +104,108 @@ func (s *a2aCatalogService) ListA2AAgents(ctx context.Context, ouID string, f mo
 	return &models.A2ACatalogPage{Entries: entries, Total: total, Limit: f.Limit, Offset: f.Offset}, nil
 }
 
-func (s *a2aCatalogService) GetA2AConnect(_ context.Context, _, _, _, _ string) (*models.A2AConnectInfo, error) {
-	return nil, errors.New("not implemented")
+// a2aEnvRef names one agent in one environment.
+type a2aEnvRef struct {
+	ouID, project, agent, env string
+	envUUID                   uuid.UUID
+}
+
+func (s *a2aCatalogService) GetA2AConnect(ctx context.Context, ouID, projectName, agentName, envName string) (*models.A2AConnectInfo, error) {
+	card, err := s.cardService.GetA2AAgentCard(ctx, ouID, projectName, agentName, envName)
+	if err != nil {
+		return nil, err
+	}
+	env, err := s.ocClient.GetEnvironment(ctx, ouID, envName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read environment %s: %w", envName, translateEnvironmentError(err))
+	}
+	ref := a2aEnvRef{ouID: ouID, project: projectName, agent: agentName, env: envName, envUUID: card.EnvironmentUUID}
+	info := &models.A2AConnectInfo{Kind: card.Source, IsProduction: env.IsProduction}
+	if card.Source == models.A2AAgentCardSourceExternal {
+		proxied, err := s.applyProxyStatus(ctx, info, ref)
+		if err != nil {
+			return nil, err
+		}
+		if !proxied {
+			return info, nil
+		}
+	} else if err := s.applyPlatformGateway(ctx, info, ref); err != nil {
+		return nil, err
+	}
+	if info.Security, err = s.connectSecurity(ctx, ref); err != nil {
+		return nil, err
+	}
+	return info, nil
+}
+
+// applyProxyStatus fills info from the environment's proxy; false means the external agent is reached directly.
+func (s *a2aCatalogService) applyProxyStatus(ctx context.Context, info *models.A2AConnectInfo, ref a2aEnvRef) (bool, error) {
+	status, err := s.proxyService.GetA2AProxy(ctx, ref.ouID, ref.project, ref.agent, ref.env)
+	if errors.Is(err, utils.ErrEnvironmentNotProxied) {
+		info.Security.Mode = models.A2ASecurityModeUnmanaged
+		info.Publication.Status = models.A2AConnectPublicationNone
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	info.Proxied = true
+	info.GatewayURL = status.GatewayURL
+	info.Publication = models.A2AConnectPublication{Status: string(status.Status), LastError: status.LastError}
+	return true, nil
+}
+
+func (s *a2aCatalogService) applyPlatformGateway(ctx context.Context, info *models.A2AConnectInfo, ref a2aEnvRef) error {
+	gatewayURL, err := s.publisher.GatewayURL(ref.ouID, ref.envUUID, ref.agent)
+	if err != nil {
+		return err
+	}
+	pub, err := s.publisher.Publication(ctx, ref.ouID, ref.project, ref.agent, ref.envUUID)
+	status, lastError, err := a2aPublicationStatus(pub, err)
+	if err != nil {
+		return err
+	}
+	info.GatewayURL = gatewayURL
+	info.Publication = models.A2AConnectPublication{Status: string(status), LastError: lastError}
+	return nil
+}
+
+func (s *a2aCatalogService) connectSecurity(ctx context.Context, ref a2aEnvRef) (models.A2AConnectSecurity, error) {
+	cfg, err := s.agentConfigRepo.Get(ctx, ref.ouID, ref.project, ref.agent, ref.env)
+	if errors.Is(err, repositories.ErrAgentConfigNotFound) {
+		return models.A2AConnectSecurity{Mode: models.A2ASecurityModeUnknown}, nil
+	}
+	if err != nil {
+		return models.A2AConnectSecurity{}, fmt.Errorf("failed to read the agent config: %w", err)
+	}
+	switch {
+	case cfg.EnableOAuthSecurity:
+		issuers, err := s.resolveIssuers(ref.envUUID, cfg.OAuthIssuers)
+		if err != nil {
+			return models.A2AConnectSecurity{}, err
+		}
+		return models.A2AConnectSecurity{Mode: models.A2ASecurityModeOAuth, OAuth: oauthConfigFromAgentConfig(cfg), Issuers: issuers}, nil
+	case cfg.EnableApiKeySecurity:
+		return models.A2AConnectSecurity{Mode: models.A2ASecurityModeAPIKey, APIKeyHeader: a2aAPIKeyHeader}, nil
+	default:
+		return models.A2AConnectSecurity{Mode: models.A2ASecurityModeNone}, nil
+	}
+}
+
+func (s *a2aCatalogService) resolveIssuers(envUUID uuid.UUID, names []string) ([]models.A2AConnectIssuer, error) {
+	providers, err := s.gatewayRepo.ListIdentityProvidersByEnvironment(envUUID.String())
+	if err != nil {
+		return nil, fmt.Errorf("failed to list identity providers: %w", err)
+	}
+	issuerByName := make(map[string]string, len(providers))
+	for _, p := range providers {
+		issuerByName[p.Name] = p.Issuer
+	}
+	issuers := make([]models.A2AConnectIssuer, 0, len(names))
+	for _, name := range names {
+		issuers = append(issuers, models.A2AConnectIssuer{Name: name, Issuer: issuerByName[name]})
+	}
+	return issuers, nil
 }
 
 func groupByAgent(rows []models.A2ACatalogRow) [][]models.A2ACatalogRow {
