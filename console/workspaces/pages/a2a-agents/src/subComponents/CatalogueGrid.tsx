@@ -31,6 +31,7 @@ import type {
 import type { CatalogueSelection } from "../useCatalogueSelection";
 import { CatalogueFilters, type CatalogueFilterValues } from "./CatalogueFilters";
 import { CatalogueTile } from "./CatalogueTile";
+import { CompactAgentList } from "./CompactAgentList";
 
 export const PAGE_SIZE = 24;
 const SEARCH_DEBOUNCE_MS = 300;
@@ -49,6 +50,7 @@ export interface CatalogueGridProps {
   selection: CatalogueSelection | null;
   compact: boolean;
   onSelect: (agent: A2ACatalogAgent) => void;
+  onAgentsLoaded?: (agents: A2ACatalogAgent[]) => void;
 }
 
 function useDebouncedValue<T>(value: T, delayMs: number): T {
@@ -91,7 +93,13 @@ const isSelected = (agent: A2ACatalogAgent, selection: CatalogueSelection | null
   selection?.projectName === agent.projectName &&
   selection?.agentName === agent.agentName;
 
-export function CatalogueGrid({ orgName, selection, compact, onSelect }: CatalogueGridProps) {
+export function CatalogueGrid({
+  orgName,
+  selection,
+  compact,
+  onSelect,
+  onAgentsLoaded,
+}: CatalogueGridProps) {
   const [searchParams, setSearchParams] = useSearchParams();
   const urlQuery = searchParams.get(SEARCH_PARAM) ?? "";
   const filters = readFilters(searchParams);
@@ -128,6 +136,12 @@ export function CatalogueGrid({ orgName, selection, compact, onSelect }: Catalog
 
   const agents = data?.agents ?? [];
   const total = data?.total ?? 0;
+
+  useEffect(() => {
+    if (data?.agents.length) onAgentsLoaded?.(data.agents);
+    // Only fresh list data should be reported.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data]);
   const isFiltering = Object.values(filters).some(Boolean) || debouncedSearch !== "";
 
   const changeFilter = (key: keyof CatalogueFilterValues, value: string) =>
@@ -182,27 +196,28 @@ export function CatalogueGrid({ orgName, selection, compact, onSelect }: Catalog
         description: "Try a different keyword or clear the filters.",
       }}
     >
-      <Box
-        role="listbox"
-        sx={{
-          display: "grid",
-          gap: 2,
-          gridTemplateColumns: compact
-            ? "1fr"
-            : "repeat(auto-fill, minmax(300px, 1fr))",
-        }}
-      >
-        {agents.map((agent) => (
-          <CatalogueTile
-            key={`${agent.projectName}/${agent.agentName}`}
-            agent={agent}
-            query={debouncedSearch}
-            selected={isSelected(agent, selection)}
-            compact={compact}
-            onSelect={() => onSelect(agent)}
-          />
-        ))}
-      </Box>
+      {compact ? (
+        <CompactAgentList agents={agents} selection={selection} onSelect={onSelect} />
+      ) : (
+        <Box
+          role="listbox"
+          sx={{
+            display: "grid",
+            gap: 2,
+            gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))",
+          }}
+        >
+          {agents.map((agent) => (
+            <CatalogueTile
+              key={`${agent.projectName}/${agent.agentName}`}
+              agent={agent}
+              query={debouncedSearch}
+              selected={isSelected(agent, selection)}
+              onSelect={() => onSelect(agent)}
+            />
+          ))}
+        </Box>
+      )}
       <TablePagination
         component="div"
         rowsPerPageOptions={[]}

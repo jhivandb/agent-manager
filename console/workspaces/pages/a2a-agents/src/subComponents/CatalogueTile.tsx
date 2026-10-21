@@ -28,7 +28,6 @@ export interface CatalogueTileProps {
   agent: A2ACatalogAgent;
   query: string;
   selected: boolean;
-  compact: boolean;
   onSelect: () => void;
 }
 
@@ -70,7 +69,6 @@ export function CatalogueTile({
   agent,
   query,
   selected,
-  compact,
   onSelect,
 }: CatalogueTileProps) {
   const emphasised = query !== "" && agent.environments.some((e) => e.matched);
@@ -112,33 +110,29 @@ export function CatalogueTile({
             {cardLabel}
           </Typography>
         )}
-        {!compact && (
-          <>
-            <Typography
-              variant="body2"
-              color="text.secondary"
-              sx={{
-                display: "-webkit-box",
-                WebkitLineClamp: 2,
-                WebkitBoxOrient: "vertical",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-              }}
-            >
-              {agent.description}
-            </Typography>
-            <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
-              {agent.skills.slice(0, MAX_SKILL_CHIPS).map((skill) => (
-                <Chip key={skill} size="small" variant="outlined" label={skill} />
-              ))}
-            </Stack>
-            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-              {agent.environments.map((environment) => (
-                <EnvironmentChip key={environment.name} environment={environment} />
-              ))}
-            </Stack>
-          </>
-        )}
+        <Typography
+          variant="body2"
+          color="text.secondary"
+          sx={{
+            display: "-webkit-box",
+            WebkitLineClamp: 2,
+            WebkitBoxOrient: "vertical",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+          }}
+        >
+          {agent.description}
+        </Typography>
+        <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+          {agent.skills.slice(0, MAX_SKILL_CHIPS).map((skill) => (
+            <Chip key={skill} size="small" variant="outlined" label={skill} />
+          ))}
+        </Stack>
+        <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+          {agent.environments.map((environment) => (
+            <EnvironmentChip key={environment.name} environment={environment} />
+          ))}
+        </Stack>
       </Stack>
     </Card>
   );
