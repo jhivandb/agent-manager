@@ -36,16 +36,19 @@ function Probe() {
 
 const search = () => screen.getByTestId('search').textContent;
 
+const renderProbe = () =>
+  render(
+    <MemoryRouter
+      initialEntries={['/list?a=1']}
+      future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+    >
+      <Probe />
+    </MemoryRouter>,
+  );
+
 describe('useReplaceSearchParams', () => {
   it('replaces instead of pushing and composes writes in one tick', () => {
-    render(
-      <MemoryRouter
-        initialEntries={['/list?a=1']}
-        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
-      >
-        <Probe />
-      </MemoryRouter>,
-    );
+    renderProbe();
 
     act(() => {
       update((p) => p.set('b', '2'));
@@ -55,5 +58,15 @@ describe('useReplaceSearchParams', () => {
 
     act(() => navigate(-1));
     expect(search()).toBe('?a=1&b=2&c=3');
+  });
+
+  it('starts the next write from a URL changed by outside navigation', () => {
+    renderProbe();
+
+    act(() => update((p) => p.set('b', '2')));
+    act(() => navigate('/list?x=9'));
+    act(() => update((p) => p.set('y', '1')));
+
+    expect(search()).toBe('?x=9&y=1');
   });
 });

@@ -16,35 +16,44 @@
  * under the License.
  */
 
-import { useEffect, useRef } from 'react';
+import { useCallback, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 
 export type SearchParamsMutation = (params: URLSearchParams) => void;
+
+interface PendingWrite {
+  base: URLSearchParams;
+  next: URLSearchParams;
+}
 
 /**
  * [current params, updater]; the updater applies the mutation to a copy of the
  * latest params and replaces history.
  *
  * React Router hands a functional setSearchParams the params of the last
- * render, so two writes in one tick would drop the first. The latest written
- * params are kept in a ref instead, resynced from the location after render.
+ * render, so two writes in one tick would drop the first. Each write records
+ * the params it was based on; a later write from the same render builds on the
+ * pending result, while a render with new params starts from those.
+ *
+ * Use one instance per page: two instances writing in the same tick still lose a write.
  */
 export function useReplaceSearchParams(): [
   URLSearchParams,
   (mutate: SearchParamsMutation) => void,
 ] {
   const [searchParams, setSearchParams] = useSearchParams();
-  const latestParams = useRef(searchParams);
+  const pending = useRef<PendingWrite | null>(null);
 
-  useEffect(() => {
-    latestParams.current = searchParams;
-  }, [searchParams]);
-
-  const replaceSearchParams = (mutate: SearchParamsMutation) => {
-    const next = new URLSearchParams(latestParams.current);
-    mutate(next);
-    latestParams.current = next;
-    setSearchParams(next, { replace: true });
-  };
+  const replaceSearchParams = useCallback(
+    (mutate: SearchParamsMutation) => {
+      const latest =
+        pending.current?.base === searchParams ? pending.current.next : searchParams;
+      const next = new URLSearchParams(latest);
+      mutate(next);
+      pending.current = { base: searchParams, next };
+      setSearchParams(next, { replace: true });
+    },
+    [searchParams, setSearchParams],
+  );
   return [searchParams, replaceSearchParams];
 }
