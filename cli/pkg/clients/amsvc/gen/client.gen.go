@@ -609,6 +609,9 @@ type ClientInterface interface {
 
 	UpdateAgent(ctx context.Context, orgName string, projName string, agentName string, body UpdateAgentJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// GetA2ACatalogEntry request
+	GetA2ACatalogEntry(ctx context.Context, orgName string, projName string, agentName string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// UpdateAgentBuildParametersWithBody request with any body
 	UpdateAgentBuildParametersWithBody(ctx context.Context, orgName string, projName string, agentName string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -3197,6 +3200,18 @@ func (c *Client) UpdateAgentWithBody(ctx context.Context, orgName string, projNa
 
 func (c *Client) UpdateAgent(ctx context.Context, orgName string, projName string, agentName string, body UpdateAgentJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewUpdateAgentRequest(c.Server, orgName, projName, agentName, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) GetA2ACatalogEntry(ctx context.Context, orgName string, projName string, agentName string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetA2ACatalogEntryRequest(c.Server, orgName, projName, agentName)
 	if err != nil {
 		return nil, err
 	}
@@ -12049,6 +12064,54 @@ func NewUpdateAgentRequestWithBody(server string, orgName string, projName strin
 	return req, nil
 }
 
+// NewGetA2ACatalogEntryRequest generates requests for GetA2ACatalogEntry
+func NewGetA2ACatalogEntryRequest(server string, orgName string, projName string, agentName string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "orgName", orgName, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "projName", projName, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam2 string
+
+	pathParam2, err = runtime.StyleParamWithOptions("simple", false, "agentName", agentName, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/orgs/%s/projects/%s/agents/%s/a2a-catalog-entry", pathParam0, pathParam1, pathParam2)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewUpdateAgentBuildParametersRequest calls the generic UpdateAgentBuildParameters builder with application/json body
 func NewUpdateAgentBuildParametersRequest(server string, orgName string, projName string, agentName string, body UpdateAgentBuildParametersJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
@@ -18322,6 +18385,9 @@ type ClientWithResponsesInterface interface {
 
 	UpdateAgentWithResponse(ctx context.Context, orgName string, projName string, agentName string, body UpdateAgentJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateAgentResp, error)
 
+	// GetA2ACatalogEntryWithResponse request
+	GetA2ACatalogEntryWithResponse(ctx context.Context, orgName string, projName string, agentName string, reqEditors ...RequestEditorFn) (*GetA2ACatalogEntryResp, error)
+
 	// UpdateAgentBuildParametersWithBodyWithResponse request with any body
 	UpdateAgentBuildParametersWithBodyWithResponse(ctx context.Context, orgName string, projName string, agentName string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UpdateAgentBuildParametersResp, error)
 
@@ -22146,6 +22212,31 @@ func (r UpdateAgentResp) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r UpdateAgentResp) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type GetA2ACatalogEntryResp struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *A2ACatalogAgent
+	JSON401      *ErrorResponse
+	JSON404      *ErrorResponse
+	JSON500      *ErrorResponse
+}
+
+// Status returns HTTPResponse.Status
+func (r GetA2ACatalogEntryResp) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetA2ACatalogEntryResp) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -25997,6 +26088,15 @@ func (c *ClientWithResponses) UpdateAgentWithResponse(ctx context.Context, orgNa
 		return nil, err
 	}
 	return ParseUpdateAgentResp(rsp)
+}
+
+// GetA2ACatalogEntryWithResponse request returning *GetA2ACatalogEntryResp
+func (c *ClientWithResponses) GetA2ACatalogEntryWithResponse(ctx context.Context, orgName string, projName string, agentName string, reqEditors ...RequestEditorFn) (*GetA2ACatalogEntryResp, error) {
+	rsp, err := c.GetA2ACatalogEntry(ctx, orgName, projName, agentName, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetA2ACatalogEntryResp(rsp)
 }
 
 // UpdateAgentBuildParametersWithBodyWithResponse request with arbitrary body returning *UpdateAgentBuildParametersResp
@@ -33447,6 +33547,53 @@ func ParseUpdateAgentResp(rsp *http.Response) (*UpdateAgentResp, error) {
 			return nil, err
 		}
 		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ErrorResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest ErrorResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetA2ACatalogEntryResp parses an HTTP response from a GetA2ACatalogEntryWithResponse call
+func ParseGetA2ACatalogEntryResp(rsp *http.Response) (*GetA2ACatalogEntryResp, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetA2ACatalogEntryResp{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest A2ACatalogAgent
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ErrorResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
 		var dest ErrorResponse

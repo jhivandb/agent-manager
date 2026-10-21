@@ -1449,13 +1449,19 @@ type A2AConnectPublicationStatus string
 
 // A2AConnectResponse defines model for A2AConnectResponse.
 type A2AConnectResponse struct {
+	// CardUrl Where clients fetch the agent card: the gateway's copy when the gateway fronts the agent, otherwise the card's own URL. Empty when neither is known.
+	CardUrl string `json:"cardUrl"`
+
 	// GatewayUrl Where the environment's gateway serves the agent. Empty for a direct external agent or while no gateway is mapped. This is the endpoint clients must use for platform and proxied agents.
-	GatewayUrl   string                 `json:"gatewayUrl"`
-	IsProduction bool                   `json:"isProduction"`
-	Kind         A2AConnectResponseKind `json:"kind"`
-	Proxied      bool                   `json:"proxied"`
-	Publication  A2AConnectPublication  `json:"publication"`
-	Security     A2AConnectSecurity     `json:"security"`
+	GatewayUrl   string `json:"gatewayUrl"`
+	IsProduction bool   `json:"isProduction"`
+
+	// JsonRpcUrl The JSON-RPC endpoint clients should call: the gateway's when it fronts the agent, otherwise the card's declared JSON-RPC interface. Empty when there is none.
+	JsonRpcUrl  string                 `json:"jsonRpcUrl"`
+	Kind        A2AConnectResponseKind `json:"kind"`
+	Proxied     bool                   `json:"proxied"`
+	Publication A2AConnectPublication  `json:"publication"`
+	Security    A2AConnectSecurity     `json:"security"`
 }
 
 // A2AConnectResponseKind defines model for A2AConnectResponse.Kind.
