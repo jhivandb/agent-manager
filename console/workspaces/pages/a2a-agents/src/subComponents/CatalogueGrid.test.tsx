@@ -28,8 +28,6 @@ vi.mock("@agent-management-platform/api-client", () => ({
 }));
 vi.mock("@agent-management-platform/shared-component", () => ({
   ResourceListShell: (props: {
-    searchValue: string;
-    onSearchChange: (v: string) => void;
     toolbar?: React.ReactNode;
     isEmpty?: boolean;
     isSearchEmpty?: boolean;
@@ -38,11 +36,6 @@ vi.mock("@agent-management-platform/shared-component", () => ({
     children: React.ReactNode;
   }) => (
     <div>
-      <input
-        aria-label="search"
-        value={props.searchValue}
-        onChange={(e) => props.onSearchChange(e.target.value)}
-      />
       {props.toolbar}
       {props.isEmpty
         ? props.emptyState.title
@@ -132,7 +125,7 @@ describe("CatalogueGrid", () => {
 
   it("queries with the debounced search text from the first page", () => {
     renderGrid();
-    fireEvent.change(screen.getByLabelText("search"), { target: { value: "refund" } });
+    fireEvent.change(screen.getByPlaceholderText("Search A2A agents..."), { target: { value: "refund" } });
     expect(useListA2AAgents).not.toHaveBeenCalledWith(
       { orgName: "acme" },
       expect.objectContaining({ q: "refund" }),
