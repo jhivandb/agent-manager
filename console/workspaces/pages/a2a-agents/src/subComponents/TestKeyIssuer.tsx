@@ -48,9 +48,16 @@ export function TestKeyIssuer({ params, onKey }: TestKeyIssuerProps) {
 
   useEffect(() => onKey(apiKey), [apiKey, onKey]);
 
+  // A cached key may be minutes from expiry while the 9-minute refresh only
+  // starts now, so a click always issues; with nothing cached, enabling does.
+  const issue = () => {
+    setRequestedFor(identity);
+    if (data) void refetch();
+  };
+
   if (!requested) {
     return (
-      <Button variant="outlined" size="small" onClick={() => setRequestedFor(identity)}>
+      <Button variant="outlined" size="small" onClick={issue}>
         Issue test key
       </Button>
     );
@@ -58,7 +65,7 @@ export function TestKeyIssuer({ params, onKey }: TestKeyIssuerProps) {
 
   return (
     <Stack spacing={1}>
-      {isFetching && !apiKey && <CircularProgress size={16} />}
+      {isFetching && <CircularProgress size={16} />}
       {isError && !apiKey && (
         <Typography variant="body2" color="error">
           {"Couldn't issue a test key. Try again."}

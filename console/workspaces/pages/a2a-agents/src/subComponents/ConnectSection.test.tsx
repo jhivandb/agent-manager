@@ -153,8 +153,32 @@ describe("ConnectSection", () => {
     mockConnect(connect());
     renderSection();
     fireEvent.click(screen.getByRole("button", { name: "Issue test key" }));
+    refetch.mockClear();
     fireEvent.click(screen.getByRole("button", { name: "Rotate" }));
-    expect(refetch).toHaveBeenCalled();
+    expect(refetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("issues a fresh key on click instead of reusing a cached one", () => {
+    mockConnect(connect());
+    renderSection();
+    expect(refetch).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Issue test key" }));
+    expect(refetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves the first issue to the enabled query when nothing is cached", () => {
+    vi.mocked(useTestAgentAPIKey).mockImplementation(((_params, options) => ({
+      data: options.enabled ? issuedKey : undefined,
+      isFetching: false,
+      isError: false,
+      refetch,
+    })) as typeof useTestAgentAPIKey);
+    mockConnect(connect());
+    renderSection();
+    fireEvent.click(screen.getByRole("button", { name: "Issue test key" }));
+    expect(refetch).not.toHaveBeenCalled();
+    expect(enabledFlags()[enabledFlags().length - 1]).toBe(true);
+    expect(screen.getByDisplayValue("test-key-1")).toBeTruthy();
   });
 
   it("stops issuing and forgets the key when the environment changes", () => {
