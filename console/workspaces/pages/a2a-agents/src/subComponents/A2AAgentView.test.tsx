@@ -17,27 +17,49 @@
  */
 
 import { fireEvent, render, screen } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { A2ACatalogAgent } from "@agent-management-platform/types";
 
 vi.mock("@agent-management-platform/api-client", () => ({
+  useGetA2ACatalogEntry: vi.fn(),
   useGetAgentCard: vi.fn(),
   useGetA2AConnect: vi.fn(() => ({ data: undefined, isLoading: true })),
-  useTestAgentAPIKey: vi.fn(() => ({ data: undefined })),
+  useIssueTestAgentAPIKey: vi.fn(() => ({ isIdle: true })),
 }));
-vi.mock("@agent-management-platform/shared-component", () => ({
-  CodeBlock: ({ code }: { code: string }) => <pre data-testid="raw-json">{code}</pre>,
-  formatRelativeTime: () => "2 minutes ago",
-  monospaceInputSx: {},
-}));
+vi.mock("@agent-management-platform/shared-component", async () => {
+  const actual = await vi.importActual<typeof import("@agent-management-platform/shared-component")>(
+    "@agent-management-platform/shared-component",
+  );
+  return {
+    CodeBlock: ({ code }: { code: string }) => <pre data-testid="raw-json">{code}</pre>,
+    formatRelativeTime: () => "2 minutes ago",
+    monospaceInputSx: {},
+    normalizeVersion: (v: string) => `v${v}`,
+    parseA2ACard: actual.parseA2ACard,
+    diffA2ACards: actual.diffA2ACards,
+    A2ASkillItem: actual.A2ASkillItem,
+  };
+});
 vi.mock("@agent-management-platform/views", () => ({
+  PageLayout: (props: {
+    title: string;
+    titleTail?: React.ReactNode;
+    isLoading?: boolean;
+    children: React.ReactNode;
+  }) => (
+    <div>
+      <h1>{props.title}</h1>
+      {props.titleTail}
+      {props.isLoading ? "Loading…" : props.children}
+    </div>
+  ),
   TextInput: () => null,
   buildConfigureTabHref: () => "/configure",
 }));
 
-import { useGetAgentCard } from "@agent-management-platform/api-client";
-import { AgentSidePanel } from "./AgentSidePanel";
+import { useGetA2ACatalogEntry, useGetAgentCard } from "@agent-management-platform/api-client";
+import { A2AAgentView } from "./A2AAgentView";
 
 const env = (name: string) => ({
   name,
@@ -89,24 +111,63 @@ const mockCards = (byEnv: Record<string, unknown>) =>
     })) as unknown as typeof useGetAgentCard,
   );
 
-const renderPanel = (props: Partial<Parameters<typeof AgentSidePanel>[0]> = {}) => {
-  const handlers = { onEnvChange: vi.fn(), onClose: vi.fn() };
+const mockEntry = (result: object) =>
+  vi.mocked(useGetA2ACatalogEntry).mockReturnValue({ isLoading: false, ...result } as never);
+
+const renderView = (path = "/org/acme/a2a-agents/view/p1/orders") =>
   render(
-    <MemoryRouter initialEntries={["/org/acme/a2a-agents"]}>
-      <AgentSidePanel agent={agent} env="dev" {...handlers} {...props} />
+    <MemoryRouter initialEntries={[path]}>
+      <Routes>
+        <Route
+          path="/org/:orgId/a2a-agents/view/:projectName/:agentName"
+          element={<A2AAgentView />}
+        />
+      </Routes>
     </MemoryRouter>,
   );
-  return handlers;
-};
 
-describe("AgentSidePanel", () => {
+describe("A2AAgentView", () => {
   beforeEach(() => {
     vi.mocked(useGetAgentCard).mockReset();
+    mockEntry({ data: agent });
+  });
+
+  it("reads the agent named in the URL", () => {
+    mockCards({ dev: devCard });
+    renderView();
+    expect(useGetA2ACatalogEntry).toHaveBeenCalledWith({
+      orgName: "acme",
+      projName: "p1",
+      agentName: "orders",
+    });
+    expect(screen.getByRole("heading", { name: "Orders" })).toBeTruthy();
+  });
+
+  it("stays loading without kind or card claims while the agent loads", () => {
+    mockEntry({ data: undefined, isLoading: true });
+    mockCards({});
+    renderView();
+    expect(screen.getByText("Loading…")).toBeTruthy();
+    expect(screen.queryByText("platform")).toBeNull();
+  });
+
+  it("says so when the agent is not in the catalogue", () => {
+    mockEntry({ data: null });
+    mockCards({});
+    renderView();
+    expect(screen.getByText(/not found in the catalogue/i)).toBeTruthy();
+  });
+
+  it("says so when the agent fails to load", () => {
+    mockEntry({ data: undefined, error: new Error("boom") });
+    mockCards({});
+    renderView();
+    expect(screen.getByText(/Failed to load the agent/)).toBeTruthy();
   });
 
   it("lists skills and marks streaming as supported", () => {
     mockCards({ dev: devCard });
-    renderPanel();
+    renderView();
     expect(screen.getAllByText("order-status").length).toBeGreaterThan(0);
     expect(screen.getByText("✓ streaming")).toBeTruthy();
     expect(screen.getByText("✗ pushNotifications")).toBeTruthy();
@@ -117,49 +178,34 @@ describe("AgentSidePanel", () => {
       data: undefined,
       isLoading: true,
     })) as unknown as typeof useGetAgentCard);
-    renderPanel();
+    renderView();
     expect(screen.getByText("Loading card…")).toBeTruthy();
     expect(screen.queryByText(/no agent card is configured/i)).toBeNull();
   });
 
   it("says no card is configured once the card lookup returns not found", () => {
     mockCards({ dev: null });
-    renderPanel();
+    renderView();
     expect(screen.getByText(/no agent card is configured/i)).toBeTruthy();
   });
 
   it("shows how to connect next to the card", () => {
     mockCards({ dev: devCard });
-    renderPanel();
+    renderView();
     expect(screen.getByTestId("connect-section")).toBeTruthy();
   });
 
-  it("switches environment from the chips", () => {
-    mockCards({ dev: devCard });
-    const { onEnvChange } = renderPanel();
-    fireEvent.click(screen.getByRole("button", { name: "prod" }));
-    expect(onEnvChange).toHaveBeenCalledWith("prod");
-  });
-
-  it("closes on Escape and on the close button", () => {
-    mockCards({ dev: devCard });
-    const { onClose } = renderPanel();
-    fireEvent.keyDown(document, { key: "Escape" });
-    fireEvent.click(screen.getByRole("button", { name: "Close details" }));
-    expect(onClose).toHaveBeenCalledTimes(2);
-  });
-
-  it("keeps the panel open when Escape dismisses the compare dropdown", () => {
+  it("opens on the environment in the URL and switches from the chips", () => {
     mockCards({ dev: devCard, prod: prodCard });
-    const { onClose } = renderPanel();
-    fireEvent.mouseDown(screen.getByRole("combobox", { name: "Compare with" }));
-    fireEvent.keyDown(screen.getByRole("listbox"), { key: "Escape" });
-    expect(onClose).not.toHaveBeenCalled();
+    renderView("/org/acme/a2a-agents/view/p1/orders?env=prod");
+    expect(screen.getByText("issue-refund")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "dev" }));
+    expect(screen.queryByText("issue-refund")).toBeNull();
   });
 
   it("says the card is pending while it has not been fetched", () => {
     mockCards({ dev: { ...devCard, status: "pending", card: undefined, fetchedAt: undefined } });
-    renderPanel();
+    renderView();
     expect(screen.getByText(/card pending/i)).toBeTruthy();
   });
 
@@ -167,21 +213,29 @@ describe("AgentSidePanel", () => {
     mockCards({
       dev: { ...devCard, status: "failed", lastError: "connection refused", card: undefined },
     });
-    renderPanel();
+    renderView();
     expect(screen.getByText(/connection refused/)).toBeTruthy();
   });
 
   it("reveals the raw card JSON on demand", () => {
     mockCards({ dev: devCard });
-    renderPanel();
+    renderView();
     expect(screen.queryByTestId("raw-json")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "View raw JSON" }));
     expect(screen.getByTestId("raw-json").textContent).toContain("order-status");
   });
 
+  it("names the other fields that differ when comparing environments", () => {
+    mockCards({ dev: devCard, prod: { ...devCard, card: { ...devCard.card, version: "2" } } });
+    renderView();
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: "Compare with" }));
+    fireEvent.click(screen.getByRole("option", { name: "prod" }));
+    expect(screen.getByText("Also differs in: version")).toBeTruthy();
+  });
+
   it("lists added skills when comparing with another environment", () => {
     mockCards({ dev: devCard, prod: prodCard });
-    renderPanel();
+    renderView();
     fireEvent.mouseDown(screen.getByRole("combobox", { name: "Compare with" }));
     fireEvent.click(screen.getByRole("option", { name: "prod" }));
     expect(screen.getByText("Added: issue-refund")).toBeTruthy();

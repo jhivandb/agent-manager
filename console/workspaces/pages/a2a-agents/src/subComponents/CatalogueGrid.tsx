@@ -17,40 +17,38 @@
  */
 
 import { useEffect, useState } from "react";
-import { useSearchParams } from "react-router-dom";
-import { Box, SearchBar, Stack, TablePagination } from "@wso2/oxygen-ui";
+import { generatePath } from "react-router-dom";
+import { Box, Skeleton, TablePagination } from "@wso2/oxygen-ui";
 import { Bot, Search } from "@wso2/oxygen-ui-icons-react";
 import { useListA2AAgents } from "@agent-management-platform/api-client";
 import { ResourceListShell } from "@agent-management-platform/shared-component";
-import type {
-  A2ACatalogAgent,
-  A2ACatalogEnvironment,
-  A2ACatalogKindFilter,
-  A2ACatalogQuery,
-} from "@agent-management-platform/types";
-import type { CatalogueSelection } from "../useCatalogueSelection";
-import { CatalogueFilters, type CatalogueFilterValues } from "./CatalogueFilters";
+import { absoluteRouteMap, type A2ACatalogQuery } from "@agent-management-platform/types";
+import {
+  CatalogueFilterBar,
+  EMPTY_FILTERS,
+  type CatalogueFilterValues,
+} from "./CatalogueFilterBar";
 import { CatalogueTile } from "./CatalogueTile";
-import { CompactAgentList } from "./CompactAgentList";
+import { useReplaceSearchParams } from "../utils/useReplaceSearchParams";
 
-export const PAGE_SIZE = 24;
+const PAGE_SIZE = 24;
 const SEARCH_DEBOUNCE_MS = 300;
 
 const SEARCH_PARAM = "q";
 const PAGE_PARAM = "page";
-const FILTER_PARAMS: Record<keyof CatalogueFilterValues, string> = {
-  kind: "kind",
-  environment: "environment",
-  project: "fproject",
-  status: "status",
+const FILTER_KEYS = Object.keys(EMPTY_FILTERS) as (keyof CatalogueFilterValues)[];
+
+const GRID_SX = {
+  display: "grid",
+  gridTemplateColumns: {
+    xs: "repeat(auto-fill, minmax(260px, 1fr))",
+    md: "repeat(auto-fill, minmax(300px, 1fr))",
+  },
+  gap: 2,
 };
 
 export interface CatalogueGridProps {
   orgName: string;
-  selection: CatalogueSelection | null;
-  compact: boolean;
-  onSelect: (agent: A2ACatalogAgent) => void;
-  onAgentsLoaded?: (agents: A2ACatalogAgent[]) => void;
 }
 
 function useDebouncedValue<T>(value: T, delayMs: number): T {
@@ -62,16 +60,11 @@ function useDebouncedValue<T>(value: T, delayMs: number): T {
   return debounced;
 }
 
-function readFilters(params: URLSearchParams): CatalogueFilterValues {
-  return {
-    kind: (params.get(FILTER_PARAMS.kind) ?? "") as A2ACatalogKindFilter | "",
-    environment: params.get(FILTER_PARAMS.environment) ?? "",
-    project: params.get(FILTER_PARAMS.project) ?? "",
-    status: (params.get(FILTER_PARAMS.status) ?? "") as
-      | A2ACatalogEnvironment["status"]
-      | "",
-  };
-}
+// The URL only ever holds values the filter bar wrote.
+const readFilters = (params: URLSearchParams) =>
+  Object.fromEntries(
+    FILTER_KEYS.map((key) => [key, params.get(key) ?? ""]),
+  ) as unknown as CatalogueFilterValues;
 
 function buildQuery(
   q: string,
@@ -79,44 +72,29 @@ function buildQuery(
   page: number,
 ): A2ACatalogQuery {
   return {
+    ...Object.fromEntries(FILTER_KEYS.map((key) => [key, filters[key] || undefined])),
     q: q || undefined,
-    kind: filters.kind || undefined,
-    environment: filters.environment || undefined,
-    project: filters.project || undefined,
-    status: filters.status || undefined,
     limit: PAGE_SIZE,
     offset: page * PAGE_SIZE,
   };
 }
 
-const isSelected = (agent: A2ACatalogAgent, selection: CatalogueSelection | null) =>
-  selection?.projectName === agent.projectName &&
-  selection?.agentName === agent.agentName;
+const loadingTiles = (
+  <Box sx={GRID_SX}>
+    {Array.from({ length: 4 }, (_, i) => (
+      <Skeleton key={i} variant="rounded" height={200} />
+    ))}
+  </Box>
+);
 
-export function CatalogueGrid({
-  orgName,
-  selection,
-  compact,
-  onSelect,
-  onAgentsLoaded,
-}: CatalogueGridProps) {
-  const [searchParams, setSearchParams] = useSearchParams();
+export function CatalogueGrid({ orgName }: CatalogueGridProps) {
+  const [searchParams, updateParams] = useReplaceSearchParams();
   const urlQuery = searchParams.get(SEARCH_PARAM) ?? "";
   const filters = readFilters(searchParams);
   const page = Number(searchParams.get(PAGE_PARAM) ?? 0) || 0;
 
   const [searchText, setSearchText] = useState(urlQuery);
   const debouncedSearch = useDebouncedValue(searchText.trim(), SEARCH_DEBOUNCE_MS);
-
-  const updateParams = (change: (params: URLSearchParams) => void) =>
-    setSearchParams(
-      (prev) => {
-        const next = new URLSearchParams(prev);
-        change(next);
-        return next;
-      },
-      { replace: true },
-    );
 
   useEffect(() => {
     if (debouncedSearch === urlQuery) return;
@@ -136,18 +114,14 @@ export function CatalogueGrid({
 
   const agents = data?.agents ?? [];
   const total = data?.total ?? 0;
-
-  useEffect(() => {
-    if (data?.agents.length) onAgentsLoaded?.(data.agents);
-    // Only fresh list data should be reported.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data]);
   const isFiltering = Object.values(filters).some(Boolean) || debouncedSearch !== "";
 
-  const changeFilter = (key: keyof CatalogueFilterValues, value: string) =>
+  const changeFilters = (next: CatalogueFilterValues) =>
     updateParams((params) => {
-      if (value) params.set(FILTER_PARAMS[key], value);
-      else params.delete(FILTER_PARAMS[key]);
+      for (const key of FILTER_KEYS) {
+        if (next[key]) params.set(key, next[key]);
+        else params.delete(key);
+      }
       params.delete(PAGE_PARAM);
     });
 
@@ -157,32 +131,23 @@ export function CatalogueGrid({
       else params.delete(PAGE_PARAM);
     });
 
-  const toolbar = (
-    <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap alignItems="center">
-      <Box flexGrow={1} minWidth={240}>
-        <SearchBar
-          placeholder="Search A2A agents..."
-          size="small"
-          fullWidth
-          value={searchText}
-          onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
-            setSearchText(event.target.value)
-          }
-        />
-      </Box>
-      <CatalogueFilters orgName={orgName} values={filters} onChange={changeFilter} />
-    </Stack>
-  );
-
   return (
     <ResourceListShell
       resourceName="a2a-agents"
       searchValue={searchText}
       onSearchChange={setSearchText}
-      searchPlaceholder="Search A2A agents..."
-      toolbar={toolbar}
+      toolbar={
+        <CatalogueFilterBar
+          orgName={orgName}
+          values={filters}
+          onChange={changeFilters}
+          searchText={searchText}
+          onSearchChange={setSearchText}
+        />
+      }
       error={error}
       isLoading={isLoading}
+      loadingPlaceholder={loadingTiles}
       isEmpty={total === 0 && !isFiltering}
       isSearchEmpty={total === 0 && isFiltering}
       emptyState={{
@@ -196,36 +161,30 @@ export function CatalogueGrid({
         description: "Try a different keyword or clear the filters.",
       }}
     >
-      {compact ? (
-        <CompactAgentList agents={agents} selection={selection} onSelect={onSelect} />
-      ) : (
-        <Box
-          role="listbox"
-          sx={{
-            display: "grid",
-            gap: 2,
-            gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))",
-          }}
-        >
-          {agents.map((agent) => (
-            <CatalogueTile
-              key={`${agent.projectName}/${agent.agentName}`}
-              agent={agent}
-              query={debouncedSearch}
-              selected={isSelected(agent, selection)}
-              onSelect={() => onSelect(agent)}
-            />
-          ))}
-        </Box>
+      <Box sx={GRID_SX}>
+        {agents.map((agent) => (
+          <CatalogueTile
+            key={`${agent.projectName}/${agent.agentName}`}
+            agent={agent}
+            to={generatePath(absoluteRouteMap.children.org.children.a2aAgents.children.view.path, {
+              orgId: orgName,
+              projectName: agent.projectName,
+              agentName: agent.agentName,
+            })}
+            emphasised={debouncedSearch !== "" && agent.environments.some((e) => e.matched)}
+          />
+        ))}
+      </Box>
+      {total > PAGE_SIZE && (
+        <TablePagination
+          component="div"
+          rowsPerPageOptions={[]}
+          count={total}
+          rowsPerPage={PAGE_SIZE}
+          page={page}
+          onPageChange={(_, nextPage) => changePage(nextPage)}
+        />
       )}
-      <TablePagination
-        component="div"
-        rowsPerPageOptions={[]}
-        count={total}
-        rowsPerPage={PAGE_SIZE}
-        page={page}
-        onPageChange={(_, nextPage) => changePage(nextPage)}
-      />
     </ResourceListShell>
   );
 }

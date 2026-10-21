@@ -17,13 +17,13 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { diffSkills, parseA2ACard } from "./card";
+import { diffA2ACards, parseA2ACard } from "./a2aCard";
 
 const fullCard = {
   name: "Orders",
   description: "Handles orders",
   version: "1.2.0",
-  provider: { organization: "Acme" },
+  provider: { organization: "Acme", url: "https://acme.example" },
   supportedInterfaces: [
     { url: "https://orders.example/a2a", protocolBinding: "JSONRPC" },
   ],
@@ -42,7 +42,6 @@ const fullCard = {
   ],
 };
 
-const cardWithSkills = (skills: object[]) => parseA2ACard({ skills });
 
 describe("parseA2ACard", () => {
   it("reads every field of an A2A v1 card", () => {
@@ -51,6 +50,7 @@ describe("parseA2ACard", () => {
       description: "Handles orders",
       version: "1.2.0",
       providerOrganization: "Acme",
+      providerUrl: "https://acme.example",
       interfaces: [{ url: "https://orders.example/a2a", protocolBinding: "JSONRPC" }],
       skills: [
         {
@@ -81,22 +81,60 @@ describe("parseA2ACard", () => {
   it("returns an empty card when there is no card", () => {
     expect(parseA2ACard(undefined).skills).toEqual([]);
   });
+
+  it("drops a provider URL that is not safe to link", () => {
+    const parsed = parseA2ACard({ provider: { organization: "Acme", url: "javascript:alert(1)" } });
+    expect(parsed.providerOrganization).toBe("Acme");
+    expect(parsed.providerUrl).toBe("");
+  });
+
+  it("drops interfaces without a URL", () => {
+    const parsed = parseA2ACard({
+      supportedInterfaces: [{ protocolBinding: "GRPC" }, { url: "https://a.example", protocolBinding: 7 }],
+    });
+    expect(parsed.interfaces).toEqual([{ url: "https://a.example", protocolBinding: "" }]);
+  });
 });
 
-describe("diffSkills", () => {
+describe("diffA2ACards", () => {
   const status = { name: "order-status", description: "d", tags: [], examples: [] };
   const refund = { name: "issue-refund", description: "r", tags: [], examples: [] };
 
   it("reports skills only present in the second card as added", () => {
-    const diff = diffSkills(cardWithSkills([status]), cardWithSkills([status, refund]));
-    expect(diff).toEqual({ added: ["issue-refund"], removed: [], changed: [] });
+    const diff = diffA2ACards({ skills: [status] }, { skills: [status, refund] });
+    expect(diff.skills).toEqual({ added: ["issue-refund"], removed: [], changed: [] });
+    expect(diff.fields).toEqual([]);
   });
 
   it("reports removed and changed skills", () => {
-    const diff = diffSkills(
-      cardWithSkills([status, refund]),
-      cardWithSkills([{ ...status, description: "new" }]),
+    const diff = diffA2ACards(
+      { skills: [status, refund] },
+      { skills: [{ ...status, description: "new" }] },
     );
-    expect(diff).toEqual({ added: [], removed: ["issue-refund"], changed: ["order-status"] });
+    expect(diff.skills).toEqual({ added: [], removed: ["issue-refund"], changed: ["order-status"] });
+  });
+
+  it("names the other fields that differ, ignoring key order", () => {
+    const diff = diffA2ACards(
+      { version: "1", capabilities: { streaming: true, pushNotifications: false } },
+      { version: "2", capabilities: { pushNotifications: false, streaming: true } },
+    );
+    expect(diff.fields).toEqual(["version"]);
+  });
+
+  it("ignores interface URLs, which differ per gateway, but not their bindings", () => {
+    const iface = (url: string, protocolBinding = "JSONRPC") => ({ url, protocolBinding });
+    expect(
+      diffA2ACards(
+        { supportedInterfaces: [iface("https://dev.gw/a")] },
+        { supportedInterfaces: [iface("https://prod.gw/a")] },
+      ).fields,
+    ).toEqual([]);
+    expect(
+      diffA2ACards(
+        { supportedInterfaces: [iface("https://dev.gw/a")] },
+        { supportedInterfaces: [iface("https://dev.gw/a", "HTTP+JSON")] },
+      ).fields,
+    ).toEqual(["supportedInterfaces"]);
   });
 });

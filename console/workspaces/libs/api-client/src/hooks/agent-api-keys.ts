@@ -99,6 +99,18 @@ export function useRevokeAgentAPIKey() {
   });
 }
 
+// useIssueTestAgentAPIKey issues (or rotates) the caller's test key on each
+// call, for pages that issue only on request rather than keeping one fresh.
+export function useIssueTestAgentAPIKey() {
+  const { getToken } = useAuthHooks();
+  return useApiMutation<IssueTestAgentAPIKeyResponse, unknown, IssueTestAgentAPIKeyPathParams>({
+    action: { verb: "create", target: "test API key" },
+    // The key itself shows where it was asked for.
+    showSuccess: false,
+    mutationFn: (params) => issueTestAgentAPIKey(params, getToken),
+  });
+}
+
 // useTestAgentAPIKey issues (or rotates) a 10-minute test API key for the
 // agent's Try-It flow. Keys are per-user on the backend (name derived from
 // the JWT subject), so a refetch only rotates the calling user's own row and

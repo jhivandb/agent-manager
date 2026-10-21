@@ -67,8 +67,12 @@ export interface A2AConnectResponse {
   proxied: boolean;
   isProduction: boolean;
   gatewayUrl: string;
+  /** The gateway's when it fronts the agent, otherwise the card's own; empty when unknown. */
+  cardUrl: string;
+  jsonRpcUrl: string;
   security: {
     mode: A2ASecurityMode;
+    /** Set when mode is apiKey. */
     apiKeyHeader?: string;
     oauth?: A2AConnectOAuth;
   };

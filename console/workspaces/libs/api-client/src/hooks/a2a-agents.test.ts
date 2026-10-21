@@ -87,15 +87,15 @@ describe("useGetA2AConnect", () => {
   const params = { orgName: "acme", projName: "p 1", agentName: "a/b", envId: "dev" };
 
   it("requests the connect endpoint with encoded segments", async () => {
-    await mount(() => useGetA2AConnect(params, { enabled: true }));
+    await mount(() => useGetA2AConnect(params));
     expect(httpGET).toHaveBeenCalledWith(
       `${SERVICE_BASE}/orgs/acme/projects/p%201/agents/a%2Fb/environments/dev/a2a-connect`,
       expect.anything(),
     );
   });
 
-  it("does not request while disabled", async () => {
-    await mount(() => useGetA2AConnect(params, { enabled: false }));
+  it("does not request without an environment", async () => {
+    await mount(() => useGetA2AConnect({ ...params, envId: "" }));
     expect(httpGET).not.toHaveBeenCalled();
   });
 });

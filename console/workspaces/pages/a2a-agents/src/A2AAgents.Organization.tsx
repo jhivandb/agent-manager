@@ -16,86 +16,36 @@
  * under the License.
  */
 
-import { useCallback, useState } from "react";
-import { useParams } from "react-router-dom";
-import { Box } from "@wso2/oxygen-ui";
+import { generatePath, Navigate, Route, Routes, useParams } from "react-router-dom";
 import { PageLayout } from "@agent-management-platform/views";
-import { useListA2AAgents } from "@agent-management-platform/api-client";
-import type { A2ACatalogAgent } from "@agent-management-platform/types";
-import { AgentSidePanel } from "./subComponents/AgentSidePanel";
+import { absoluteRouteMap } from "@agent-management-platform/types";
+import { A2AAgentView } from "./subComponents/A2AAgentView";
 import { CatalogueGrid } from "./subComponents/CatalogueGrid";
-import { SelectionStatusPanel } from "./subComponents/SelectionStatusPanel";
-import { useCatalogueSelection } from "./useCatalogueSelection";
-
-const agentKey = (projectName: string, agentName: string) => `${projectName}/${agentName}`;
 
 export function A2AAgentsOrganization() {
-  const { orgId } = useParams<{ orgId: string }>();
-  const { selection, select, selectEnv, clear } = useCatalogueSelection();
-  const [seenAgents, setSeenAgents] = useState<Record<string, A2ACatalogAgent>>({});
-
-  const rememberAgents = useCallback(
-    (agents: A2ACatalogAgent[]) =>
-      setSeenAgents((seen) => ({
-        ...seen,
-        ...Object.fromEntries(agents.map((a) => [agentKey(a.projectName, a.agentName), a])),
-      })),
-    [],
-  );
-
-  const seenAgent = selection
-    ? seenAgents[agentKey(selection.projectName, selection.agentName)]
-    : undefined;
-  const lookup = useListA2AAgents(
-    { orgName: orgId ?? "" },
-    { project: selection?.projectName, limit: 100, offset: 0 },
-    { enabled: selection !== null && !seenAgent },
-  );
-  const selectedAgent =
-    seenAgent ?? lookup.data?.agents.find(
-      (a) => a.projectName === selection?.projectName && a.agentName === selection?.agentName,
-    );
-
-  const grid = (
-    <CatalogueGrid
-      orgName={orgId ?? ""}
-      selection={selection}
-      compact={selection !== null}
-      onSelect={select}
-      onAgentsLoaded={rememberAgents}
-    />
-  );
+  const { orgId = "" } = useParams<{ orgId: string }>();
 
   return (
-    <PageLayout title="A2A Agents" disableIcon>
-      {selection ? (
-        <Box
-          sx={{
-            display: "grid",
-            gap: 2,
-            gridTemplateColumns: { xs: "1fr", md: "300px 1fr" },
-            alignItems: "start",
-          }}
-        >
-          <Box sx={{ minWidth: 0 }}>{grid}</Box>
-          {selectedAgent ? (
-            <AgentSidePanel
-              agent={selectedAgent}
-              env={selection.env ?? selectedAgent.leadEnvironment}
-              onEnvChange={selectEnv}
-              onClose={clear}
-            />
-          ) : (
-            <SelectionStatusPanel
-              state={lookup.isLoading || lookup.isFetching || lookup.isPlaceholderData ? "loading" : "not-found"}
-              onClose={clear}
-            />
-          )}
-        </Box>
-      ) : (
-        grid
-      )}
-    </PageLayout>
+    <Routes>
+      <Route
+        index
+        element={
+          <PageLayout title="A2A Agents" disableIcon>
+            <CatalogueGrid orgName={orgId} />
+          </PageLayout>
+        }
+      />
+      <Route path="view/:projectName/:agentName" element={<A2AAgentView />} />
+      <Route
+        path="*"
+        element={
+          <Navigate
+            to={generatePath(absoluteRouteMap.children.org.children.a2aAgents.path, { orgId })}
+            replace
+          />
+        }
+      />
+    </Routes>
   );
 }
 

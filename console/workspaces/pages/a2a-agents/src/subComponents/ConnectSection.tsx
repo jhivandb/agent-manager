@@ -16,8 +16,8 @@
  * under the License.
  */
 
-import { useCallback, useEffect, useState } from "react";
-import { Link, generatePath, useParams } from "react-router-dom";
+import { useState } from "react";
+import { Link, generatePath } from "react-router-dom";
 import {
   Alert,
   Box,
@@ -28,24 +28,26 @@ import {
   ToggleButtonGroup,
   Typography,
 } from "@wso2/oxygen-ui";
-import { useGetA2AConnect, useGetAgentCard } from "@agent-management-platform/api-client";
-import { CodeBlock, monospaceInputSx } from "@agent-management-platform/shared-component";
+import { useGetA2AConnect } from "@agent-management-platform/api-client";
+import {
+  CodeBlock,
+  monospaceInputSx,
+  parseA2ACard,
+} from "@agent-management-platform/shared-component";
 import {
   absoluteRouteMap,
   type A2ACatalogAgent,
   type A2AConnectResponse,
   type AgentCardPathParams,
+  type AgentCardResponse,
 } from "@agent-management-platform/types";
 import { buildConfigureTabHref, TextInput } from "@agent-management-platform/views";
-import { parseA2ACard } from "../utils/card";
 import { resolveConnectEndpoints, type ConnectEndpoints } from "../utils/endpoints";
-import { paramsIdentity } from "../utils/paramsIdentity";
 import { buildA2ASnippet, type SnippetAuth, type SnippetLanguage } from "../utils/snippets";
 import { TestKeyIssuer } from "./TestKeyIssuer";
 
 type Security = A2AConnectResponse["security"];
 
-const API_KEY_HEADER = "X-API-Key";
 const API_KEY_PLACEHOLDER = "<YOUR_API_KEY>";
 const ACCESS_TOKEN_PLACEHOLDER = "<ACCESS_TOKEN>";
 
@@ -72,7 +74,7 @@ function manageSecurityHref(orgId: string, agent: A2ACatalogAgent, env: string):
 function snippetAuth(security: Security, testKey: string | null): SnippetAuth | null {
   if (security.mode === "apiKey") {
     return {
-      header: security.apiKeyHeader || API_KEY_HEADER,
+      header: security.apiKeyHeader ?? "",
       value: testKey ?? API_KEY_PLACEHOLDER,
     };
   }
@@ -167,7 +169,7 @@ function SecuritySummary({ connect, cardSecuritySchemes, params, onKey }: Securi
       return (
         <Stack spacing={1}>
           <Typography variant="body2">
-            API key required in header <Code>{security.apiKeyHeader || API_KEY_HEADER}</Code>
+            API key required in header <Code>{security.apiKeyHeader ?? ""}</Code>
           </Typography>
           {connect.isProduction ? (
             <Typography variant="body2" color="text.secondary">
@@ -256,26 +258,22 @@ const SectionTitle = ({ children }: { children: string }) => (
 );
 
 export interface ConnectSectionProps {
+  orgName: string;
   agent: A2ACatalogAgent;
   env: string;
+  card: AgentCardResponse | null | undefined;
 }
 
-export function ConnectSection({ agent, env }: ConnectSectionProps) {
-  const { orgId } = useParams<{ orgId: string }>();
+/** How to call the agent in one environment; mount one per environment. */
+export function ConnectSection({ orgName, agent, env, card }: ConnectSectionProps) {
   const params: AgentCardPathParams = {
-    orgName: orgId,
+    orgName,
     projName: agent.projectName,
     agentName: agent.agentName,
     envId: env,
   };
-  const identity = paramsIdentity(params);
   const { data: connect, isLoading, isError } = useGetA2AConnect(params);
-  const { data: card } = useGetAgentCard(params);
-
-  const [issued, setIssued] = useState<{ identity: string; key: string | null } | null>(null);
-  const testKey = issued?.identity === identity ? issued.key : null;
-  const onKey = useCallback((key: string | null) => setIssued({ identity, key }), [identity]);
-  useEffect(() => setIssued((prior) => (prior?.identity === identity ? prior : null)), [identity]);
+  const [testKey, setTestKey] = useState<string | null>(null);
 
   const parsedCard = parseA2ACard(card?.card);
 
@@ -289,11 +287,7 @@ export function ConnectSection({ agent, env }: ConnectSectionProps) {
       </Typography>
     );
   } else {
-    const endpoints = resolveConnectEndpoints(
-      connect.gatewayUrl,
-      card?.sourceUrl ?? "",
-      parsedCard.interfaces,
-    );
+    const endpoints = resolveConnectEndpoints(connect, parsedCard.interfaces);
     body = (
       <Stack spacing={2}>
         <PublicationWarning publication={connect.publication} />
@@ -307,7 +301,7 @@ export function ConnectSection({ agent, env }: ConnectSectionProps) {
             connect={connect}
             cardSecuritySchemes={parsedCard.securitySchemes}
             params={params}
-            onKey={onKey}
+            onKey={setTestKey}
           />
         </Stack>
         {endpoints.snippetEndpoint && (
@@ -329,11 +323,9 @@ export function ConnectSection({ agent, env }: ConnectSectionProps) {
     <Stack spacing={1.5} data-testid="connect-section" sx={{ minWidth: 0 }}>
       <Stack direction="row" alignItems="center" justifyContent="space-between">
         <Typography variant="subtitle1">Connect</Typography>
-        {orgId && (
-          <Button size="small" component={Link} to={manageSecurityHref(orgId, agent, env)}>
-            Manage security
-          </Button>
-        )}
+        <Button size="small" component={Link} to={manageSecurityHref(orgName, agent, env)}>
+          Manage security
+        </Button>
       </Stack>
       {body}
     </Stack>

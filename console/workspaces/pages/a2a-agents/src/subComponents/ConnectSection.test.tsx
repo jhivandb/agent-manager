@@ -23,8 +23,7 @@ import type { A2ACatalogAgent, A2AConnectResponse } from "@agent-management-plat
 
 vi.mock("@agent-management-platform/api-client", () => ({
   useGetA2AConnect: vi.fn(),
-  useGetAgentCard: vi.fn(),
-  useTestAgentAPIKey: vi.fn(),
+  useIssueTestAgentAPIKey: vi.fn(),
 }));
 vi.mock("@agent-management-platform/views", () => ({
   TextInput: ({ label, value }: { label?: string; value?: string }) => (
@@ -32,16 +31,21 @@ vi.mock("@agent-management-platform/views", () => ({
   ),
   buildConfigureTabHref: () => "/configure",
 }));
-vi.mock("@agent-management-platform/shared-component", () => ({
+vi.mock("@agent-management-platform/shared-component", async () => ({
   CodeBlock: ({ code }: { code: string }) => <pre data-testid="snippet">{code}</pre>,
   formatRelativeTime: () => "in 10 minutes",
   monospaceInputSx: {},
+  parseA2ACard: (
+    await vi.importActual<typeof import("@agent-management-platform/shared-component")>(
+      "@agent-management-platform/shared-component",
+    )
+  ).parseA2ACard,
 }));
 
+import { useState } from "react";
 import {
   useGetA2AConnect,
-  useGetAgentCard,
-  useTestAgentAPIKey,
+  useIssueTestAgentAPIKey,
 } from "@agent-management-platform/api-client";
 import { ConnectSection } from "./ConnectSection";
 
@@ -74,6 +78,8 @@ const connect = (overrides: Partial<A2AConnectResponse> = {}): A2AConnectRespons
   proxied: false,
   isProduction: false,
   gatewayUrl: "https://gw.example/orders",
+  cardUrl: "https://gw.example/orders/.well-known/agent-card.json",
+  jsonRpcUrl: "https://gw.example/orders/rpc",
   security: { mode: "apiKey", apiKeyHeader: "X-API-Key" },
   publication: { status: "published", lastError: "" },
   ...overrides,
@@ -86,14 +92,26 @@ const issuedKey = {
   gatewayConnected: false,
 };
 
-const refetch = vi.fn();
+const issue = vi.fn();
+
+/** Behaves like a react-query mutation: idle until called, then holds the issued key. */
+function useFakeIssueMutation() {
+  const [data, setData] = useState<typeof issuedKey | undefined>();
+  return {
+    mutate: (params: unknown) => {
+      issue(params);
+      setData(issuedKey);
+    },
+    data,
+    isPending: false,
+    isError: false,
+    isIdle: data === undefined,
+  };
+}
 
 function mockConnect(data: A2AConnectResponse) {
   vi.mocked(useGetA2AConnect).mockReturnValue({ data, isLoading: false, isError: false } as never);
 }
-
-const enabledFlags = () =>
-  vi.mocked(useTestAgentAPIKey).mock.calls.map(([, options]) => options.enabled);
 
 function renderSection(env = "dev") {
   const ui = (environment: string) => (
@@ -101,7 +119,16 @@ function renderSection(env = "dev") {
       <Routes>
         <Route
           path="/org/:orgId/a2a-agents"
-          element={<ConnectSection agent={agent} env={environment} />}
+          element={
+            // Keyed as A2AAgentView mounts it: one section per environment.
+            <ConnectSection
+              key={environment}
+              orgName="acme"
+              agent={agent}
+              env={environment}
+              card={agentCard as never}
+            />
+          }
         />
       </Routes>
     </MemoryRouter>
@@ -115,17 +142,8 @@ const snippet = () => screen.getByTestId("snippet").textContent ?? "";
 describe("ConnectSection", () => {
   beforeEach(() => {
     vi.mocked(useGetA2AConnect).mockReset();
-    vi.mocked(useGetAgentCard).mockReset();
-    vi.mocked(useTestAgentAPIKey).mockReset();
-    refetch.mockReset();
-    vi.mocked(useGetAgentCard).mockReturnValue({ data: agentCard } as never);
-    // Like react-query, a cached key is returned even while the query is disabled.
-    vi.mocked(useTestAgentAPIKey).mockReturnValue({
-      data: issuedKey,
-      isFetching: false,
-      isError: false,
-      refetch,
-    } as never);
+    issue.mockReset();
+    vi.mocked(useIssueTestAgentAPIKey).mockImplementation(useFakeIssueMutation as never);
   });
 
   it("offers a test key for a non-production API-key environment without issuing one", () => {
@@ -133,7 +151,7 @@ describe("ConnectSection", () => {
     renderSection();
     expect(screen.getByText(/API key required in header/)).toBeTruthy();
     expect(screen.getByRole("button", { name: "Issue test key" })).toBeTruthy();
-    expect(enabledFlags()).not.toContain(true);
+    expect(issue).not.toHaveBeenCalled();
     expect(screen.queryByDisplayValue("test-key-1")).toBeNull();
     expect(snippet()).toContain("<YOUR_API_KEY>");
   });
@@ -142,52 +160,32 @@ describe("ConnectSection", () => {
     mockConnect(connect());
     renderSection();
     fireEvent.click(screen.getByRole("button", { name: "Issue test key" }));
-    expect(enabledFlags().at(-1)).toBe(true);
+    expect(issue).toHaveBeenCalledWith({
+      orgName: "acme",
+      projName: "p1",
+      agentName: "orders",
+      envId: "dev",
+    });
     expect(screen.getByDisplayValue("test-key-1")).toBeTruthy();
     expect(snippet()).toContain("test-key-1");
     expect(screen.getByText(/gateway is not connected to the control plane/)).toBeTruthy();
     expect(screen.getByText(/in 10 minutes/)).toBeTruthy();
   });
 
-  it("rotates the key through the query's refetch", () => {
+  it("issues a new key on Rotate", () => {
     mockConnect(connect());
     renderSection();
     fireEvent.click(screen.getByRole("button", { name: "Issue test key" }));
-    refetch.mockClear();
     fireEvent.click(screen.getByRole("button", { name: "Rotate" }));
-    expect(refetch).toHaveBeenCalledTimes(1);
-  });
-
-  it("issues a fresh key on click instead of reusing a cached one", () => {
-    mockConnect(connect());
-    renderSection();
-    expect(refetch).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Issue test key" }));
-    expect(refetch).toHaveBeenCalledTimes(1);
-  });
-
-  it("leaves the first issue to the enabled query when nothing is cached", () => {
-    vi.mocked(useTestAgentAPIKey).mockImplementation(((_params, options) => ({
-      data: options.enabled ? issuedKey : undefined,
-      isFetching: false,
-      isError: false,
-      refetch,
-    })) as typeof useTestAgentAPIKey);
-    mockConnect(connect());
-    renderSection();
-    fireEvent.click(screen.getByRole("button", { name: "Issue test key" }));
-    expect(refetch).not.toHaveBeenCalled();
-    expect(enabledFlags()[enabledFlags().length - 1]).toBe(true);
-    expect(screen.getByDisplayValue("test-key-1")).toBeTruthy();
+    expect(issue).toHaveBeenCalledTimes(2);
   });
 
   it("stops issuing and forgets the key when the environment changes", () => {
     mockConnect(connect());
     const { rerenderWithEnv } = renderSection();
     fireEvent.click(screen.getByRole("button", { name: "Issue test key" }));
-    const callsBeforeSwitch = enabledFlags().length;
     rerenderWithEnv("staging");
-    expect(enabledFlags().slice(callsBeforeSwitch)).not.toContain(true);
+    expect(issue).toHaveBeenCalledTimes(1);
     expect(screen.queryByDisplayValue("test-key-1")).toBeNull();
     expect(snippet()).not.toContain("test-key-1");
   });
@@ -197,9 +195,8 @@ describe("ConnectSection", () => {
     const { rerenderWithEnv } = renderSection();
     fireEvent.click(screen.getByRole("button", { name: "Issue test key" }));
     rerenderWithEnv("staging");
-    const callsBeforeReturn = enabledFlags().length;
     rerenderWithEnv("dev");
-    expect(enabledFlags().slice(callsBeforeReturn)).not.toContain(true);
+    expect(issue).toHaveBeenCalledTimes(1);
     expect(screen.getByRole("button", { name: "Issue test key" })).toBeTruthy();
     expect(screen.queryByDisplayValue("test-key-1")).toBeNull();
     expect(snippet()).not.toContain("test-key-1");
@@ -232,7 +229,6 @@ describe("ConnectSection", () => {
     expect(screen.getByText(/API key required in header/)).toBeTruthy();
     expect(screen.getByText("Keys for production are issued by the agent's owners.")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Issue test key" })).toBeNull();
-    expect(enabledFlags()).not.toContain(true);
   });
 
   it("describes OAuth issuers, audiences and header without a key issuer", () => {
@@ -281,6 +277,8 @@ describe("ConnectSection", () => {
       connect({
         kind: "external",
         gatewayUrl: "",
+        cardUrl: "https://origin.example/.well-known/agent-card.json",
+        jsonRpcUrl: originInterface,
         security: { mode: "unmanaged" },
         publication: { status: "none", lastError: "" },
       }),
@@ -296,7 +294,13 @@ describe("ConnectSection", () => {
 
   it("addresses a proxied agent at the gateway, not the card's origin", () => {
     mockConnect(
-      connect({ kind: "external", proxied: true, gatewayUrl: "https://gw/agents/x" }),
+      connect({
+        kind: "external",
+        proxied: true,
+        gatewayUrl: "https://gw/agents/x",
+        cardUrl: "https://gw/agents/x/.well-known/agent-card.json",
+        jsonRpcUrl: "https://gw/agents/x/rpc",
+      }),
     );
     renderSection();
     const endpoints = within(screen.getByTestId("connect-endpoints"));

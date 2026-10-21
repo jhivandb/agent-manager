@@ -170,7 +170,13 @@ export const rootRouteMap: AppRoute = {
                 a2aAgents: {
                     path: 'a2a-agents',
                     index: true,
-                    children: {},
+                    children: {
+                        view: {
+                            path: 'view/:projectName/:agentName',
+                            index: true,
+                            children: {},
+                        },
+                    },
                 },
                 mcpProxies: {
                     path: 'mcp-proxies',

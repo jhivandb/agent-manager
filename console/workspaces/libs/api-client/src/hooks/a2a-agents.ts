@@ -18,37 +18,53 @@
 import { keepPreviousData } from "@tanstack/react-query";
 import { useAuthHooks } from "@agent-management-platform/auth";
 import type {
+  A2ACatalogAgent,
   A2AConnectResponse,
   A2ACatalogListResponse,
   A2ACatalogQuery,
   AgentCardPathParams,
 } from "@agent-management-platform/types";
-import { getA2AConnect, listA2AAgents } from "../apis/a2a-agents";
-import { useApiQuery } from "./react-query-notifications";
+import { getA2ACatalogEntry, getA2AConnect, listA2AAgents } from "../apis/a2a-agents";
 
-export function useListA2AAgents(
-  params: { orgName: string },
-  query: A2ACatalogQuery,
-  options: { enabled?: boolean } = {},
-) {
+// Each catalogue read summarizes every card on the page, so a back-navigation reuses a recent one.
+const CATALOGUE_STALE_MS = 30 * 1000;
+import { useApiQuery } from "./react-query-notifications";
+import { nullIfNotFound } from "../utils";
+
+export function useListA2AAgents(params: { orgName: string }, query: A2ACatalogQuery) {
   const { getToken } = useAuthHooks();
   return useApiQuery<A2ACatalogListResponse>({
     queryKey: ["a2a-agents", params, query],
     queryFn: () => listA2AAgents(params, query, getToken),
-    enabled: (options.enabled ?? true) && !!params.orgName,
+    enabled: !!params.orgName,
     placeholderData: keepPreviousData,
+    staleTime: CATALOGUE_STALE_MS,
   });
 }
 
-export function useGetA2AConnect(
-  params: AgentCardPathParams,
-  options: { enabled?: boolean } = {},
-) {
+export function useGetA2ACatalogEntry(params: {
+  orgName: string;
+  projName: string;
+  agentName: string;
+}) {
+  const { getToken } = useAuthHooks();
+  // null when the agent is not in the catalogue.
+  return useApiQuery<A2ACatalogAgent | null>({
+    queryKey: ["a2a-catalog-entry", params],
+    queryFn: () => nullIfNotFound(getA2ACatalogEntry(params, getToken)),
+    enabled: !!(params.orgName && params.projName && params.agentName),
+    staleTime: CATALOGUE_STALE_MS,
+    retry: false,
+    // The page says when the agent fails to load.
+    silent: true,
+  });
+}
+
+export function useGetA2AConnect(params: AgentCardPathParams) {
   const { getToken } = useAuthHooks();
   return useApiQuery<A2AConnectResponse>({
     queryKey: ["a2a-connect", params],
     queryFn: () => getA2AConnect(params, getToken),
-    enabled: (options.enabled ?? true) &&
-      !!(params.orgName && params.projName && params.agentName && params.envId),
+    enabled: !!(params.orgName && params.projName && params.agentName && params.envId),
   });
 }

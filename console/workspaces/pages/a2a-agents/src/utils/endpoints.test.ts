@@ -20,37 +20,28 @@ import { describe, expect, it } from "vitest";
 import { resolveConnectEndpoints } from "./endpoints";
 
 const gatewayUrl = "https://gw.example/orders";
-const originCardUrl = "https://origin.example/.well-known/agent-card.json";
+const viaGateway = {
+  gatewayUrl,
+  cardUrl: `${gatewayUrl}/.well-known/agent-card.json`,
+  jsonRpcUrl: `${gatewayUrl}/rpc`,
+};
+const direct = (jsonRpcUrl: string) => ({
+  gatewayUrl: "",
+  cardUrl: "https://origin.example/.well-known/agent-card.json",
+  jsonRpcUrl,
+});
 
 describe("resolveConnectEndpoints", () => {
   it("puts the gateway first and keeps the card's own interfaces for information", () => {
     const interfaces = [{ url: "http://localhost:9099/rpc", protocolBinding: "JSONRPC" }];
-    const resolved = resolveConnectEndpoints(gatewayUrl, originCardUrl, interfaces);
-    expect(resolved.endpoints[0]).toEqual({ label: "Gateway endpoint", url: gatewayUrl });
+    const resolved = resolveConnectEndpoints(viaGateway, interfaces);
+    expect(resolved.endpoints).toEqual([
+      { label: "Gateway endpoint", url: gatewayUrl },
+      { label: "JSON-RPC", url: `${gatewayUrl}/rpc` },
+    ]);
     expect(resolved.declared).toEqual(interfaces);
-    expect(resolved.cardUrl).toBe(`${gatewayUrl}/.well-known/agent-card.json`);
-  });
-
-  it("sends JSON-RPC to the gateway's /rpc route when the card names no gateway interface", () => {
-    const interfaces = [{ url: "http://localhost:9099/rpc", protocolBinding: "JSONRPC" }];
-    const resolved = resolveConnectEndpoints(`${gatewayUrl}/`, originCardUrl, interfaces);
+    expect(resolved.cardUrl).toBe(viaGateway.cardUrl);
     expect(resolved.snippetEndpoint).toBe(`${gatewayUrl}/rpc`);
-    expect(resolved.endpoints).toContainEqual({ label: "JSON-RPC", url: `${gatewayUrl}/rpc` });
-  });
-
-  it("uses the gateway JSON-RPC interface a gateway-fetched card declares", () => {
-    const interfaces = [
-      { url: `${gatewayUrl}/rest`, protocolBinding: "HTTP+JSON" },
-      { url: `${gatewayUrl}/a2a`, protocolBinding: "JSONRPC" },
-    ];
-    expect(resolveConnectEndpoints(gatewayUrl, originCardUrl, interfaces).snippetEndpoint)
-      .toBe(`${gatewayUrl}/a2a`);
-  });
-
-  it("does not mistake a sibling path for the gateway's", () => {
-    const interfaces = [{ url: `${gatewayUrl}-other/rpc`, protocolBinding: "JSONRPC" }];
-    expect(resolveConnectEndpoints(gatewayUrl, originCardUrl, interfaces).snippetEndpoint)
-      .toBe(`${gatewayUrl}/rpc`);
   });
 
   it("lists the card's interfaces as the endpoints of a directly reached agent", () => {
@@ -58,25 +49,24 @@ describe("resolveConnectEndpoints", () => {
       { url: "https://origin.example/rest", protocolBinding: "HTTP+JSON" },
       { url: "https://origin.example/rpc", protocolBinding: "JSONRPC" },
     ];
-    const resolved = resolveConnectEndpoints("", originCardUrl, interfaces);
-    expect(resolved.endpoints.map((e) => e.url)).toEqual([
-      "https://origin.example/rest",
-      "https://origin.example/rpc",
+    const resolved = resolveConnectEndpoints(direct("https://origin.example/rpc"), interfaces);
+    expect(resolved.endpoints).toEqual([
+      { label: "HTTP+JSON", url: "https://origin.example/rest" },
+      { label: "JSONRPC", url: "https://origin.example/rpc" },
     ]);
-    expect(resolved.endpoints[0].label).toBe("HTTP+JSON");
     expect(resolved.declared).toEqual([]);
-    expect(resolved.cardUrl).toBe(originCardUrl);
+    expect(resolved.cardUrl).toBe("https://origin.example/.well-known/agent-card.json");
     expect(resolved.snippetEndpoint).toBe("https://origin.example/rpc");
   });
 
   it("falls back to the first interface when the card offers no JSON-RPC", () => {
     const interfaces = [{ url: "https://origin.example/rest", protocolBinding: "HTTP+JSON" }];
-    expect(resolveConnectEndpoints("", originCardUrl, interfaces).snippetEndpoint)
+    expect(resolveConnectEndpoints(direct(""), interfaces).snippetEndpoint)
       .toBe("https://origin.example/rest");
   });
 
   it("has no snippet endpoint when a direct agent's card declares none", () => {
-    const resolved = resolveConnectEndpoints("", originCardUrl, []);
+    const resolved = resolveConnectEndpoints(direct(""), []);
     expect(resolved.endpoints).toEqual([]);
     expect(resolved.snippetEndpoint).toBe("");
   });

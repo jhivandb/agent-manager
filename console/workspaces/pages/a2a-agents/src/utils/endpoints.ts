@@ -16,7 +16,8 @@
  * under the License.
  */
 
-import type { ParsedA2ACard } from "./card";
+import type { ParsedA2ACard } from "@agent-management-platform/shared-component";
+import type { A2AConnectResponse } from "@agent-management-platform/types";
 
 type CardInterface = ParsedA2ACard["interfaces"][number];
 
@@ -34,57 +35,29 @@ export interface ConnectEndpoints {
   snippetEndpoint: string;
 }
 
-const AGENT_CARD_PATH = "/.well-known/agent-card.json";
-// The gateway serves a platform agent's JSON-RPC transport here (AMS a2aPathPrefixJSONRPC).
-const GATEWAY_JSONRPC_PATH = "/rpc";
-const JSONRPC = "JSONRPC";
-
-const isUnder = (url: string, base: string) => url === base || url.startsWith(`${base}/`);
-
-/**
- * A gateway-fetched card (proxied external agent) already carries the gateway's
- * JSON-RPC URL; a platform agent's card carries the agent's own address instead.
- */
-function gatewayJsonRpcUrl(gatewayUrl: string, interfaces: CardInterface[]): string {
-  const rewritten = interfaces.find(
-    (iface) => iface.protocolBinding === JSONRPC && isUnder(iface.url, gatewayUrl),
-  );
-  return rewritten?.url ?? `${gatewayUrl}${GATEWAY_JSONRPC_PATH}`;
-}
-
-function viaGateway(gatewayUrl: string, interfaces: CardInterface[]): ConnectEndpoints {
-  const base = gatewayUrl.replace(/\/+$/, "");
-  const jsonRpcUrl = gatewayJsonRpcUrl(base, interfaces);
+/** When the gateway fronts the agent it is the endpoint; otherwise the card's interfaces are. */
+export function resolveConnectEndpoints(
+  connect: Pick<A2AConnectResponse, "gatewayUrl" | "cardUrl" | "jsonRpcUrl">,
+  interfaces: CardInterface[],
+): ConnectEndpoints {
+  if (connect.gatewayUrl) {
+    return {
+      endpoints: [
+        { label: "Gateway endpoint", url: connect.gatewayUrl },
+        { label: "JSON-RPC", url: connect.jsonRpcUrl },
+      ],
+      declared: interfaces,
+      cardUrl: connect.cardUrl,
+      snippetEndpoint: connect.jsonRpcUrl,
+    };
+  }
   return {
-    endpoints: [
-      { label: "Gateway endpoint", url: base },
-      { label: "JSON-RPC", url: jsonRpcUrl },
-    ],
-    declared: interfaces,
-    cardUrl: `${base}${AGENT_CARD_PATH}`,
-    snippetEndpoint: jsonRpcUrl,
-  };
-}
-
-function direct(cardUrl: string, interfaces: CardInterface[]): ConnectEndpoints {
-  const reachable = interfaces.filter((iface) => iface.url !== "");
-  const preferred = reachable.find((iface) => iface.protocolBinding === JSONRPC) ?? reachable[0];
-  return {
-    endpoints: reachable.map((iface) => ({
+    endpoints: interfaces.map((iface) => ({
       label: iface.protocolBinding || "Endpoint",
       url: iface.url,
     })),
     declared: [],
-    cardUrl,
-    snippetEndpoint: preferred?.url ?? "",
+    cardUrl: connect.cardUrl,
+    snippetEndpoint: connect.jsonRpcUrl || (interfaces[0]?.url ?? ""),
   };
-}
-
-/** When the gateway fronts the agent it is the endpoint; otherwise the card's interfaces are. */
-export function resolveConnectEndpoints(
-  gatewayUrl: string,
-  sourceCardUrl: string,
-  interfaces: CardInterface[],
-): ConnectEndpoints {
-  return gatewayUrl ? viaGateway(gatewayUrl, interfaces) : direct(sourceCardUrl, interfaces);
 }

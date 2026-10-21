@@ -20,7 +20,6 @@ import { useState } from "react";
 import {
   Box,
   Button,
-  Chip,
   FormControl,
   InputLabel,
   MenuItem,
@@ -28,9 +27,14 @@ import {
   Stack,
   Typography,
 } from "@wso2/oxygen-ui";
-import { CodeBlock, formatRelativeTime } from "@agent-management-platform/shared-component";
+import {
+  A2ASkillItem,
+  CodeBlock,
+  diffA2ACards,
+  formatRelativeTime,
+  parseA2ACard,
+} from "@agent-management-platform/shared-component";
 import type { AgentCardResponse } from "@agent-management-platform/types";
-import { diffSkills, parseA2ACard, type ParsedSkill } from "../utils/card";
 
 export interface CardDetailsProps {
   card: AgentCardResponse | null | undefined;
@@ -46,43 +50,6 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
     <Typography variant="subtitle2" color="text.secondary">
       {children}
     </Typography>
-  );
-}
-
-function ChipRow({ label, values }: { label?: string; values: string[] }) {
-  if (values.length === 0) return null;
-  return (
-    <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap alignItems="center">
-      {label && (
-        <Typography variant="caption" color="text.secondary">
-          {label}
-        </Typography>
-      )}
-      {values.map((value) => (
-        <Chip key={value} size="small" variant="outlined" label={value} />
-      ))}
-    </Stack>
-  );
-}
-
-function SkillItem({ skill }: { skill: ParsedSkill }) {
-  return (
-    <Stack spacing={0.5} sx={{ p: 1.5, border: "1px solid", borderColor: "divider", borderRadius: 1 }}>
-      <Typography variant="subtitle2">{skill.name}</Typography>
-      {skill.description && (
-        <Typography variant="body2" color="text.secondary">
-          {skill.description}
-        </Typography>
-      )}
-      <ChipRow values={skill.tags} />
-      <ChipRow label="Input" values={skill.inputModes} />
-      <ChipRow label="Output" values={skill.outputModes} />
-      {skill.examples.map((example) => (
-        <Typography key={example} variant="caption" color="text.secondary">
-          e.g. {example}
-        </Typography>
-      ))}
-    </Stack>
   );
 }
 
@@ -110,7 +77,7 @@ function CardStatus({ card }: { card: AgentCardResponse }) {
 
 type MaybeCard = AgentCardResponse | null | undefined;
 
-function SkillDiff({ base, other }: { base: MaybeCard; other: MaybeCard }) {
+function CardDiff({ base, other }: { base: MaybeCard; other: MaybeCard }) {
   if (!other?.card) {
     return (
       <Typography variant="caption" color="text.secondary">
@@ -118,19 +85,17 @@ function SkillDiff({ base, other }: { base: MaybeCard; other: MaybeCard }) {
       </Typography>
     );
   }
-  const { added, removed, changed } = diffSkills(
-    parseA2ACard(base?.card),
-    parseA2ACard(other.card),
-  );
+  const { fields, skills } = diffA2ACards(base?.card, other.card);
   const lines = [
-    ...added.map((name) => `Added: ${name}`),
-    ...removed.map((name) => `Removed: ${name}`),
-    ...changed.map((name) => `Changed: ${name}`),
+    ...skills.added.map((name) => `Added: ${name}`),
+    ...skills.removed.map((name) => `Removed: ${name}`),
+    ...skills.changed.map((name) => `Changed: ${name}`),
+    ...(fields.length > 0 ? [`Also differs in: ${fields.join(", ")}`] : []),
   ];
   if (lines.length === 0) {
     return (
       <Typography variant="caption" color="text.secondary">
-        Skills are identical.
+        The cards are identical.
       </Typography>
     );
   }
@@ -187,7 +152,7 @@ export function CardDetails({
       ) : (
         <Stack spacing={1}>
           {parsed.skills.map((skill) => (
-            <SkillItem key={skill.id || skill.name} skill={skill} />
+            <A2ASkillItem key={skill.id || skill.name} skill={skill} />
           ))}
         </Stack>
       )}
@@ -219,7 +184,7 @@ export function CardDetails({
               ))}
             </Select>
           </FormControl>
-          {compareEnv && <SkillDiff base={card} other={compareCard} />}
+          {compareEnv && <CardDiff base={card} other={compareCard} />}
         </Stack>
       )}
 

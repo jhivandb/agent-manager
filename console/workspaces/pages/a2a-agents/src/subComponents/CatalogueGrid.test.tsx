@@ -78,15 +78,15 @@ const agents = [
   agentWith("p2", [env("dev", { proxied: true })]),
 ];
 
-function renderGrid(selected: { projectName: string; agentName: string } | null = null) {
-  const onSelect = vi.fn();
+function renderGrid() {
   render(
     <MemoryRouter initialEntries={["/?q=old"]}>
-      <CatalogueGrid orgName="acme" selection={selected} compact={false} onSelect={onSelect} />
+      <CatalogueGrid orgName="acme" />
     </MemoryRouter>,
   );
-  return onSelect;
 }
+
+const lastQuery = () => vi.mocked(useListA2AAgents).mock.lastCall?.[1];
 
 describe("CatalogueGrid", () => {
   beforeEach(() => {
@@ -109,23 +109,37 @@ describe("CatalogueGrid", () => {
     expect(screen.getByText("proxied")).toBeInTheDocument();
   });
 
-  it("marks only the tile with the matching project as selected", () => {
-    renderGrid({ projectName: "p2", agentName: "orders" });
-    const tiles = screen.getAllByTestId("catalogue-tile");
-    expect(within(tiles[0]).queryByText("p1")).toBeInTheDocument();
-    expect(tiles[0]).toHaveAttribute("aria-selected", "false");
-    expect(tiles[1]).toHaveAttribute("aria-selected", "true");
+  it("links each tile to its agent's page in its own project", () => {
+    renderGrid();
+    const links = screen.getAllByRole("link");
+    expect(within(links[0]).getByText("p1")).toBeInTheDocument();
+    expect(links[0]).toHaveAttribute("href", "/org/acme/a2a-agents/view/p1/orders");
+    expect(links[1]).toHaveAttribute("href", "/org/acme/a2a-agents/view/p2/orders");
   });
 
-  it("selects the clicked agent", () => {
-    const onSelect = renderGrid();
-    fireEvent.click(screen.getAllByTestId("catalogue-tile")[1]);
-    expect(onSelect).toHaveBeenCalledWith(agents[1]);
+  it("filters by kind from the toggle straight away", () => {
+    renderGrid();
+    fireEvent.click(screen.getByRole("button", { name: "External" }));
+    expect(lastQuery()).toEqual(expect.objectContaining({ kind: "external", offset: 0 }));
+  });
+
+  it("applies advanced filters only on Filter, and removes one from its chip", () => {
+    renderGrid();
+    fireEvent.click(screen.getByRole("button", { name: "Advanced Filters" }));
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: "Card status" }));
+    fireEvent.click(screen.getByRole("option", { name: "Failed" }));
+    expect(lastQuery()?.status).toBeUndefined();
+
+    fireEvent.click(screen.getByRole("button", { name: "Filter" }));
+    expect(lastQuery()).toEqual(expect.objectContaining({ status: "failed" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove Card status: Failed" }));
+    expect(lastQuery()?.status).toBeUndefined();
   });
 
   it("queries with the debounced search text from the first page", () => {
     renderGrid();
-    fireEvent.change(screen.getByPlaceholderText("Search A2A agents..."), { target: { value: "refund" } });
+    fireEvent.change(screen.getByPlaceholderText("Search A2A agents"), { target: { value: "refund" } });
     expect(useListA2AAgents).not.toHaveBeenCalledWith(
       { orgName: "acme" },
       expect.objectContaining({ q: "refund" }),

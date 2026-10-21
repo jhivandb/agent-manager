@@ -16,12 +16,14 @@
  * under the License.
  */
 import type {
+  A2ACatalogAgent,
   A2AConnectResponse,
   A2ACatalogListResponse,
   A2ACatalogQuery,
   AgentCardPathParams,
 } from "@agent-management-platform/types";
 import { encodeRequired, httpGET, SERVICE_BASE } from "../utils";
+import { agentEnvPath } from "./agent-card";
 
 function setParams(query: A2ACatalogQuery): Record<string, string> {
   const entries = Object.entries(query).filter(([, value]) => value !== undefined && value !== "");
@@ -43,18 +45,26 @@ export async function listA2AAgents(
   return res.json();
 }
 
+export async function getA2ACatalogEntry(
+  params: { orgName: string; projName: string; agentName: string },
+  getToken?: () => Promise<string>,
+): Promise<A2ACatalogAgent> {
+  const org = encodeRequired(params.orgName, "orgName");
+  const proj = encodeRequired(params.projName, "projName");
+  const agent = encodeRequired(params.agentName, "agentName");
+  const token = getToken ? await getToken() : undefined;
+  const res = await httpGET(
+    `${SERVICE_BASE}/orgs/${org}/projects/${proj}/agents/${agent}/a2a-catalog-entry`,
+    { token },
+  );
+  return res.json();
+}
+
 export async function getA2AConnect(
   params: AgentCardPathParams,
   getToken?: () => Promise<string>,
 ): Promise<A2AConnectResponse> {
-  const org = encodeRequired(params.orgName, "orgName");
-  const proj = encodeRequired(params.projName, "projName");
-  const agent = encodeRequired(params.agentName, "agentName");
-  const env = encodeRequired(params.envId, "envId");
   const token = getToken ? await getToken() : undefined;
-  const res = await httpGET(
-    `${SERVICE_BASE}/orgs/${org}/projects/${proj}/agents/${agent}/environments/${env}/a2a-connect`,
-    { token },
-  );
+  const res = await httpGET(agentEnvPath(params, "a2a-connect"), { token });
   return res.json();
 }

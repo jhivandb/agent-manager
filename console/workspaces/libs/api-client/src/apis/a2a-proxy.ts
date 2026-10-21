@@ -21,15 +21,10 @@ import type {
   A2AProxyResponse,
   SetA2AProxyRequest,
 } from "@agent-management-platform/types";
-import { encodeRequired, httpDELETE, httpGET, httpPOST, httpPUT, SERVICE_BASE } from "../utils";
+import { httpDELETE, httpGET, httpPOST, httpPUT } from "../utils";
+import { agentEnvPath } from "./agent-card";
 
-function a2aProxyPath(params: A2AProxyPathParams): string {
-  const org = encodeRequired(params.orgName, "orgName");
-  const proj = encodeRequired(params.projName, "projName");
-  const agent = encodeRequired(params.agentName, "agentName");
-  const env = encodeRequired(params.envId, "envId");
-  return `${SERVICE_BASE}/orgs/${org}/projects/${proj}/agents/${agent}/environments/${env}/a2a-proxy`;
-}
+const a2aProxyPath = (params: A2AProxyPathParams) => agentEnvPath(params, "a2a-proxy");
 
 // A direct environment answers 404, which the http helpers throw with status 404.
 export async function getA2AProxy(
