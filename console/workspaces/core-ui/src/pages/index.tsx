@@ -175,6 +175,13 @@ export const LazyAddLLMProvidersOrg = lazy(() =>
   }))
 );
 
+// A2A Agents
+export const LazyA2AAgentsOrg = lazy(() =>
+  import("@agent-management-platform/a2a-agents").then((m) => ({
+    default: m.metaData.levels!.organization as ComponentType,
+  }))
+);
+
 // MCP Proxies
 export const LazyMCPProxiesOrg = lazy(() =>
   import("@agent-management-platform/mcp-proxies").then((m) => ({

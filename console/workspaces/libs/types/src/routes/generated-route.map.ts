@@ -148,6 +148,11 @@ export const generatedRouteMap =  {
             }
           }
         },
+        "a2aAgents": {
+          "path": "/org/:orgId/a2a-agents",
+          "wildPath": "/org/:orgId/a2a-agents/*",
+          "children": {}
+        },
         "mcpProxies": {
           "path": "/org/:orgId/mcp-proxies",
           "wildPath": "/org/:orgId/mcp-proxies/*",
