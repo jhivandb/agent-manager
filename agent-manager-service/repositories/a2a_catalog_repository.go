@@ -109,9 +109,10 @@ func (r *A2ACatalogRepo) ListAgents(ctx context.Context, ouID string, f models.A
 		pageSQL += " LIMIT @limit OFFSET @offset"
 		args = append(args, sql.Named("limit", f.Limit), sql.Named("offset", f.Offset))
 	}
+	// Flat, not embedding a2aCatalogAgentKey: gorm skips an unexported embedded field, leaving the names empty.
 	var page []struct {
-		a2aCatalogAgentKey
-		Total int64
+		ProjectName, AgentName string
+		Total                  int64
 	}
 	if err := r.db.WithContext(ctx).Raw(pageSQL, args...).Scan(&page).Error; err != nil {
 		return nil, 0, fmt.Errorf("list a2a catalogue agents: %w", err)
@@ -123,7 +124,7 @@ func (r *A2ACatalogRepo) ListAgents(ctx context.Context, ouID string, f models.A
 
 	agents := make([]a2aCatalogAgentKey, 0, len(page))
 	for _, p := range page {
-		agents = append(agents, p.a2aCatalogAgentKey)
+		agents = append(agents, a2aCatalogAgentKey{ProjectName: p.ProjectName, AgentName: p.AgentName})
 	}
 	rows, err := r.rowsOfAgents(ctx, ouID, agents, f.Query, matchedExpr)
 	if err != nil {
