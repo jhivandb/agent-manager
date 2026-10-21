@@ -154,10 +154,7 @@ func TestListA2AAgentsRejectsBadParameters(t *testing.T) {
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			stub := &catalogServiceStub{ListFunc: func(context.Context, models.A2ACatalogFilter) (*models.A2ACatalogPage, error) {
-				t.Fatal("the service must not be called on a 400")
-				return nil, nil
-			}}
+			stub := &catalogServiceStub{} // ListFunc nil: the service must not be called on a 400
 			rec := httptest.NewRecorder()
 
 			NewA2ACatalogController(stub).ListA2AAgents(rec, catalogListRequest(tc.query))
