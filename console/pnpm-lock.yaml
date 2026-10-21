@@ -105,6 +105,9 @@ importers:
 
   workspaces/core-ui:
     dependencies:
+      '@agent-management-platform/a2a-agents':
+        specifier: workspace:*
+        version: link:../pages/a2a-agents
       '@agent-management-platform/add-new-agent':
         specifier: workspace:*
         version: link:../pages/add-new-agent

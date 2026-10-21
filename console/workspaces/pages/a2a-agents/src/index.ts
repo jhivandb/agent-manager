@@ -16,4 +16,22 @@
  * under the License.
  */
 
-export * from './routes';
+import { Network } from '@wso2/oxygen-ui-icons-react';
+import type { PageMetadata } from '@agent-management-platform/types';
+import { A2AAgentsOrganization } from './A2AAgents.Organization';
+import { A2AAgentPage } from './A2AAgentPage';
+
+export const metaData: PageMetadata = {
+  title: 'A2A Agents',
+  description: 'Organization-wide catalogue of A2A agents',
+  icon: Network,
+  path: '/a2a-agents',
+  component: A2AAgentsOrganization,
+  levels: {
+    organization: A2AAgentsOrganization,
+  },
+};
+
+export { A2AAgentsOrganization, A2AAgentPage };
+
+export default A2AAgentsOrganization;
