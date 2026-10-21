@@ -26,12 +26,16 @@ import type {
 import { getA2AConnect, listA2AAgents } from "../apis/a2a-agents";
 import { useApiQuery } from "./react-query-notifications";
 
-export function useListA2AAgents(params: { orgName: string }, query: A2ACatalogQuery) {
+export function useListA2AAgents(
+  params: { orgName: string },
+  query: A2ACatalogQuery,
+  options: { enabled?: boolean } = {},
+) {
   const { getToken } = useAuthHooks();
   return useApiQuery<A2ACatalogListResponse>({
     queryKey: ["a2a-agents", params, query],
     queryFn: () => listA2AAgents(params, query, getToken),
-    enabled: !!params.orgName,
+    enabled: (options.enabled ?? true) && !!params.orgName,
     placeholderData: keepPreviousData,
   });
 }

@@ -120,6 +120,14 @@ describe("AgentSidePanel", () => {
     expect(onClose).toHaveBeenCalledTimes(2);
   });
 
+  it("keeps the panel open when Escape dismisses the compare dropdown", () => {
+    mockCards({ dev: devCard, prod: prodCard });
+    const { onClose } = renderPanel();
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: "Compare with" }));
+    fireEvent.keyDown(screen.getByRole("listbox"), { key: "Escape" });
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
   it("says the card is pending while it has not been fetched", () => {
     mockCards({ dev: { ...devCard, status: "pending", card: undefined, fetchedAt: undefined } });
     renderPanel();

@@ -20,28 +20,14 @@ import { useCallback, useState } from "react";
 import { useParams } from "react-router-dom";
 import { Box } from "@wso2/oxygen-ui";
 import { PageLayout } from "@agent-management-platform/views";
+import { useListA2AAgents } from "@agent-management-platform/api-client";
 import type { A2ACatalogAgent } from "@agent-management-platform/types";
 import { AgentSidePanel } from "./subComponents/AgentSidePanel";
 import { CatalogueGrid } from "./subComponents/CatalogueGrid";
-import { useCatalogueSelection, type CatalogueSelection } from "./useCatalogueSelection";
+import { SelectionStatusPanel } from "./subComponents/SelectionStatusPanel";
+import { useCatalogueSelection } from "./useCatalogueSelection";
 
 const agentKey = (projectName: string, agentName: string) => `${projectName}/${agentName}`;
-
-function placeholderAgent(selection: CatalogueSelection): A2ACatalogAgent {
-  return {
-    projectName: selection.projectName,
-    agentName: selection.agentName,
-    kind: "platform",
-    name: selection.agentName,
-    description: "",
-    version: "",
-    skills: [],
-    leadEnvironment: selection.env ?? "",
-    environments: selection.env
-      ? [{ name: selection.env, status: "fetched", proxied: false, cardDiffers: false, matched: false }]
-      : [],
-  };
-}
 
 export function A2AAgentsOrganization() {
   const { orgId } = useParams<{ orgId: string }>();
@@ -57,10 +43,16 @@ export function A2AAgentsOrganization() {
     [],
   );
 
-  const selectedAgent = selection
-    ? (seenAgents[agentKey(selection.projectName, selection.agentName)] ??
-      placeholderAgent(selection))
-    : null;
+  const seenAgent = selection
+    ? seenAgents[agentKey(selection.projectName, selection.agentName)]
+    : undefined;
+  const lookup = useListA2AAgents(
+    { orgName: orgId ?? "" },
+    { project: selection?.projectName, limit: 100, offset: 0 },
+    { enabled: selection !== null && !seenAgent },
+  );
+  const selectedAgent =
+    seenAgent ?? lookup.data?.agents.find((a) => a.agentName === selection?.agentName);
 
   const grid = (
     <CatalogueGrid
@@ -74,7 +66,7 @@ export function A2AAgentsOrganization() {
 
   return (
     <PageLayout title="A2A Agents" disableIcon>
-      {selection && selectedAgent ? (
+      {selection ? (
         <Box
           sx={{
             display: "grid",
@@ -84,12 +76,19 @@ export function A2AAgentsOrganization() {
           }}
         >
           <Box sx={{ minWidth: 0 }}>{grid}</Box>
-          <AgentSidePanel
-            agent={selectedAgent}
-            env={selection.env ?? selectedAgent.leadEnvironment}
-            onEnvChange={selectEnv}
-            onClose={clear}
-          />
+          {selectedAgent ? (
+            <AgentSidePanel
+              agent={selectedAgent}
+              env={selection.env ?? selectedAgent.leadEnvironment}
+              onEnvChange={selectEnv}
+              onClose={clear}
+            />
+          ) : (
+            <SelectionStatusPanel
+              state={lookup.isLoading ? "loading" : "not-found"}
+              onClose={clear}
+            />
+          )}
         </Box>
       ) : (
         grid

@@ -25,6 +25,8 @@ import type { A2ACatalogAgent } from "@agent-management-platform/types";
 import { parseA2ACard } from "../utils/card";
 import { CardDetails } from "./CardDetails";
 
+const OWN_ESCAPE_SELECTOR = "input, textarea, [role=listbox], [role=menu]";
+
 export interface AgentSidePanelProps {
   agent: A2ACatalogAgent;
   env: string;
@@ -38,7 +40,10 @@ export function AgentSidePanel({ agent, env, onEnvChange, onClose }: AgentSidePa
 
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      const target = event.target instanceof Element ? event.target : null;
+      if (target?.closest(OWN_ESCAPE_SELECTOR)) return;
+      onClose();
     };
     document.addEventListener("keydown", closeOnEscape);
     return () => document.removeEventListener("keydown", closeOnEscape);
