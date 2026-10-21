@@ -50,4 +50,5 @@ export * from './mcp-proxy-scopes';
 export * from './agent-identity';
 export * from './token-scopes';
 export { extractServerErrorMessage, MAX_SNACKBAR_REASON_LENGTH } from './react-query-notifications';
+export * from './a2a-agents';
 export * from './telemetry';
