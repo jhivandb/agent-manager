@@ -248,6 +248,23 @@ func TestListA2AAgents_DoesNotCachePipelineFailures(t *testing.T) {
 	assert.Equal(t, 2, calls)
 }
 
+func TestListA2AAgents_FailingPipelineIsFetchedOncePerProjectWithinARequest(t *testing.T) {
+	h := newCatalogHarness(
+		catalogRow("p", "a", "dev", `{}`),
+		catalogRow("p", "b", "dev", `{}`),
+	)
+	calls := 0
+	h.oc.GetProjectDeploymentPipelineFunc = func(context.Context, string, string) (*models.DeploymentPipelineResponse, error) {
+		calls++
+		return nil, errors.New("boom")
+	}
+
+	page := list(t, h)
+
+	assert.Len(t, page.Entries, 2)
+	assert.Equal(t, 1, calls)
+}
+
 func TestListA2AAgents_PassesThroughProxiedAndMatched(t *testing.T) {
 	row := catalogRow("p", "a", "dev", `{}`)
 	row.Proxied = true

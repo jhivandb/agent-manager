@@ -97,8 +97,14 @@ func (s *a2aCatalogService) ListA2AAgents(ctx context.Context, ouID string, f mo
 		return nil, fmt.Errorf("list a2a catalogue agents: %w", err)
 	}
 	entries := make([]models.A2ACatalogEntry, 0)
+	orders := make(map[string][]string)
 	for _, group := range groupByAgent(rows) {
-		order := s.environmentOrder(ctx, ouID, group[0].Card.ProjectName)
+		project := group[0].Card.ProjectName
+		order, seen := orders[project]
+		if !seen {
+			order = s.environmentOrder(ctx, ouID, project)
+			orders[project] = order
+		}
 		entries = append(entries, s.buildEntry(sortByEnvironmentOrder(group, order)))
 	}
 	return &models.A2ACatalogPage{Entries: entries, Total: total, Limit: f.Limit, Offset: f.Offset}, nil

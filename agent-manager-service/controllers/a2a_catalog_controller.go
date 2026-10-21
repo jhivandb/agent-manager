@@ -136,7 +136,7 @@ func toA2ACatalogListResponse(page *models.A2ACatalogPage) *spec.A2ACatalogListR
 		agents = append(agents, *spec.NewA2ACatalogAgent(entry.ProjectName, entry.AgentName, string(entry.Kind),
 			entry.Name, entry.Description, entry.Version, skills, entry.LeadEnvironment, environments))
 	}
-	return spec.NewA2ACatalogListResponse(agents, int32(page.Total), int32(page.Limit), int32(page.Offset)) //nolint:gosec // bounded by the page limit
+	return spec.NewA2ACatalogListResponse(agents, int32(page.Total), int32(page.Limit), int32(page.Offset)) //nolint:gosec // catalogue counts fit int32
 }
 
 func toA2AConnectResponse(info *models.A2AConnectInfo) *spec.A2AConnectResponse {
