@@ -35,7 +35,13 @@ vi.mock("../utils", async (importOriginal) => ({
 }));
 
 import { httpGET, SERVICE_BASE } from "../utils";
-import { a2aCatalogEntryQueryKey, useGetA2ACatalogEntry, useListA2ACatalog } from "./a2a-catalog";
+import {
+  a2aCatalogEntryQueryKey,
+  a2aConnectQueryKey,
+  useGetA2ACatalogEntry,
+  useGetA2AConnect,
+  useListA2ACatalog,
+} from "./a2a-catalog";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -122,5 +128,31 @@ describe("useGetA2ACatalogEntry", () => {
     await mount(() => useGetA2ACatalogEntry({ ...entry, projName: "" }));
     await settle();
     expect(httpGET).not.toHaveBeenCalled();
+  });
+});
+
+describe("useGetA2AConnect", () => {
+  const connect = { orgName: "acme", projName: "p 1", agentName: "a/b", envId: "dev" };
+
+  it("encodes every segment", async () => {
+    await mount(() => useGetA2AConnect(connect));
+    await settle();
+    expect(httpGET).toHaveBeenCalledWith(
+      `${SERVICE_BASE}/orgs/acme/projects/p%201/agents/a%2Fb/environments/dev/a2a-connect`,
+      { token: "t" });
+  });
+
+  it("does not request without an environment", async () => {
+    await mount(() => useGetA2AConnect({ ...connect, envId: "" }));
+    await settle();
+    expect(httpGET).not.toHaveBeenCalled();
+  });
+
+  it("caches under the a2a-connect key", async () => {
+    vi.mocked(httpGET).mockResolvedValueOnce(
+      { ok: true, json: async () => ({ kind: "platform" }) } as Response);
+    const { qc } = await mount(() => useGetA2AConnect(connect));
+    await settle();
+    expect(qc.getQueryData(a2aConnectQueryKey(connect))).toEqual({ kind: "platform" });
   });
 });

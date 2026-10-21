@@ -22,8 +22,11 @@ import type {
   A2ACatalogListPathParams,
   A2ACatalogListQuery,
   A2ACatalogListResponse,
+  A2AConnectPathParams,
+  A2AConnectResponse,
 } from "@agent-management-platform/types";
 import { encodeRequired, httpGET, SERVICE_BASE } from "../utils";
+import { agentEnvironmentResourcePath } from "./agent-card";
 
 function catalogSearchParams(query: A2ACatalogListQuery): Record<string, string> | undefined {
   const present = Object.entries(query).filter(([, value]) => value !== undefined && value !== "");
@@ -57,5 +60,14 @@ export async function getA2ACatalogEntry(
     `${SERVICE_BASE}/orgs/${org}/projects/${project}/agents/${agent}/a2a-catalog-entry`,
     { token },
   );
+  return res.json();
+}
+
+export async function getA2AConnect(
+  params: A2AConnectPathParams,
+  getToken?: () => Promise<string>,
+): Promise<A2AConnectResponse> {
+  const token = getToken ? await getToken() : undefined;
+  const res = await httpGET(agentEnvironmentResourcePath(params, "a2a-connect"), { token });
   return res.json();
 }

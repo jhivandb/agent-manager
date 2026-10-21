@@ -24,9 +24,11 @@ import type {
   A2ACatalogListPathParams,
   A2ACatalogListQuery,
   A2ACatalogListResponse,
+  A2AConnectPathParams,
+  A2AConnectResponse,
 } from "@agent-management-platform/types";
 import { useApiQuery } from "./react-query-notifications";
-import { getA2ACatalogEntry, listA2ACatalog } from "../apis/a2a-catalog";
+import { getA2ACatalogEntry, getA2AConnect, listA2ACatalog } from "../apis/a2a-catalog";
 import { nullIfNotFound } from "../utils";
 
 export const A2A_CATALOG_STALE_MS = 30_000;
@@ -38,6 +40,9 @@ export const a2aCatalogListQueryKey = (
 
 export const a2aCatalogEntryQueryKey = (params: A2ACatalogEntryPathParams) =>
   ["a2a-catalog-entry", params] as const;
+
+export const a2aConnectQueryKey = (params: A2AConnectPathParams) =>
+  ["a2a-connect", params] as const;
 
 export function useListA2ACatalog(params: A2ACatalogListPathParams, query: A2ACatalogListQuery) {
   const { getToken } = useAuthHooks();
@@ -60,5 +65,14 @@ export function useGetA2ACatalogEntry(params: A2ACatalogEntryPathParams) {
     staleTime: A2A_CATALOG_STALE_MS,
     retry: false,
     silent: true,
+  });
+}
+
+export function useGetA2AConnect(params: A2AConnectPathParams) {
+  const { getToken } = useAuthHooks();
+  return useApiQuery<A2AConnectResponse>({
+    queryKey: a2aConnectQueryKey(params),
+    queryFn: () => getA2AConnect(params, getToken),
+    enabled: !!(params.orgName && params.projName && params.agentName && params.envId),
   });
 }
