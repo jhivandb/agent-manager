@@ -163,7 +163,12 @@ func (s *a2aCardReconcilerService) fetchOne(ctx context.Context, row models.A2AA
 		s.recordAttemptFailure(ctx, row, fetched.releaseName, err)
 		return
 	}
-	err = s.cardRepo.MarkFetched(ctx, row, fetched.body, hash, fetched.url, fetched.releaseName)
+	projection, err := a2aCardProjection(fetched.body)
+	if err != nil {
+		s.recordAttemptFailure(ctx, row, fetched.releaseName, err)
+		return
+	}
+	err = s.cardRepo.MarkFetched(ctx, row, fetched.body, hash, fetched.url, fetched.releaseName, projection)
 	switch {
 	case errors.Is(err, repositories.ErrA2AAgentCardSuperseded):
 		s.logSuperseded(row)

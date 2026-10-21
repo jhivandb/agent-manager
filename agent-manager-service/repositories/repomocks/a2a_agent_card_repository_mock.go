@@ -66,7 +66,7 @@ import (
 //			MarkFailedFunc: func(ctx context.Context, read models.A2AAgentCard, lastErr string, releaseName string) error {
 //				panic("mock out the MarkFailed method")
 //			},
-//			MarkFetchedFunc: func(ctx context.Context, read models.A2AAgentCard, card json.RawMessage, cardHash string, fetchedURL string, releaseName string) error {
+//			MarkFetchedFunc: func(ctx context.Context, read models.A2AAgentCard, card json.RawMessage, cardHash string, fetchedURL string, releaseName string, projection models.A2ACardProjection) error {
 //				panic("mock out the MarkFetched method")
 //			},
 //			RequeueFunc: func(ctx context.Context, ouID string, projectName string, agentName string, environmentName string) error {
@@ -128,7 +128,7 @@ type A2AAgentCardRepositoryMock struct {
 	MarkFailedFunc func(ctx context.Context, read models.A2AAgentCard, lastErr string, releaseName string) error
 
 	// MarkFetchedFunc mocks the MarkFetched method.
-	MarkFetchedFunc func(ctx context.Context, read models.A2AAgentCard, card json.RawMessage, cardHash string, fetchedURL string, releaseName string) error
+	MarkFetchedFunc func(ctx context.Context, read models.A2AAgentCard, card json.RawMessage, cardHash string, fetchedURL string, releaseName string, projection models.A2ACardProjection) error
 
 	// RequeueFunc mocks the Requeue method.
 	RequeueFunc func(ctx context.Context, ouID string, projectName string, agentName string, environmentName string) error
@@ -315,6 +315,8 @@ type A2AAgentCardRepositoryMock struct {
 			FetchedURL string
 			// ReleaseName is the releaseName argument value.
 			ReleaseName string
+			// Projection is the projection argument value.
+			Projection models.A2ACardProjection
 		}
 		// Requeue holds details about calls to the Requeue method.
 		Requeue []struct {
@@ -1012,7 +1014,7 @@ func (mock *A2AAgentCardRepositoryMock) MarkFailedCalls() []struct {
 }
 
 // MarkFetched calls MarkFetchedFunc.
-func (mock *A2AAgentCardRepositoryMock) MarkFetched(ctx context.Context, read models.A2AAgentCard, card json.RawMessage, cardHash string, fetchedURL string, releaseName string) error {
+func (mock *A2AAgentCardRepositoryMock) MarkFetched(ctx context.Context, read models.A2AAgentCard, card json.RawMessage, cardHash string, fetchedURL string, releaseName string, projection models.A2ACardProjection) error {
 	if mock.MarkFetchedFunc == nil {
 		panic("A2AAgentCardRepositoryMock.MarkFetchedFunc: method is nil but A2AAgentCardRepository.MarkFetched was just called")
 	}
@@ -1023,6 +1025,7 @@ func (mock *A2AAgentCardRepositoryMock) MarkFetched(ctx context.Context, read mo
 		CardHash    string
 		FetchedURL  string
 		ReleaseName string
+		Projection  models.A2ACardProjection
 	}{
 		Ctx:         ctx,
 		Read:        read,
@@ -1030,11 +1033,12 @@ func (mock *A2AAgentCardRepositoryMock) MarkFetched(ctx context.Context, read mo
 		CardHash:    cardHash,
 		FetchedURL:  fetchedURL,
 		ReleaseName: releaseName,
+		Projection:  projection,
 	}
 	mock.lockMarkFetched.Lock()
 	mock.calls.MarkFetched = append(mock.calls.MarkFetched, callInfo)
 	mock.lockMarkFetched.Unlock()
-	return mock.MarkFetchedFunc(ctx, read, card, cardHash, fetchedURL, releaseName)
+	return mock.MarkFetchedFunc(ctx, read, card, cardHash, fetchedURL, releaseName, projection)
 }
 
 // MarkFetchedCalls gets all the calls that were made to MarkFetched.
@@ -1048,6 +1052,7 @@ func (mock *A2AAgentCardRepositoryMock) MarkFetchedCalls() []struct {
 	CardHash    string
 	FetchedURL  string
 	ReleaseName string
+	Projection  models.A2ACardProjection
 } {
 	var calls []struct {
 		Ctx         context.Context
@@ -1056,6 +1061,7 @@ func (mock *A2AAgentCardRepositoryMock) MarkFetchedCalls() []struct {
 		CardHash    string
 		FetchedURL  string
 		ReleaseName string
+		Projection  models.A2ACardProjection
 	}
 	mock.lockMarkFetched.RLock()
 	calls = mock.calls.MarkFetched
