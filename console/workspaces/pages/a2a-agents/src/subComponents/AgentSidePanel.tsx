@@ -58,7 +58,7 @@ export function AgentSidePanel({ agent, env, onEnvChange, onClose }: AgentSidePa
     agentName: agent.agentName,
     envId,
   });
-  const { data: card } = useGetAgentCard(cardParams(env));
+  const { data: card, isLoading: isCardLoading } = useGetAgentCard(cardParams(env));
   const { data: compareCard } = useGetAgentCard(cardParams(compareEnv), {
     enabled: compareEnv !== "",
     poll: false,
@@ -109,6 +109,7 @@ export function AgentSidePanel({ agent, env, onEnvChange, onClose }: AgentSidePa
         >
           <CardDetails
             card={card}
+            isLoading={isCardLoading}
             compareEnvOptions={agent.environments.map((e) => e.name).filter((n) => n !== env)}
             compareEnv={compareEnv}
             compareCard={compareCard}

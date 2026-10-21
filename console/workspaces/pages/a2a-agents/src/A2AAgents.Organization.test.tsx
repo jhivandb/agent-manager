@@ -101,6 +101,25 @@ describe("A2AAgentsOrganization deep link to an unseen agent", () => {
     expect(screen.getByRole("button", { name: "prod" })).toBeTruthy();
   });
 
+  it("ignores a same-named agent from another project in placeholder data", () => {
+    mockList({
+      data: { agents: [{ ...externalAgent, projectName: "other" }], total: 1 },
+      isLoading: false,
+      isFetching: true,
+      isPlaceholderData: true,
+    } as never);
+    renderDeepLink();
+    expect(screen.queryByText("External Bot")).toBeNull();
+    expect(screen.getByText("Loading agent…")).toBeTruthy();
+  });
+
+  it("does not match a same-named agent from another project once loaded", () => {
+    mockList(listResult([{ ...externalAgent, projectName: "other" }]));
+    renderDeepLink();
+    expect(screen.queryByText("External Bot")).toBeNull();
+    expect(screen.getByText(/not found in the catalogue/i)).toBeTruthy();
+  });
+
   it("says so when the agent is not in the catalogue", () => {
     mockList(listResult([]));
     renderDeepLink();

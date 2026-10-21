@@ -220,7 +220,12 @@ function SecuritySummary({ connect, cardSecuritySchemes, params, onKey }: Securi
   }
 }
 
-function QuickStart({ cardUrl, endpointUrl, auth }: Parameters<typeof buildA2ASnippet>[1]) {
+function QuickStart({
+  cardUrl,
+  endpointUrl,
+  auth,
+  authUnmanaged,
+}: Parameters<typeof buildA2ASnippet>[1]) {
   const [language, setLanguage] = useState<SnippetLanguage>("python");
   const highlight = SNIPPET_LANGUAGES.find((l) => l.value === language)?.highlight;
   return (
@@ -238,7 +243,7 @@ function QuickStart({ cardUrl, endpointUrl, auth }: Parameters<typeof buildA2ASn
         ))}
       </ToggleButtonGroup>
       <CodeBlock
-        code={buildA2ASnippet(language, { cardUrl, endpointUrl, auth })}
+        code={buildA2ASnippet(language, { cardUrl, endpointUrl, auth, authUnmanaged })}
         language={highlight}
         fieldId="a2a-connect-snippet"
       />
@@ -312,6 +317,7 @@ export function ConnectSection({ agent, env }: ConnectSectionProps) {
               cardUrl={endpoints.cardUrl}
               endpointUrl={endpoints.snippetEndpoint}
               auth={snippetAuth(connect.security, testKey)}
+              authUnmanaged={connect.security.mode !== "none"}
             />
           </Stack>
         )}

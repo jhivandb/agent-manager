@@ -42,7 +42,6 @@
     "react-dom": "19.2.3",
     "react-router-dom": "6.30.6",
     "@mui/material": "7.0.0",
-    "@mui/icons-material": "7.0.0",
     "@emotion/react": "11.13.5",
     "@emotion/styled": "11.13.5",
     "@wso2/oxygen-ui": "0.15.0",
@@ -50,8 +49,7 @@
     "@agent-management-platform/views": "workspace:*",
     "@agent-management-platform/types": "workspace:*",
     "@agent-management-platform/shared-component": "workspace:*",
-    "@agent-management-platform/api-client": "workspace:*",
-    "date-fns": "4.1.0"
+    "@agent-management-platform/api-client": "workspace:*"
   },
   "devDependencies": {
     "@types/jest": "29.5.14",

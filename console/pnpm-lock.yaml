@@ -925,9 +925,6 @@ importers:
       '@emotion/styled':
         specifier: 11.13.5
         version: 11.13.5(@emotion/react@11.13.5(@types/react@19.2.14)(react@19.2.3))(@types/react@19.2.14)(react@19.2.3)
-      '@mui/icons-material':
-        specifier: 7.0.0
-        version: 7.0.0(@mui/material@7.0.0(@emotion/react@11.13.5(@types/react@19.2.14)(react@19.2.3))(@emotion/styled@11.13.5(@emotion/react@11.13.5(@types/react@19.2.14)(react@19.2.3))(@types/react@19.2.14)(react@19.2.3))(@types/react@19.2.14)(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(@types/react@19.2.14)(react@19.2.3)
       '@mui/material':
         specifier: 7.0.0
         version: 7.0.0(@emotion/react@11.13.5(@types/react@19.2.14)(react@19.2.3))(@emotion/styled@11.13.5(@emotion/react@11.13.5(@types/react@19.2.14)(react@19.2.3))(@types/react@19.2.14)(react@19.2.3))(@types/react@19.2.14)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
@@ -937,9 +934,6 @@ importers:
       '@wso2/oxygen-ui-icons-react':
         specifier: 0.13.1
         version: 0.13.1(react@19.2.3)
-      date-fns:
-        specifier: 4.1.0
-        version: 4.1.0
       react-dom:
         specifier: 19.2.3
         version: 19.2.3(react@19.2.3)

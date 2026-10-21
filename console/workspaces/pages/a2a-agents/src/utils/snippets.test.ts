@@ -46,6 +46,17 @@ describe("buildA2ASnippet", () => {
     expect(snippet).not.toContain("Authorization");
   });
 
+  it.each(languages)("%s tells the user to add the card's auth when security is unmanaged", (lang) => {
+    const input = { cardUrl, endpointUrl, auth: null, authUnmanaged: true };
+    const snippet = buildA2ASnippet(lang, input);
+    expect(snippet).toContain("does not manage this agent's security");
+  });
+
+  it.each(languages)("%s adds no unmanaged note for an open agent", (lang) => {
+    const snippet = buildA2ASnippet(lang, { cardUrl, endpointUrl, auth: null });
+    expect(snippet).not.toContain("does not manage");
+  });
+
   it("curl posts a v1 JSON-RPC SendMessage to the endpoint", () => {
     const snippet = buildA2ASnippet("curl", { cardUrl, endpointUrl, auth: null });
     expect(snippet).toContain(`-X POST '${endpointUrl}'`);

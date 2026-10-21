@@ -52,7 +52,9 @@ export function A2AAgentsOrganization() {
     { enabled: selection !== null && !seenAgent },
   );
   const selectedAgent =
-    seenAgent ?? lookup.data?.agents.find((a) => a.agentName === selection?.agentName);
+    seenAgent ?? lookup.data?.agents.find(
+      (a) => a.projectName === selection?.projectName && a.agentName === selection?.agentName,
+    );
 
   const grid = (
     <CatalogueGrid
@@ -85,7 +87,7 @@ export function A2AAgentsOrganization() {
             />
           ) : (
             <SelectionStatusPanel
-              state={lookup.isLoading ? "loading" : "not-found"}
+              state={lookup.isLoading || lookup.isFetching || lookup.isPlaceholderData ? "loading" : "not-found"}
               onClose={clear}
             />
           )}

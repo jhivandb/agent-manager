@@ -34,6 +34,7 @@ import { diffSkills, parseA2ACard, type ParsedSkill } from "../utils/card";
 
 export interface CardDetailsProps {
   card: AgentCardResponse | null | undefined;
+  isLoading?: boolean;
   compareEnvOptions: string[];
   compareEnv: string;
   compareCard: AgentCardResponse | null | undefined;
@@ -146,12 +147,21 @@ function SkillDiff({ base, other }: { base: MaybeCard; other: MaybeCard }) {
 
 export function CardDetails({
   card,
+  isLoading = false,
   compareEnvOptions,
   compareEnv,
   compareCard,
   onCompareEnvChange,
 }: CardDetailsProps) {
   const [showRaw, setShowRaw] = useState(false);
+
+  if (isLoading && card === undefined) {
+    return (
+      <Typography variant="body2" color="text.secondary">
+        Loading card…
+      </Typography>
+    );
+  }
 
   if (!card) {
     return (

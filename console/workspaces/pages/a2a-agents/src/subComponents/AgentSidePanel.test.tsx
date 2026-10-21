@@ -112,6 +112,22 @@ describe("AgentSidePanel", () => {
     expect(screen.getByText("✗ pushNotifications")).toBeTruthy();
   });
 
+  it("shows a loading state, not a missing-card claim, while the card loads", () => {
+    vi.mocked(useGetAgentCard).mockImplementation((() => ({
+      data: undefined,
+      isLoading: true,
+    })) as unknown as typeof useGetAgentCard);
+    renderPanel();
+    expect(screen.getByText("Loading card…")).toBeTruthy();
+    expect(screen.queryByText(/no agent card is configured/i)).toBeNull();
+  });
+
+  it("says no card is configured once the card lookup returns not found", () => {
+    mockCards({ dev: null });
+    renderPanel();
+    expect(screen.getByText(/no agent card is configured/i)).toBeTruthy();
+  });
+
   it("shows how to connect next to the card", () => {
     mockCards({ dev: devCard });
     renderPanel();

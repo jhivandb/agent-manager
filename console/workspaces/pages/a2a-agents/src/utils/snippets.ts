@@ -29,16 +29,24 @@ export interface SnippetInput {
   cardUrl: string;
   endpointUrl: string;
   auth: SnippetAuth | null;
+  authUnmanaged?: boolean;
 }
 
 const stringLiteral = (value: string) => JSON.stringify(value);
 
 const shellQuote = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`;
 
+const unmanagedAuthNote =
+  "The platform does not manage this agent's security; add whatever auth its agent card declares.";
+
+const authNoteLine = (input: SnippetInput, commentPrefix: string) =>
+  input.authUnmanaged && !input.auth ? `${commentPrefix} ${unmanagedAuthNote}\n` : "";
+
 const endpointNote = (endpointUrl: string) =>
   `The card routes JSON-RPC calls to ${stringLiteral(endpointUrl)}.`;
 
-function pythonSnippet({ cardUrl, endpointUrl, auth }: SnippetInput): string {
+function pythonSnippet(input: SnippetInput): string {
+  const { cardUrl, endpointUrl, auth } = input;
   const headers = auth ? `headers={${stringLiteral(auth.header)}: ${stringLiteral(auth.value)}}` : "";
   return `# pip install a2a-sdk
 import asyncio
@@ -50,7 +58,7 @@ from a2a.types import Message, Part, Role, SendMessageRequest
 
 CARD_URL = ${stringLiteral(cardUrl)}
 # ${endpointNote(endpointUrl)}
-
+${authNoteLine(input, "#")}
 
 async def main() -> None:
     async with httpx.AsyncClient(${headers}) as http:
@@ -70,7 +78,8 @@ asyncio.run(main())
 `;
 }
 
-function typescriptSnippet({ cardUrl, endpointUrl, auth }: SnippetInput): string {
+function typescriptSnippet(input: SnippetInput): string {
+  const { cardUrl, endpointUrl, auth } = input;
   const headers = auth ? `{ ${stringLiteral(auth.header)}: ${stringLiteral(auth.value)} }` : "{}";
   return `// npm install @a2a-js/sdk
 import { Role, type SendMessageRequest } from "@a2a-js/sdk";
@@ -82,7 +91,7 @@ import {
 
 const cardUrl = ${stringLiteral(cardUrl)};
 // ${endpointNote(endpointUrl)}
-const headers: Record<string, string> = ${headers};
+${authNoteLine(input, "//")}const headers: Record<string, string> = ${headers};
 
 const fetchWithHeaders: typeof fetch = (input, init) =>
   fetch(input, { ...init, headers: { ...Object.fromEntries(new Headers(init?.headers)), ...headers } });
@@ -116,7 +125,8 @@ console.log(JSON.stringify(result, null, 2));
 `;
 }
 
-function curlSnippet({ cardUrl, endpointUrl, auth }: SnippetInput): string {
+function curlSnippet(input: SnippetInput): string {
+  const { cardUrl, endpointUrl, auth } = input;
   const authLine = auth ? `  -H ${shellQuote(`${auth.header}: ${auth.value}`)}` : null;
   const body = JSON.stringify(
     {
@@ -132,7 +142,7 @@ function curlSnippet({ cardUrl, endpointUrl, auth }: SnippetInput): string {
   );
   const lines = (...parts: (string | null)[]) =>
     parts.filter((part): part is string => part !== null).join(" \\\n");
-  return `# Fetch the agent card
+  return `${authNoteLine(input, "#")}# Fetch the agent card
 ${lines(`curl -s ${shellQuote(cardUrl)}`, authLine)}
 
 # Send a message (JSON-RPC SendMessage)
