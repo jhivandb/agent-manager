@@ -23,10 +23,14 @@ import type { A2ACatalogAgent } from "@agent-management-platform/types";
 
 vi.mock("@agent-management-platform/views", () => ({
   PageLayout: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  TextInput: () => null,
+  buildConfigureTabHref: () => "/configure",
 }));
 vi.mock("@agent-management-platform/api-client", () => ({
   useListA2AAgents: vi.fn(),
   useGetAgentCard: vi.fn(() => ({ data: undefined })),
+  useGetA2AConnect: vi.fn(() => ({ data: undefined, isLoading: true })),
+  useTestAgentAPIKey: vi.fn(() => ({ data: undefined })),
   useListEnvironments: vi.fn(() => ({ data: [] })),
   useListProjects: vi.fn(() => ({ data: { projects: [] } })),
 }));
@@ -34,6 +38,7 @@ vi.mock("@agent-management-platform/shared-component", () => ({
   ResourceListShell: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   CodeBlock: () => null,
   formatRelativeTime: () => "now",
+  monospaceInputSx: {},
 }));
 
 import { useListA2AAgents } from "@agent-management-platform/api-client";

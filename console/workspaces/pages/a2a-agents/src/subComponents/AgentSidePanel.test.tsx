@@ -23,10 +23,17 @@ import type { A2ACatalogAgent } from "@agent-management-platform/types";
 
 vi.mock("@agent-management-platform/api-client", () => ({
   useGetAgentCard: vi.fn(),
+  useGetA2AConnect: vi.fn(() => ({ data: undefined, isLoading: true })),
+  useTestAgentAPIKey: vi.fn(() => ({ data: undefined })),
 }));
 vi.mock("@agent-management-platform/shared-component", () => ({
   CodeBlock: ({ code }: { code: string }) => <pre data-testid="raw-json">{code}</pre>,
   formatRelativeTime: () => "2 minutes ago",
+  monospaceInputSx: {},
+}));
+vi.mock("@agent-management-platform/views", () => ({
+  TextInput: () => null,
+  buildConfigureTabHref: () => "/configure",
 }));
 
 import { useGetAgentCard } from "@agent-management-platform/api-client";
@@ -103,6 +110,12 @@ describe("AgentSidePanel", () => {
     expect(screen.getAllByText("order-status").length).toBeGreaterThan(0);
     expect(screen.getByText("✓ streaming")).toBeTruthy();
     expect(screen.getByText("✗ pushNotifications")).toBeTruthy();
+  });
+
+  it("shows how to connect next to the card", () => {
+    mockCards({ dev: devCard });
+    renderPanel();
+    expect(screen.getByTestId("connect-section")).toBeTruthy();
   });
 
   it("switches environment from the chips", () => {

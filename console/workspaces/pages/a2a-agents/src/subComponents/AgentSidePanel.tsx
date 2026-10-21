@@ -24,6 +24,7 @@ import { useGetAgentCard } from "@agent-management-platform/api-client";
 import type { A2ACatalogAgent } from "@agent-management-platform/types";
 import { parseA2ACard } from "../utils/card";
 import { CardDetails } from "./CardDetails";
+import { ConnectSection } from "./ConnectSection";
 
 const OWN_ESCAPE_SELECTOR = "input, textarea, [role=listbox], [role=menu]";
 
@@ -113,11 +114,7 @@ export function AgentSidePanel({ agent, env, onEnvChange, onClose }: AgentSidePa
             compareCard={compareCard}
             onCompareEnvChange={setCompareEnv}
           />
-          <Box data-testid="connect-section-placeholder">
-            <Typography variant="body2" color="text.secondary">
-              Connect details are coming soon.
-            </Typography>
-          </Box>
+          <ConnectSection agent={agent} env={env} />
         </Box>
       </Stack>
     </Box>
