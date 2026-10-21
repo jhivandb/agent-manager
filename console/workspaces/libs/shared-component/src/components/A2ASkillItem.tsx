@@ -56,7 +56,7 @@ export function A2ASkillItem({ skill }: A2ASkillItemProps) {
         {skill.tags.length > 0 && (
           <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
             {skill.tags.map((tag, index) => (
-              <Chip key={`${index}-${tag}`} label={tag} size="small" />
+              <Chip key={`${index}-${tag}`} label={tag} size="small" variant="outlined" />
             ))}
           </Stack>
         )}

@@ -44,6 +44,9 @@ describe("A2ASkillItem", () => {
     expect(screen.getByText("order-status")).toBeInTheDocument();
     expect(screen.getByText("Where an order is")).toBeInTheDocument();
     expect(screen.getAllByText("orders")).toHaveLength(2);
+    screen.getAllByText("orders").forEach((tag) => {
+      expect(tag.closest(".MuiChip-root")).toHaveClass("MuiChip-outlined");
+    });
     expect(screen.getByText("Input")).toBeInTheDocument();
     expect(screen.getByText("text/plain")).toBeInTheDocument();
     expect(screen.getByText("Output")).toBeInTheDocument();
