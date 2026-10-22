@@ -18,6 +18,8 @@ package repositories
 
 import (
 	"context"
+	"database/sql"
+	"fmt"
 	"strings"
 
 	"gorm.io/gorm"
@@ -48,107 +50,117 @@ const a2aCatalogProxied = `EXISTS (SELECT 1 FROM a2a_proxies p
 	WHERE p.ou_id = c.ou_id AND p.project_name = c.project_name
 	AND p.agent_name = c.agent_name AND p.environment_uuid = c.environment_uuid)`
 
-const a2aCatalogSearchMatch = `(c.agent_name ILIKE ? ESCAPE '\' OR c.card_search_text ILIKE ? ESCAPE '\')`
+const a2aCatalogSearchMatch = `(c.agent_name ILIKE @pattern ESCAPE '\' OR c.card_search_text ILIKE @pattern ESCAPE '\')`
 
-// sqlCondition is a SQL boolean expression with its bind arguments.
-type sqlCondition struct {
-	sql  string
-	args []interface{}
+func searchPattern(query string) sql.NamedArg {
+	return sql.Named("pattern", "%"+escapeLikePattern(query)+"%")
 }
 
-func searchCondition(query string) sqlCondition {
-	pattern := "%" + escapeLikePattern(query) + "%"
-	return sqlCondition{sql: a2aCatalogSearchMatch, args: []interface{}{pattern, pattern}}
-}
-
-// rowCondition is what one card row must satisfy for its agent to be in the catalogue.
-func rowCondition(filter models.A2ACatalogFilter) sqlCondition {
-	conds := []sqlCondition{{sql: "c.ou_id = ?", args: []interface{}{filter.OUID}}}
-	addEquals := func(column, value string) {
+// rowCondition is what one card row must satisfy for its agent to be in the catalogue, with its named arguments.
+func rowCondition(filter models.A2ACatalogFilter) (string, []any) {
+	conds := []string{"c.ou_id = @ou"}
+	args := []any{sql.Named("ou", filter.OUID)}
+	addEquals := func(column, name, value string) {
 		if value != "" {
-			conds = append(conds, sqlCondition{sql: column + " = ?", args: []interface{}{value}})
+			conds = append(conds, column+" = @"+name)
+			args = append(args, sql.Named(name, value))
 		}
 	}
-	addEquals("c.project_name", filter.Project)
-	addEquals("c.environment_name", filter.Environment)
-	addEquals("c.status", string(filter.Status))
+	addEquals("c.project_name", "project", filter.Project)
+	addEquals("c.environment_name", "env", filter.Environment)
+	addEquals("c.status", "status", string(filter.Status))
 	switch filter.Kind {
 	case models.A2ACatalogKindPlatform, models.A2ACatalogKindExternal:
-		addEquals("c.source", string(filter.Kind))
+		addEquals("c.source", "source", string(filter.Kind))
 	case models.A2ACatalogKindProxied:
-		conds = append(conds, sqlCondition{sql: a2aCatalogProxied})
+		conds = append(conds, a2aCatalogProxied)
 	}
 	if filter.Query != "" {
-		conds = append(conds, searchCondition(filter.Query))
+		conds = append(conds, a2aCatalogSearchMatch)
+		args = append(args, searchPattern(filter.Query))
 	}
-
-	sqls := make([]string, 0, len(conds))
-	var args []interface{}
-	for _, cond := range conds {
-		sqls = append(sqls, cond.sql)
-		args = append(args, cond.args...)
-	}
-	return sqlCondition{sql: strings.Join(sqls, " AND "), args: args}
+	return strings.Join(conds, " AND "), args
 }
 
-// matchedColumn is the per-row search flag; without a query no row is matched.
-func matchedColumn(query string) sqlCondition {
-	if query == "" {
-		return sqlCondition{sql: "false"}
-	}
-	search := searchCondition(query)
-	return sqlCondition{sql: "COALESCE(" + search.sql + ", false)", args: search.args}
-}
+type a2aCatalogAgentKey struct{ ProjectName, AgentName string }
 
 func (r *a2aCatalogRepository) List(ctx context.Context, filter models.A2ACatalogFilter) ([]models.A2ACatalogRow, int, error) {
-	where := rowCondition(filter)
+	where, args := rowCondition(filter)
 
+	// The window counts the matching agents before LIMIT applies, so one scan yields the page and the total.
+	pageSQL := `SELECT c.project_name, c.agent_name, COUNT(*) OVER () AS total
+		FROM a2a_agent_cards c WHERE ` + where + `
+		GROUP BY c.project_name, c.agent_name
+		ORDER BY c.project_name, c.agent_name`
+	if filter.Limit > 0 {
+		pageSQL += " LIMIT @limit"
+		args = append(args, sql.Named("limit", filter.Limit))
+	}
+	pageSQL += " OFFSET @offset"
+	args = append(args, sql.Named("offset", filter.Offset))
+
+	// Flat, not embedding a2aCatalogAgentKey: gorm skips an unexported embedded field, leaving the names empty.
+	var page []struct {
+		ProjectName, AgentName string
+		Total                  int
+	}
+	if err := r.db.WithContext(ctx).Raw(pageSQL, args...).Scan(&page).Error; err != nil {
+		return nil, 0, fmt.Errorf("list a2a catalogue agents: %w", err)
+	}
+	if len(page) == 0 {
+		total, err := r.countAgents(ctx, where, args)
+		return []models.A2ACatalogRow{}, total, err
+	}
+
+	agents := make([]a2aCatalogAgentKey, 0, len(page))
+	for _, p := range page {
+		agents = append(agents, a2aCatalogAgentKey{ProjectName: p.ProjectName, AgentName: p.AgentName})
+	}
+	rows, err := r.rowsOfAgents(ctx, filter.OUID, agents, filter.Query)
+	if err != nil {
+		return nil, 0, err
+	}
+	return rows, page[0].Total, nil
+}
+
+// countAgents counts the matching agents for a page past the last one, which has no row to carry the total.
+func (r *a2aCatalogRepository) countAgents(ctx context.Context, where string, args []any) (int, error) {
 	var total int
 	countSQL := `SELECT COUNT(*) FROM (
-		SELECT 1 FROM a2a_agent_cards c WHERE ` + where.sql + `
+		SELECT 1 FROM a2a_agent_cards c WHERE ` + where + `
 		GROUP BY c.project_name, c.agent_name
 	) m`
-	if err := r.db.WithContext(ctx).Raw(countSQL, where.args...).Scan(&total).Error; err != nil {
-		return nil, 0, err
+	if err := r.db.WithContext(ctx).Raw(countSQL, args...).Scan(&total).Error; err != nil {
+		return 0, fmt.Errorf("count a2a catalogue agents: %w", err)
 	}
-
-	args := append([]interface{}{}, where.args...)
-	page := "OFFSET ?"
-	if filter.Limit > 0 {
-		page = "LIMIT ? OFFSET ?"
-		args = append(args, filter.Limit)
-	}
-	args = append(args, filter.Offset)
-	matched := matchedColumn(filter.Query)
-	args = append(args, matched.args...)
-	args = append(args, filter.OUID)
-
-	rowsSQL := `WITH keys AS (
-		SELECT c.project_name, c.agent_name FROM a2a_agent_cards c WHERE ` + where.sql + `
-		GROUP BY c.project_name, c.agent_name
-		ORDER BY c.project_name, c.agent_name
-		` + page + `
-	)
-	SELECT c.*, ` + a2aCatalogProxied + ` AS proxied, ` + matched.sql + ` AS matched
-	FROM a2a_agent_cards c
-	JOIN keys k ON k.project_name = c.project_name AND k.agent_name = c.agent_name
-	WHERE c.ou_id = ?
-	ORDER BY c.project_name, c.agent_name, c.environment_name`
-	rows := []models.A2ACatalogRow{}
-	if err := r.db.WithContext(ctx).Raw(rowsSQL, args...).Scan(&rows).Error; err != nil {
-		return nil, 0, err
-	}
-	return rows, total, nil
+	return total, nil
 }
 
 func (r *a2aCatalogRepository) ListForAgent(ctx context.Context, ouID, projectName, agentName string) ([]models.A2ACatalogRow, error) {
-	rowsSQL := `SELECT c.*, ` + a2aCatalogProxied + ` AS proxied, false AS matched
+	return r.rowsOfAgents(ctx, ouID, []a2aCatalogAgentKey{{ProjectName: projectName, AgentName: agentName}}, "")
+}
+
+// rowsOfAgents loads every row of the given agents; a row is Matched when it satisfies the query on its own.
+func (r *a2aCatalogRepository) rowsOfAgents(ctx context.Context, ouID string, agents []a2aCatalogAgentKey, query string,
+) ([]models.A2ACatalogRow, error) {
+	pairs := make([][]any, 0, len(agents))
+	for _, a := range agents {
+		pairs = append(pairs, []any{a.ProjectName, a.AgentName})
+	}
+	args := []any{sql.Named("ou", ouID), sql.Named("pairs", pairs)}
+	matched := "false"
+	if query != "" {
+		matched = "COALESCE(" + a2aCatalogSearchMatch + ", false)"
+		args = append(args, searchPattern(query))
+	}
+
+	rowsSQL := `SELECT c.*, ` + a2aCatalogProxied + ` AS proxied, ` + matched + ` AS matched
 	FROM a2a_agent_cards c
-	WHERE c.ou_id = ? AND c.project_name = ? AND c.agent_name = ?
-	ORDER BY c.environment_name`
+	WHERE c.ou_id = @ou AND (c.project_name, c.agent_name) IN @pairs
+	ORDER BY c.project_name, c.agent_name, c.environment_name`
 	rows := []models.A2ACatalogRow{}
-	if err := r.db.WithContext(ctx).Raw(rowsSQL, ouID, projectName, agentName).Scan(&rows).Error; err != nil {
-		return nil, err
+	if err := r.db.WithContext(ctx).Raw(rowsSQL, args...).Scan(&rows).Error; err != nil {
+		return nil, fmt.Errorf("load a2a catalogue rows: %w", err)
 	}
 	return rows, nil
 }
