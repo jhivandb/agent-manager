@@ -49,6 +49,7 @@ export function A2AQuickStart({ inputs }: A2AQuickStartProps) {
   return (
     <Stack spacing={1}>
       <ToggleButtonGroup
+        aria-label="Snippet language"
         exclusive
         size="small"
         value={language}

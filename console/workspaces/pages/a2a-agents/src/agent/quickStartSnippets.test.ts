@@ -44,6 +44,9 @@ describe('buildQuickStartSnippet', () => {
     const withAuth = buildQuickStartSnippet(l, withKey);
     expect(withAuth).toContain('X-API-Key');
     expect(withAuth).toContain('k1');
+    if (l === 'curl') {
+      expect(withAuth.match(/-H 'X-API-Key: k1'/g)).toHaveLength(2);
+    }
     const without = buildQuickStartSnippet(l, base);
     expect(without).not.toContain('X-API-Key');
     expect(without).not.toContain('Authorization');

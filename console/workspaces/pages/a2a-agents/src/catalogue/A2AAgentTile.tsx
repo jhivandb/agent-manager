@@ -72,9 +72,9 @@ const SkillsRow: React.FC<{ skills: string[] }> = ({ skills }) => {
         flexWrap: 'nowrap',
       }}
     >
-      {skills.slice(0, VISIBLE_SKILLS).map((skill) => (
+      {skills.slice(0, VISIBLE_SKILLS).map((skill, index) => (
         <Chip
-          key={skill}
+          key={`${index}-${skill}`}
           label={skill}
           size="small"
           sx={{ ...smallChipSx, flexShrink: 0 }}
