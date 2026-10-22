@@ -69,7 +69,8 @@ func newCardReconcilerHarness(endpointURL string) *cardReconcilerHarness {
 		MarkAttemptFailedFunc: func(context.Context, models.A2AAgentCard, string, string, time.Time) error {
 			return nil
 		},
-		MarkFailedFunc: func(context.Context, models.A2AAgentCard, string, string) error { return nil },
+		MarkFailedFunc:                      func(context.Context, models.A2AAgentCard, string, string) error { return nil },
+		RequeueFetchedWithoutProjectionFunc: func(context.Context) (int64, error) { return 0, nil },
 	}
 	fetcher := &fakeA2ACardFetcher{
 		FetchFunc: func(context.Context, string, bool) (json.RawMessage, error) {
@@ -245,6 +246,31 @@ func TestCardReconcilerRunOnceDrainsTheDueBatch(t *testing.T) {
 	h.svc.RunOnce(context.Background())
 
 	assert.Len(t, h.repo.MarkFetchedCalls(), 2)
+}
+
+// During a rolling upgrade an old pod can store a requeued card without its projection; every tick makes such
+// rows due again, within one attempt's timeout, and a failure to do so does not stop the tick's batch.
+func TestCardReconcilerRequeuesFetchedCardsWithoutAProjectionEachTick(t *testing.T) {
+	for name, sweepErr := range map[string]error{"requeued": nil, "requeue failed": assert.AnError} {
+		t.Run(name, func(t *testing.T) {
+			h := newCardReconcilerHarness("http://gw.example/a")
+			var deadlineSet bool
+			h.repo.RequeueFetchedWithoutProjectionFunc = func(ctx context.Context) (int64, error) {
+				_, deadlineSet = ctx.Deadline()
+				return 3, sweepErr
+			}
+			h.repo.ClaimDueFunc = func(context.Context, time.Time, int) ([]models.A2AAgentCard, error) {
+				return []models.A2AAgentCard{pendingCard(models.A2AAgentCardSourcePlatform)}, nil
+			}
+
+			h.svc.RunOnce(context.Background())
+			h.svc.RunOnce(context.Background())
+
+			assert.Len(t, h.repo.RequeueFetchedWithoutProjectionCalls(), 2)
+			assert.True(t, deadlineSet, "the update is bounded like an attempt")
+			assert.Len(t, h.repo.MarkFetchedCalls(), 2, "the due batch is still drained")
+		})
+	}
 }
 
 func TestA2ACardHashIgnoresKeyOrderAndWhitespace(t *testing.T) {

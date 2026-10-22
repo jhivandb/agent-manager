@@ -253,6 +253,44 @@ func newTestCardLike(card *models.A2AAgentCard) *models.A2AAgentCard {
 }
 
 // A row whose retry is scheduled for later is not handed out until then.
+// A pod from before the projection stores a requeued card without one during a rolling upgrade; the sweep makes
+// that row due again, keeping its card, and leaves projected and pending rows as they were.
+func TestA2AAgentCardRequeueFetchedWithoutProjectionResetsOnlyUnprojectedRows(t *testing.T) {
+	repo := NewA2AAgentCardRepository(db.GetDB())
+	ctx := context.Background()
+	fetchCard := func(prefix string, projection models.A2ACardProjection) *models.A2AAgentCard {
+		card := newTestCard(prefix+uuid.New().String()[:8], models.A2AAgentCardSourcePlatform)
+		cleanupCard(t, repo, card)
+		require.NoError(t, repo.Enqueue(ctx, card))
+		require.NoError(t, repo.MarkFetched(ctx, dueCardFor(t, repo, card.AgentName), json.RawMessage(sampleCard), "h", "u", "", projection))
+		return card
+	}
+	unprojected := fetchCard("unprojected-", models.A2ACardProjection{})
+	projected := fetchCard("projected-", sampleProjection)
+	pending := newTestCard("pending-"+uuid.New().String()[:8], models.A2AAgentCardSourcePlatform)
+	cleanupCard(t, repo, pending)
+	require.NoError(t, repo.Enqueue(ctx, pending))
+	retryAt := time.Now().Add(time.Hour).Truncate(time.Microsecond)
+	require.NoError(t, repo.MarkAttemptFailed(ctx, dueCardFor(t, repo, pending.AgentName), "not ready", "", retryAt))
+
+	n, err := repo.RequeueFetchedWithoutProjection(ctx)
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, n, int64(1))
+
+	got := cardRowOf(t, unprojected)
+	assert.Equal(t, models.A2AAgentCardStatusPending, got.Status)
+	assert.Zero(t, got.AttemptCount)
+	require.NotNil(t, got.NextAttemptAt)
+	assert.False(t, got.NextAttemptAt.After(time.Now()), "the row is due now")
+	assert.JSONEq(t, sampleCard, string(got.Card), "readers keep the card until the refetch lands")
+
+	assert.Equal(t, models.A2AAgentCardStatusFetched, cardRowOf(t, projected).Status, "a projected card is not refetched")
+	stillPending := cardRowOf(t, pending)
+	assert.Equal(t, 1, stillPending.AttemptCount, "a pending row keeps its budget")
+	require.NotNil(t, stillPending.NextAttemptAt)
+	assert.WithinDuration(t, retryAt, *stillPending.NextAttemptAt, time.Millisecond, "a pending row keeps its backoff")
+}
+
 func TestA2AAgentCardClaimDueRespectsBackoff(t *testing.T) {
 	repo := NewA2AAgentCardRepository(db.GetDB())
 	ctx := context.Background()

@@ -72,6 +72,9 @@ import (
 //			RequeueFunc: func(ctx context.Context, ouID string, projectName string, agentName string, environmentName string) error {
 //				panic("mock out the Requeue method")
 //			},
+//			RequeueFetchedWithoutProjectionFunc: func(ctx context.Context) (int64, error) {
+//				panic("mock out the RequeueFetchedWithoutProjection method")
+//			},
 //			WithTxFunc: func(tx *gorm.DB) repositories.A2AAgentCardRepository {
 //				panic("mock out the WithTx method")
 //			},
@@ -132,6 +135,9 @@ type A2AAgentCardRepositoryMock struct {
 
 	// RequeueFunc mocks the Requeue method.
 	RequeueFunc func(ctx context.Context, ouID string, projectName string, agentName string, environmentName string) error
+
+	// RequeueFetchedWithoutProjectionFunc mocks the RequeueFetchedWithoutProjection method.
+	RequeueFetchedWithoutProjectionFunc func(ctx context.Context) (int64, error)
 
 	// WithTxFunc mocks the WithTx method.
 	WithTxFunc func(tx *gorm.DB) repositories.A2AAgentCardRepository
@@ -331,30 +337,36 @@ type A2AAgentCardRepositoryMock struct {
 			// EnvironmentName is the environmentName argument value.
 			EnvironmentName string
 		}
+		// RequeueFetchedWithoutProjection holds details about calls to the RequeueFetchedWithoutProjection method.
+		RequeueFetchedWithoutProjection []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+		}
 		// WithTx holds details about calls to the WithTx method.
 		WithTx []struct {
 			// Tx is the tx argument value.
 			Tx *gorm.DB
 		}
 	}
-	lockClaimDue                  sync.RWMutex
-	lockClearCard                 sync.RWMutex
-	lockDeleteForAgent            sync.RWMutex
-	lockDeleteForAgentEnv         sync.RWMutex
-	lockDeleteForEnvironment      sync.RWMutex
-	lockDeleteIfUnchanged         sync.RWMutex
-	lockDeletePlatformForAgentEnv sync.RWMutex
-	lockEnqueue                   sync.RWMutex
-	lockFailParked                sync.RWMutex
-	lockGet                       sync.RWMutex
-	lockListEnvironmentUUIDs      sync.RWMutex
-	lockListForAgent              sync.RWMutex
-	lockListForEnvironment        sync.RWMutex
-	lockMarkAttemptFailed         sync.RWMutex
-	lockMarkFailed                sync.RWMutex
-	lockMarkFetched               sync.RWMutex
-	lockRequeue                   sync.RWMutex
-	lockWithTx                    sync.RWMutex
+	lockClaimDue                        sync.RWMutex
+	lockClearCard                       sync.RWMutex
+	lockDeleteForAgent                  sync.RWMutex
+	lockDeleteForAgentEnv               sync.RWMutex
+	lockDeleteForEnvironment            sync.RWMutex
+	lockDeleteIfUnchanged               sync.RWMutex
+	lockDeletePlatformForAgentEnv       sync.RWMutex
+	lockEnqueue                         sync.RWMutex
+	lockFailParked                      sync.RWMutex
+	lockGet                             sync.RWMutex
+	lockListEnvironmentUUIDs            sync.RWMutex
+	lockListForAgent                    sync.RWMutex
+	lockListForEnvironment              sync.RWMutex
+	lockMarkAttemptFailed               sync.RWMutex
+	lockMarkFailed                      sync.RWMutex
+	lockMarkFetched                     sync.RWMutex
+	lockRequeue                         sync.RWMutex
+	lockRequeueFetchedWithoutProjection sync.RWMutex
+	lockWithTx                          sync.RWMutex
 }
 
 // ClaimDue calls ClaimDueFunc.
@@ -1114,6 +1126,38 @@ func (mock *A2AAgentCardRepositoryMock) RequeueCalls() []struct {
 	mock.lockRequeue.RLock()
 	calls = mock.calls.Requeue
 	mock.lockRequeue.RUnlock()
+	return calls
+}
+
+// RequeueFetchedWithoutProjection calls RequeueFetchedWithoutProjectionFunc.
+func (mock *A2AAgentCardRepositoryMock) RequeueFetchedWithoutProjection(ctx context.Context) (int64, error) {
+	if mock.RequeueFetchedWithoutProjectionFunc == nil {
+		panic("A2AAgentCardRepositoryMock.RequeueFetchedWithoutProjectionFunc: method is nil but A2AAgentCardRepository.RequeueFetchedWithoutProjection was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+	}{
+		Ctx: ctx,
+	}
+	mock.lockRequeueFetchedWithoutProjection.Lock()
+	mock.calls.RequeueFetchedWithoutProjection = append(mock.calls.RequeueFetchedWithoutProjection, callInfo)
+	mock.lockRequeueFetchedWithoutProjection.Unlock()
+	return mock.RequeueFetchedWithoutProjectionFunc(ctx)
+}
+
+// RequeueFetchedWithoutProjectionCalls gets all the calls that were made to RequeueFetchedWithoutProjection.
+// Check the length with:
+//
+//	len(mockedA2AAgentCardRepository.RequeueFetchedWithoutProjectionCalls())
+func (mock *A2AAgentCardRepositoryMock) RequeueFetchedWithoutProjectionCalls() []struct {
+	Ctx context.Context
+} {
+	var calls []struct {
+		Ctx context.Context
+	}
+	mock.lockRequeueFetchedWithoutProjection.RLock()
+	calls = mock.calls.RequeueFetchedWithoutProjection
+	mock.lockRequeueFetchedWithoutProjection.RUnlock()
 	return calls
 }
 

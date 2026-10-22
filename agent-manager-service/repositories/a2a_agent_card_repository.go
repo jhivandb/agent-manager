@@ -57,6 +57,9 @@ type A2AAgentCardRepository interface {
 
 	// ClaimDue leases up to limit pending rows whose next_attempt_at has passed; NULL is never due.
 	ClaimDue(ctx context.Context, now time.Time, limit int) ([]models.A2AAgentCard, error)
+	// RequeueFetchedWithoutProjection makes every fetched card that has no fingerprint due again and reports how many;
+	// during a rolling upgrade a pod from before the projection can store a card without one.
+	RequeueFetchedWithoutProjection(ctx context.Context) (int64, error)
 
 	// The Mark* methods act on the row as ClaimDue returned it and return
 	// ErrA2AAgentCardSuperseded when updated_at moved (a newer Enqueue).
@@ -246,6 +249,17 @@ func (r *a2aAgentCardRepository) ClaimDue(ctx context.Context, now time.Time, li
 		return nil, err
 	}
 	return claimed, nil
+}
+
+func (r *a2aAgentCardRepository) RequeueFetchedWithoutProjection(ctx context.Context) (int64, error) {
+	res := r.db.WithContext(ctx).Model(&models.A2AAgentCard{}).
+		Where("status = ? AND card IS NOT NULL AND card_fingerprint = ''", models.A2AAgentCardStatusFetched).
+		Updates(map[string]interface{}{
+			"status":          models.A2AAgentCardStatusPending,
+			"attempt_count":   0,
+			"next_attempt_at": time.Now(),
+		})
+	return res.RowsAffected, res.Error
 }
 
 func (r *a2aAgentCardRepository) MarkFetched(
