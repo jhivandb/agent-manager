@@ -33,6 +33,8 @@ import { metaData } from './index';
 
 vi.mock('@agent-management-platform/api-client', () => ({
   useListA2ACatalog: vi.fn(),
+  useGetA2ACatalogEntry: vi.fn(() => ({ data: undefined, isLoading: true, isError: false })),
+  useGetAgentCard: vi.fn(() => ({ data: undefined, isLoading: false, isError: false })),
   useListEnvironments: vi.fn(() => ({ data: [] })),
   useListProjects: vi.fn(() => ({ data: { projects: [] } })),
 }));
