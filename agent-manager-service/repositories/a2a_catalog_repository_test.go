@@ -260,6 +260,22 @@ func TestA2ACatalogListEscapesWildcards(t *testing.T) {
 	assert.Empty(t, rows)
 }
 
+// A backslash is the LIKE escape character, so it is the one a missed escape turns into a broken or wider pattern.
+func TestA2ACatalogListMatchesABackslashLiterally(t *testing.T) {
+	catalog, cards, _ := catalogRepos()
+	ou := newCatalogOU()
+	seedFetchedCard(t, cards, ou, "p", "greeter", "dev", `say "hi" \ now`)
+	seedFetchedCard(t, cards, ou, "p", "clock", "dev", "right now")
+
+	rows, total := listCatalog(t, catalog, models.A2ACatalogFilter{OUID: ou, Query: `\`, Limit: 10})
+	assert.Equal(t, 1, total)
+	assert.Equal(t, []string{"greeter/dev"}, rowKeys(rows))
+
+	rows, total = listCatalog(t, catalog, models.A2ACatalogFilter{OUID: ou, Query: `\ now`, Limit: 10})
+	assert.Equal(t, 1, total)
+	assert.Equal(t, []string{"greeter/dev"}, rowKeys(rows), "the backslash is not taken as escaping the space")
+}
+
 func TestA2ACatalogListLeavesPendingAgentsOutOfSearch(t *testing.T) {
 	catalog, cards, _ := catalogRepos()
 	ou := newCatalogOU()
