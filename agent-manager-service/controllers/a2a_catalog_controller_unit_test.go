@@ -163,12 +163,16 @@ func TestListA2AAgentsRejectsBadParameters(t *testing.T) {
 			assert.Contains(t, rec.Body.String(), `"`+tc.wantMsg+`"`)
 		})
 	}
-	for _, query := range []string{"limit=1", "limit=100", "q=" + strings.Repeat("é", 255)} {
-		t.Run("accepts "+query[:min(len(query), 12)], func(t *testing.T) {
+	for _, tc := range []struct{ name, query string }{
+		{"smallest limit", "limit=1"},
+		{"largest limit", "limit=100"},
+		{"longest multibyte query", "q=" + strings.Repeat("é", 255)},
+	} {
+		t.Run("accepts "+tc.name, func(t *testing.T) {
 			var got models.A2ACatalogFilter
 			rec := httptest.NewRecorder()
 
-			NewA2ACatalogController(capturingList(&got, models.A2ACatalogPage{})).ListA2AAgents(rec, catalogListRequest(query))
+			NewA2ACatalogController(capturingList(&got, models.A2ACatalogPage{})).ListA2AAgents(rec, catalogListRequest(tc.query))
 
 			assert.Equal(t, http.StatusOK, rec.Code)
 		})
