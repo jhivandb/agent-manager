@@ -248,27 +248,34 @@ func TestCardReconcilerRunOnceDrainsTheDueBatch(t *testing.T) {
 	assert.Len(t, h.repo.MarkFetchedCalls(), 2)
 }
 
-// During a rolling upgrade an old pod can store a requeued card without its projection; every tick makes such
-// rows due again, within one attempt's timeout, and a failure to do so does not stop the tick's batch.
-func TestCardReconcilerRequeuesFetchedCardsWithoutAProjectionEachTick(t *testing.T) {
+// During a rolling upgrade an old pod can store a requeued card without its projection; starting makes such rows due
+// again, within one attempt's timeout, and a failure to do so does not stop the reconciler.
+func TestCardReconcilerRequeuesFetchedCardsWithoutAProjectionOnStart(t *testing.T) {
 	for name, sweepErr := range map[string]error{"requeued": nil, "requeue failed": assert.AnError} {
 		t.Run(name, func(t *testing.T) {
 			h := newCardReconcilerHarness("http://gw.example/a")
-			var deadlineSet bool
+			swept := make(chan bool, 1)
 			h.repo.RequeueFetchedWithoutProjectionFunc = func(ctx context.Context) (int64, error) {
-				_, deadlineSet = ctx.Deadline()
+				_, deadlineSet := ctx.Deadline()
+				swept <- deadlineSet
 				return 3, sweepErr
 			}
 			h.repo.ClaimDueFunc = func(context.Context, time.Time, int) ([]models.A2AAgentCard, error) {
 				return []models.A2AAgentCard{pendingCard(models.A2AAgentCardSourcePlatform)}, nil
 			}
 
-			h.svc.RunOnce(context.Background())
+			require.NoError(t, h.svc.Start(context.Background()))
+			defer func() { require.NoError(t, h.svc.Stop()) }()
+			select {
+			case deadlineSet := <-swept:
+				assert.True(t, deadlineSet, "the update is bounded like an attempt")
+			case <-time.After(5 * time.Second):
+				t.Fatal("start did not requeue cards stored without a projection")
+			}
 			h.svc.RunOnce(context.Background())
 
-			assert.Len(t, h.repo.RequeueFetchedWithoutProjectionCalls(), 2)
-			assert.True(t, deadlineSet, "the update is bounded like an attempt")
-			assert.Len(t, h.repo.MarkFetchedCalls(), 2, "the due batch is still drained")
+			assert.Len(t, h.repo.RequeueFetchedWithoutProjectionCalls(), 1, "ticks do not repeat the requeue")
+			assert.Len(t, h.repo.MarkFetchedCalls(), 1, "the due batch is still drained")
 		})
 	}
 }

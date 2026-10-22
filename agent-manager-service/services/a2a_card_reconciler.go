@@ -139,7 +139,6 @@ func (s *a2aCardReconcilerService) runLoop(ctx context.Context) {
 }
 
 func (s *a2aCardReconcilerService) RunOnce(ctx context.Context) {
-	s.requeueFetchedWithoutProjection(ctx)
 	claimedAt := time.Now()
 	due, err := s.cardRepo.ClaimDue(ctx, claimedAt, a2aCardBatch)
 	if err != nil {
@@ -149,15 +148,15 @@ func (s *a2aCardReconcilerService) RunOnce(ctx context.Context) {
 	drainWithinLease(ctx, s.logger, claimedAt.Add(s.batchBudget), due, "A2A card", s.fetchOne)
 }
 
-// requeueFetchedWithoutProjection runs at start and on every tick, not only in migration 049: while a rolling upgrade
-// lasts, a pod from before the projection can claim a requeued row and store its card without one. Once every pod
-// writes the projection the update matches nothing.
+// requeueFetchedWithoutProjection runs once at start, not only in migration 049: while a rolling upgrade lasts, a pod
+// from before the projection can claim a requeued row and store its card without one, and each new pod's start sweeps
+// up what the old pods stored before it.
 func (s *a2aCardReconcilerService) requeueFetchedWithoutProjection(ctx context.Context) {
 	ctx, cancel := context.WithTimeout(ctx, s.attemptTimeout)
 	defer cancel()
 	n, err := s.cardRepo.RequeueFetchedWithoutProjection(ctx)
 	if err != nil {
-		s.logger.Error("Failed to requeue A2A agent cards stored without a projection; retrying next tick",
+		s.logger.Error("Failed to requeue A2A agent cards stored without a projection",
 			"error", err)
 		return
 	}
