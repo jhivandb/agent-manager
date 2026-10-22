@@ -252,7 +252,6 @@ func newTestCardLike(card *models.A2AAgentCard) *models.A2AAgentCard {
 	return again
 }
 
-// A row whose retry is scheduled for later is not handed out until then.
 // A pod from before the projection stores a requeued card without one during a rolling upgrade; the sweep makes
 // that row due again, keeping its card, and leaves projected and pending rows as they were.
 func TestA2AAgentCardRequeueFetchedWithoutProjectionResetsOnlyUnprojectedRows(t *testing.T) {
@@ -291,6 +290,7 @@ func TestA2AAgentCardRequeueFetchedWithoutProjectionResetsOnlyUnprojectedRows(t 
 	assert.WithinDuration(t, retryAt, *stillPending.NextAttemptAt, time.Millisecond, "a pending row keeps its backoff")
 }
 
+// A row whose retry is scheduled for later is not handed out until then.
 func TestA2AAgentCardClaimDueRespectsBackoff(t *testing.T) {
 	repo := NewA2AAgentCardRepository(db.GetDB())
 	ctx := context.Background()
