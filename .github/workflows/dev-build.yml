@@ -13,10 +13,6 @@ on:
         default: "main"
         type: string
 
-concurrency:
-  group: dev-build
-  cancel-in-progress: false
-
 # Fixed to the registry the quick-start installer and the charts default to.
 env:
   REGISTRY: ghcr.io
@@ -209,14 +205,16 @@ jobs:
         env:
           SHA: ${{ needs.prepare.outputs.sha }}
           VERSION: ${{ needs.prepare.outputs.version }}
-        # The version embeds the commit, so an existing tag is a same-day rerun of this commit.
+        # The version embeds the commit, so an existing tag is a same-day build of this
+        # commit, possibly a concurrent run that pushed it first.
         run: |
           TAG="amp/v${VERSION}"
-          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null; then
+          tag_exists() { git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null; }
+          if tag_exists; then
             echo "Tag $TAG already exists; keeping it."
           else
             git tag -a "$TAG" -m "Dev build ${VERSION} from ${SHA:0:7}" "$SHA"
-            git push origin "$TAG"
+            git push origin "$TAG" || tag_exists
           fi
 
       - name: Write run instructions
