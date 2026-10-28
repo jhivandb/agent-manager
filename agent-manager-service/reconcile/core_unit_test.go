@@ -497,6 +497,9 @@ func TestMarkStaleRequeuesAndRedeploys(t *testing.T) {
 	h.intents.GetByScopeFunc = func(context.Context, string, uuid.UUID, models.DeployScope) (*models.DeployIntent, error) {
 		return nil, repositories.ErrDeployIntentNotFound
 	}
+	h.intents.StatusRowsFunc = func(context.Context, models.DeployIntent) ([]models.DeploymentStatusRecord, error) {
+		return nil, nil
+	}
 	assert.ErrorIs(t, h.core.MarkStale(ctx, testKind, "ou-1", h.intent.ArtifactUUID, done.Scope(), "x"),
 		repositories.ErrDeployIntentNotFound)
 }

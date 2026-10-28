@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"time"
 
@@ -162,49 +163,56 @@ type sent struct {
 }
 
 func (c *Core) deploy(ctx context.Context, kind Kind, intent models.DeployIntent) error {
-	targets, err := kind.Targets(ctx, intent)
+	targets, rendered, err := c.render(ctx, kind, intent, nil)
 	if err != nil {
 		return err
 	}
-	if len(targets) == 0 {
-		return errors.New("the artifact has no gateway to deploy to")
-	}
-	rendered := make([]Rendered, len(targets))
-	for i, gatewayID := range targets {
-		if rendered[i], err = kind.Render(ctx, intent, gatewayID); err != nil {
-			return err
-		}
-	}
-
 	var done models.DeployIntent
-	deployments := make([]sent, 0, len(targets))
+	var written []*models.Deployment
 	err = c.tx(ctx, func(tx *gorm.DB) error {
-		// Marked first: the row lock it takes orders this against a teardown deleting the intent.
-		if done, err = c.intents.WithTx(tx).MarkDone(ctx, intent); err != nil {
-			return err
-		}
-		for i, gatewayID := range targets {
-			deployment := &models.Deployment{
-				DeploymentID: uuid.New(),
-				Name:         rendered[i].Name,
-				ArtifactUUID: intent.ArtifactUUID,
-				OUID:         intent.OUID,
-				GatewayUUID:  gatewayID,
-				Content:      rendered[i].Content,
-			}
-			if err := c.deployments.WithTx(tx).CreateWithLimitEnforcement(deployment, c.cfg.DeploymentHardLimit); err != nil {
-				return fmt.Errorf("failed to write the deployment for gateway %s: %w", gatewayID, err)
-			}
-			deployments = append(deployments, sent{gatewayID, deployment.DeploymentID.String(), *deployment.PerformedAt})
-		}
-		return nil
+		done, written, err = c.writeDeployments(ctx, tx, intent, targets, rendered, nil)
+		return err
 	})
 	if err != nil {
 		return err
 	}
+	deployments := make([]sent, 0, len(written))
+	for _, d := range written {
+		deployments = append(deployments, sent{d.GatewayUUID, d.DeploymentID.String(), *d.PerformedAt})
+	}
 	c.publish(ctx, kind, done, kind.DeployEvent, deployments)
 	c.withdrawIfGone(ctx, kind, done, targets)
 	return nil
+}
+
+// writeDeployments marks intent done and writes a deployment per target in tx, DEPLOYING.
+func (c *Core) writeDeployments(
+	ctx context.Context, tx *gorm.DB, intent models.DeployIntent, targets []uuid.UUID, rendered []Rendered, override *Override,
+) (models.DeployIntent, []*models.Deployment, error) {
+	// Marked first: the row lock it takes orders this against a teardown deleting the intent.
+	done, err := c.intents.WithTx(tx).MarkDone(ctx, intent)
+	if err != nil {
+		return models.DeployIntent{}, nil, err
+	}
+	deployments := make([]*models.Deployment, 0, len(targets))
+	for i, gatewayID := range targets {
+		deployment := &models.Deployment{
+			DeploymentID: uuid.New(),
+			Name:         rendered[i].Name,
+			ArtifactUUID: intent.ArtifactUUID,
+			OUID:         intent.OUID,
+			GatewayUUID:  gatewayID,
+			Content:      rendered[i].Content,
+		}
+		if override != nil {
+			deployment.BaseDeploymentID, deployment.Metadata = override.BaseDeploymentID, override.Metadata
+		}
+		if err := c.deployments.WithTx(tx).CreateWithLimitEnforcement(deployment, c.cfg.DeploymentHardLimit); err != nil {
+			return models.DeployIntent{}, nil, fmt.Errorf("failed to write the deployment for gateway %s: %w", gatewayID, err)
+		}
+		deployments = append(deployments, deployment)
+	}
+	return done, deployments, nil
 }
 
 func (c *Core) undeploy(ctx context.Context, kind Kind, intent models.DeployIntent) error {
@@ -215,28 +223,37 @@ func (c *Core) undeploy(ctx context.Context, kind Kind, intent models.DeployInte
 	var done models.DeployIntent
 	var undeployments []sent
 	err = c.tx(ctx, func(tx *gorm.DB) error {
-		if done, err = c.intents.WithTx(tx).MarkDone(ctx, intent); err != nil {
-			return err
-		}
-		undeployments = undeployments[:0]
-		for _, row := range rows {
-			gatewayID := row.GatewayUUID.String()
-			id, performedAt, err := c.deployments.WithTx(tx).BeginUndeploy(ctx, intent.ArtifactUUID.String(), intent.OUID, gatewayID)
-			if errors.Is(err, utils.ErrDeploymentNotActive) {
-				continue
-			}
-			if err != nil {
-				return fmt.Errorf("failed to undeploy from gateway %s: %w", gatewayID, err)
-			}
-			undeployments = append(undeployments, sent{row.GatewayUUID, id, performedAt})
-		}
-		return nil
+		done, undeployments, err = c.beginUndeploys(ctx, tx, intent, rows)
+		return err
 	})
 	if err != nil {
 		return err
 	}
 	c.publish(ctx, kind, done, kind.UndeployEvent, undeployments)
 	return nil
+}
+
+// beginUndeploys marks intent done and moves each of rows still placed to UNDEPLOYING, in tx.
+func (c *Core) beginUndeploys(
+	ctx context.Context, tx *gorm.DB, intent models.DeployIntent, rows []models.DeploymentStatusRecord,
+) (models.DeployIntent, []sent, error) {
+	done, err := c.intents.WithTx(tx).MarkDone(ctx, intent)
+	if err != nil {
+		return models.DeployIntent{}, nil, err
+	}
+	var undeployments []sent
+	for _, row := range rows {
+		gatewayID := row.GatewayUUID.String()
+		id, performedAt, err := c.deployments.WithTx(tx).BeginUndeploy(ctx, intent.ArtifactUUID.String(), intent.OUID, gatewayID)
+		if errors.Is(err, utils.ErrDeploymentNotActive) {
+			continue
+		}
+		if err != nil {
+			return models.DeployIntent{}, nil, fmt.Errorf("failed to undeploy from gateway %s: %w", gatewayID, err)
+		}
+		undeployments = append(undeployments, sent{row.GatewayUUID, id, performedAt})
+	}
+	return done, undeployments, nil
 }
 
 // publish sends each deployment's event once its transaction has committed. A failure is left to
@@ -292,14 +309,20 @@ func (c *Core) withdrawIfGone(ctx context.Context, kind Kind, done models.Deploy
 // an input (not charged), failed for now and retried after Config.RetryIn, or failed for good
 // once the attempt budget is spent or the failure is permanent.
 func (c *Core) Process(ctx context.Context, intent models.DeployIntent) {
+	_ = c.process(ctx, intent)
+}
+
+// process is Process returning the attempt's error, already recorded.
+func (c *Core) process(ctx context.Context, intent models.DeployIntent) error {
 	ctx = orgctx.WithResolvedOrg(ctx, orgctx.ResolvedOrg{OUID: intent.OUID})
 	attemptCtx, cancel := context.WithTimeout(ctx, c.cfg.AttemptTimeout)
 	defer cancel()
 	err := c.Reconcile(attemptCtx, intent)
 	if err == nil {
-		return
+		return nil
 	}
 	c.recordFailure(context.WithoutCancel(ctx), intent, err)
+	return err
 }
 
 func (c *Core) recordFailure(ctx context.Context, intent models.DeployIntent, cause error) {
@@ -361,19 +384,61 @@ func (c *Core) logSuperseded(intent models.DeployIntent) {
 }
 
 // MarkStale re-renders the artifact in its scope because an input outside its edited state
-// changed: it requeues the artifact's intent and processes it. An intent to undeploy is left
-// alone. It returns repositories.ErrDeployIntentNotFound when the artifact has no intent there.
+// changed: it requeues the artifact's intent and processes it, returning the attempt's error once
+// recorded (an input that is not ready is not one). An intent to undeploy is left alone. An
+// artifact placed in scope before its kind had intents gets one first, from its status row; it
+// returns repositories.ErrDeployIntentNotFound when nothing is placed there.
 func (c *Core) MarkStale(ctx context.Context, kind, ouID string, artifactUUID uuid.UUID, scope models.DeployScope, reason string) error {
+	k, err := c.kind(kind)
+	if err != nil {
+		return err
+	}
 	intent, err := c.intents.GetByScope(ctx, ouID, artifactUUID, scope)
+	if errors.Is(err, repositories.ErrDeployIntentNotFound) {
+		intent, err = c.adopt(ctx, k, ouID, artifactUUID, scope)
+	}
 	if err != nil {
 		return err
 	}
 	if intent.Kind != kind {
 		return fmt.Errorf("the artifact's intent is of kind %s, not %s", intent.Kind, kind)
 	}
-	return c.markStale(ctx, *intent, reason)
+	err = c.markStale(ctx, *intent, reason)
+	if errors.Is(err, ErrInputNotReady) {
+		return nil
+	}
+	return err
 }
 
+// adopt records an intent for an artifact placed in scope by a deployment made before its kind
+// had intents, so it can be redeployed like any other.
+func (c *Core) adopt(ctx context.Context, kind Kind, ouID string, artifactUUID uuid.UUID, scope models.DeployScope) (*models.DeployIntent, error) {
+	intent := &models.DeployIntent{
+		OUID: ouID, Kind: kind.Name(), ArtifactUUID: artifactUUID,
+		EnvironmentUUID: scope.EnvironmentUUID, GatewayUUID: scope.GatewayUUID, Desired: models.DeploymentStatusDeployed,
+	}
+	rows, err := c.intents.StatusRows(ctx, *intent)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read the artifact's deployments: %w", err)
+	}
+	if !slices.ContainsFunc(rows, func(row models.DeploymentStatusRecord) bool {
+		return row.StatusDesired == models.DeploymentStatusDeployed
+	}) {
+		return nil, repositories.ErrDeployIntentNotFound
+	}
+	if adopter, ok := kind.(Adopter); ok {
+		if err := adopter.Adopt(ctx, intent); err != nil {
+			return nil, fmt.Errorf("failed to adopt the artifact's deployment: %w", err)
+		}
+	}
+	if err := c.intents.Upsert(ctx, intent); err != nil {
+		return nil, fmt.Errorf("failed to record the deploy intent: %w", err)
+	}
+	c.logger.Info("Adopted a deployment made before deploy intents", intentAttrs(*intent)...)
+	return intent, nil
+}
+
+// markStale requeues intent and processes it, returning the requeue's error or the attempt's.
 func (c *Core) markStale(ctx context.Context, intent models.DeployIntent, reason string) error {
 	if intent.Desired != models.DeploymentStatusDeployed {
 		return nil
@@ -390,8 +455,7 @@ func (c *Core) markStale(ctx context.Context, intent models.DeployIntent, reason
 	if err != nil {
 		return fmt.Errorf("failed to read the requeued deploy intent: %w", err)
 	}
-	c.Process(ctx, *requeued)
-	return nil
+	return c.process(ctx, *requeued)
 }
 
 // Status is where an artifact's deployment in one scope stands.

@@ -18,6 +18,7 @@ package reconcile
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 
@@ -239,8 +240,9 @@ func (w *Worker) checkDrift(ctx context.Context) {
 			if !drifted {
 				continue
 			}
-			if err := c.markStale(intentCtx, intent, reason); err != nil {
-				c.logger.Error("Failed to redeploy a drifted artifact", intentAttrs(intent, "error", err)...)
+			// A failed attempt is recorded on the intent and retried; only log it.
+			if err := c.markStale(intentCtx, intent, reason); err != nil && !errors.Is(err, ErrInputNotReady) {
+				c.logger.Warn("Failed to redeploy a drifted artifact", intentAttrs(intent, "error", err)...)
 			}
 		}
 	}

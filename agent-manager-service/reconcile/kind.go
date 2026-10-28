@@ -130,6 +130,13 @@ type FailureHook interface {
 	AfterFailed(ctx context.Context, intent models.DeployIntent, lastErr string)
 }
 
+// Adopter is a Kind whose artifacts may have been deployed before it had intents. When an outside
+// input changes for such an artifact, the core records an intent for it from its deployment_status
+// row; Adopt fills in the kind data the kind's events and Render need.
+type Adopter interface {
+	Adopt(ctx context.Context, intent *models.DeployIntent) error
+}
+
 // Publisher sends a gateway event to whichever replica holds the gateway's connection.
 type Publisher interface {
 	PublishGatewayEvent(ctx context.Context, gatewayID string, event Event) error
