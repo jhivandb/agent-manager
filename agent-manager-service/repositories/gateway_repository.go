@@ -120,8 +120,6 @@ type GatewayRepository interface {
 
 	// Gateway association checking operations
 	HasGatewayDeployments(gatewayID, ouID string) (bool, error)
-	HasGatewayAssociations(gatewayID, ouID string) (bool, error)
-	HasGatewayAssociationsOrDeployments(gatewayID, ouID string) (bool, error)
 
 	// Token operations
 	CreateToken(token *models.GatewayToken) error
@@ -282,16 +280,9 @@ func (r *GatewayRepo) buildFilterQuery(filters GatewayFilterOptions) *gorm.DB {
 // Soft delete does not trigger FK ON DELETE CASCADE, so active tokens are
 // revoked and deployment history is removed explicitly here; other child tables
 // (environment mappings, identity providers) are left in place and must be
-// filtered by gateways.deleted_at at the read site. API associations have no FK
-// to gateways and must be cleaned up explicitly regardless of delete mode.
+// filtered by gateways.deleted_at at the read site.
 func (r *GatewayRepo) Delete(gatewayID, ouID string) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("resource_uuid = ? AND association_type = ? AND ou_id = ?",
-			gatewayID, "gateway", ouID).
-			Delete(&models.APIAssociation{}).Error; err != nil {
-			return err
-		}
-
 		result := tx.Where("uuid = ? AND ou_id = ?", gatewayID, ouID).
 			Delete(&models.Gateway{})
 		if result.Error != nil {
@@ -448,35 +439,6 @@ func (r *GatewayRepo) HasGatewayDeployments(gatewayID, ouID string) (bool, error
 		return false, err
 	}
 	return count > 0, nil
-}
-
-// HasGatewayAssociations checks if a gateway has any associations
-func (r *GatewayRepo) HasGatewayAssociations(gatewayID, ouID string) (bool, error) {
-	var count int64
-	err := r.db.Model(&models.APIAssociation{}).
-		Where("resource_uuid = ? AND association_type = ? AND ou_id = ?",
-			gatewayID, "gateway", ouID).
-		Count(&count).Error
-	if err != nil {
-		return false, err
-	}
-	return count > 0, nil
-}
-
-// HasGatewayAssociationsOrDeployments checks if a gateway has any associations (deployments or associations)
-func (r *GatewayRepo) HasGatewayAssociationsOrDeployments(gatewayID, ouID string) (bool, error) {
-	// Check deployments first
-	hasDeployments, err := r.HasGatewayDeployments(gatewayID, ouID)
-	if err != nil {
-		return false, err
-	}
-
-	if hasDeployments {
-		return true, nil
-	}
-
-	// Check associations
-	return r.HasGatewayAssociations(gatewayID, ouID)
 }
 
 // CreateEnvironmentMapping creates a mapping between a gateway and an environment

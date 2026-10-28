@@ -90,12 +90,6 @@ import (
 //			GetTokenByUUIDFunc: func(tokenId string) (*models.GatewayToken, error) {
 //				panic("mock out the GetTokenByUUID method")
 //			},
-//			HasGatewayAssociationsFunc: func(gatewayID string, ouID string) (bool, error) {
-//				panic("mock out the HasGatewayAssociations method")
-//			},
-//			HasGatewayAssociationsOrDeploymentsFunc: func(gatewayID string, ouID string) (bool, error) {
-//				panic("mock out the HasGatewayAssociationsOrDeployments method")
-//			},
 //			HasGatewayDeploymentsFunc: func(gatewayID string, ouID string) (bool, error) {
 //				panic("mock out the HasGatewayDeployments method")
 //			},
@@ -213,12 +207,6 @@ type GatewayRepositoryMock struct {
 
 	// GetTokenByUUIDFunc mocks the GetTokenByUUID method.
 	GetTokenByUUIDFunc func(tokenId string) (*models.GatewayToken, error)
-
-	// HasGatewayAssociationsFunc mocks the HasGatewayAssociations method.
-	HasGatewayAssociationsFunc func(gatewayID string, ouID string) (bool, error)
-
-	// HasGatewayAssociationsOrDeploymentsFunc mocks the HasGatewayAssociationsOrDeployments method.
-	HasGatewayAssociationsOrDeploymentsFunc func(gatewayID string, ouID string) (bool, error)
 
 	// HasGatewayDeploymentsFunc mocks the HasGatewayDeployments method.
 	HasGatewayDeploymentsFunc func(gatewayID string, ouID string) (bool, error)
@@ -405,20 +393,6 @@ type GatewayRepositoryMock struct {
 			// TokenId is the tokenId argument value.
 			TokenId string
 		}
-		// HasGatewayAssociations holds details about calls to the HasGatewayAssociations method.
-		HasGatewayAssociations []struct {
-			// GatewayID is the gatewayID argument value.
-			GatewayID string
-			// OuID is the ouID argument value.
-			OuID string
-		}
-		// HasGatewayAssociationsOrDeployments holds details about calls to the HasGatewayAssociationsOrDeployments method.
-		HasGatewayAssociationsOrDeployments []struct {
-			// GatewayID is the gatewayID argument value.
-			GatewayID string
-			// OuID is the ouID argument value.
-			OuID string
-		}
 		// HasGatewayDeployments holds details about calls to the HasGatewayDeployments method.
 		HasGatewayDeployments []struct {
 			// GatewayID is the gatewayID argument value.
@@ -517,8 +491,6 @@ type GatewayRepositoryMock struct {
 	lockGetEnvironmentMappingsByGatewayID        sync.RWMutex
 	lockGetEnvironmentMappingsByGatewayIDs       sync.RWMutex
 	lockGetTokenByUUID                           sync.RWMutex
-	lockHasGatewayAssociations                   sync.RWMutex
-	lockHasGatewayAssociationsOrDeployments      sync.RWMutex
 	lockHasGatewayDeployments                    sync.RWMutex
 	lockList                                     sync.RWMutex
 	lockListFailedGatewaysAllOrgs                sync.RWMutex
@@ -1347,78 +1319,6 @@ func (mock *GatewayRepositoryMock) GetTokenByUUIDCalls() []struct {
 	mock.lockGetTokenByUUID.RLock()
 	calls = mock.calls.GetTokenByUUID
 	mock.lockGetTokenByUUID.RUnlock()
-	return calls
-}
-
-// HasGatewayAssociations calls HasGatewayAssociationsFunc.
-func (mock *GatewayRepositoryMock) HasGatewayAssociations(gatewayID string, ouID string) (bool, error) {
-	if mock.HasGatewayAssociationsFunc == nil {
-		panic("GatewayRepositoryMock.HasGatewayAssociationsFunc: method is nil but GatewayRepository.HasGatewayAssociations was just called")
-	}
-	callInfo := struct {
-		GatewayID string
-		OuID      string
-	}{
-		GatewayID: gatewayID,
-		OuID:      ouID,
-	}
-	mock.lockHasGatewayAssociations.Lock()
-	mock.calls.HasGatewayAssociations = append(mock.calls.HasGatewayAssociations, callInfo)
-	mock.lockHasGatewayAssociations.Unlock()
-	return mock.HasGatewayAssociationsFunc(gatewayID, ouID)
-}
-
-// HasGatewayAssociationsCalls gets all the calls that were made to HasGatewayAssociations.
-// Check the length with:
-//
-//	len(mockedGatewayRepository.HasGatewayAssociationsCalls())
-func (mock *GatewayRepositoryMock) HasGatewayAssociationsCalls() []struct {
-	GatewayID string
-	OuID      string
-} {
-	var calls []struct {
-		GatewayID string
-		OuID      string
-	}
-	mock.lockHasGatewayAssociations.RLock()
-	calls = mock.calls.HasGatewayAssociations
-	mock.lockHasGatewayAssociations.RUnlock()
-	return calls
-}
-
-// HasGatewayAssociationsOrDeployments calls HasGatewayAssociationsOrDeploymentsFunc.
-func (mock *GatewayRepositoryMock) HasGatewayAssociationsOrDeployments(gatewayID string, ouID string) (bool, error) {
-	if mock.HasGatewayAssociationsOrDeploymentsFunc == nil {
-		panic("GatewayRepositoryMock.HasGatewayAssociationsOrDeploymentsFunc: method is nil but GatewayRepository.HasGatewayAssociationsOrDeployments was just called")
-	}
-	callInfo := struct {
-		GatewayID string
-		OuID      string
-	}{
-		GatewayID: gatewayID,
-		OuID:      ouID,
-	}
-	mock.lockHasGatewayAssociationsOrDeployments.Lock()
-	mock.calls.HasGatewayAssociationsOrDeployments = append(mock.calls.HasGatewayAssociationsOrDeployments, callInfo)
-	mock.lockHasGatewayAssociationsOrDeployments.Unlock()
-	return mock.HasGatewayAssociationsOrDeploymentsFunc(gatewayID, ouID)
-}
-
-// HasGatewayAssociationsOrDeploymentsCalls gets all the calls that were made to HasGatewayAssociationsOrDeployments.
-// Check the length with:
-//
-//	len(mockedGatewayRepository.HasGatewayAssociationsOrDeploymentsCalls())
-func (mock *GatewayRepositoryMock) HasGatewayAssociationsOrDeploymentsCalls() []struct {
-	GatewayID string
-	OuID      string
-} {
-	var calls []struct {
-		GatewayID string
-		OuID      string
-	}
-	mock.lockHasGatewayAssociationsOrDeployments.RLock()
-	calls = mock.calls.HasGatewayAssociationsOrDeployments
-	mock.lockHasGatewayAssociationsOrDeployments.RUnlock()
 	return calls
 }
 
