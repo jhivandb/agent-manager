@@ -39,8 +39,28 @@ type Deployment struct {
 	// Lifecycle state fields (from deployment_status table via JOIN)
 	// nil values indicate ARCHIVED state (no record in status table)
 	// Read-only fields - populated via JOIN, never inserted/updated directly
-	Status    *DeploymentStatus `gorm:"column:status;->" json:"status,omitempty"`
-	UpdatedAt *time.Time        `gorm:"column:status_updated_at;->" json:"updatedAt,omitempty"`
+	Status        *DeploymentStatus `gorm:"column:status;->" json:"status,omitempty"`
+	StatusDesired *DeploymentStatus `gorm:"column:status_desired;->" json:"statusDesired,omitempty"`
+	StatusReason  *string           `gorm:"column:status_reason;->" json:"statusReason,omitempty"`
+	UpdatedAt     *time.Time        `gorm:"column:status_updated_at;->" json:"updatedAt,omitempty"`
+}
+
+// IsPlaced reports whether this deployment is the one its gateway is meant to hold:
+// desired DEPLOYED, whether it is still DEPLOYING, already DEPLOYED, or FAILED.
+// Placement, URLs, keys and undeploy targets follow placed deployments.
+func (d *Deployment) IsPlaced() bool {
+	if d.Status == nil {
+		return false
+	}
+	if d.StatusDesired != nil {
+		return *d.StatusDesired == DeploymentStatusDeployed
+	}
+	return d.Status.ImpliedDesired() == DeploymentStatusDeployed
+}
+
+// IsLive reports whether the gateway has acknowledged holding this deployment.
+func (d *Deployment) IsLive() bool {
+	return d.Status != nil && *d.Status == DeploymentStatusDeployed
 }
 
 // TableName returns the table name for the Deployment model
@@ -52,21 +72,74 @@ func (Deployment) TableName() string {
 // Note: ARCHIVED is a derived state (not stored in database)
 type DeploymentStatus string
 
+// DEPLOYING and UNDEPLOYING are written when AMS sends the event; the gateway's ack
+// moves them to DEPLOYED, UNDEPLOYED or FAILED, and the timeout sweeper moves rows
+// that never get an ack to FAILED.
 const (
-	DeploymentStatusDeployed   DeploymentStatus = "DEPLOYED"
-	DeploymentStatusUndeployed DeploymentStatus = "UNDEPLOYED"
-	DeploymentStatusArchived   DeploymentStatus = "ARCHIVED" // Derived state: exists in history but not in status table
+	DeploymentStatusDeploying   DeploymentStatus = "DEPLOYING"
+	DeploymentStatusDeployed    DeploymentStatus = "DEPLOYED"
+	DeploymentStatusUndeploying DeploymentStatus = "UNDEPLOYING"
+	DeploymentStatusUndeployed  DeploymentStatus = "UNDEPLOYED"
+	DeploymentStatusFailed      DeploymentStatus = "FAILED"
+	DeploymentStatusArchived    DeploymentStatus = "ARCHIVED" // Derived state: exists in history but not in status table
 )
+
+// DeploymentReasonTimeout is the status_reason the sweeper records on a row that got no ack in time.
+const DeploymentReasonTimeout = "DEPLOYMENT_TIMEOUT"
+
+// IsValidDeploymentStatusFilter reports whether s is a status a deployment listing can filter on.
+func IsValidDeploymentStatusFilter(s string) bool {
+	switch DeploymentStatus(s) {
+	case DeploymentStatusDeploying, DeploymentStatusDeployed, DeploymentStatusUndeploying,
+		DeploymentStatusUndeployed, DeploymentStatusFailed, DeploymentStatusArchived:
+		return true
+	}
+	return false
+}
+
+// ImpliedDesired is the desired state a row in this status must have, or "" for FAILED, which can follow either.
+func (s DeploymentStatus) ImpliedDesired() DeploymentStatus {
+	switch s {
+	case DeploymentStatusDeploying, DeploymentStatusDeployed:
+		return DeploymentStatusDeployed
+	case DeploymentStatusUndeploying, DeploymentStatusUndeployed:
+		return DeploymentStatusUndeployed
+	}
+	return ""
+}
 
 // DeploymentStatusRecord represents the current deployment status record
 type DeploymentStatusRecord struct {
-	ArtifactUUID uuid.UUID        `gorm:"column:artifact_uuid;primaryKey" json:"artifactId"`
-	OUID         string           `gorm:"column:ou_id;primaryKey" json:"organizationId"`
-	GatewayUUID  uuid.UUID        `gorm:"column:gateway_uuid;primaryKey" json:"gatewayId"`
-	DeploymentID uuid.UUID        `gorm:"column:deployment_id" json:"deploymentId"`
-	Status       DeploymentStatus `gorm:"column:status" json:"status"`
-	UpdatedAt    time.Time        `gorm:"column:updated_at" json:"updatedAt"`
+	ArtifactUUID  uuid.UUID        `gorm:"column:artifact_uuid;primaryKey" json:"artifactId"`
+	OUID          string           `gorm:"column:ou_id;primaryKey" json:"organizationId"`
+	GatewayUUID   uuid.UUID        `gorm:"column:gateway_uuid;primaryKey" json:"gatewayId"`
+	DeploymentID  uuid.UUID        `gorm:"column:deployment_id" json:"deploymentId"`
+	Status        DeploymentStatus `gorm:"column:status" json:"status"`
+	StatusDesired DeploymentStatus `gorm:"column:status_desired" json:"statusDesired"`
+	// StatusReason is the ack's error code, the timeout reason, or empty.
+	StatusReason string `gorm:"column:status_reason" json:"statusReason,omitempty"`
+	// PerformedAt is when the current transition was started; the timeout sweeper measures from it.
+	PerformedAt time.Time `gorm:"column:performed_at" json:"performedAt"`
+	UpdatedAt   time.Time `gorm:"column:updated_at" json:"updatedAt"`
 }
+
+// DeploymentAck is a gateway's acknowledgement of a deploy or undeploy event, reduced to what the status update needs.
+type DeploymentAck struct {
+	// DeploymentID is the id the event carried; empty for an undeploy sent while the gateway's version was unknown.
+	DeploymentID string
+	// ArtifactID is the id the gateway stores the artifact under: its UUID, or an LLM proxy's handle.
+	ArtifactID string
+	// Action is DeploymentAckActionDeploy or DeploymentAckActionUndeploy.
+	Action    string
+	Success   bool
+	ErrorCode string
+}
+
+// Deployment ack actions, as the gateway reports them.
+const (
+	DeploymentAckActionDeploy   = "deploy"
+	DeploymentAckActionUndeploy = "undeploy"
+)
 
 // TableName returns the table name for the DeploymentStatusRecord model
 func (DeploymentStatusRecord) TableName() string {
