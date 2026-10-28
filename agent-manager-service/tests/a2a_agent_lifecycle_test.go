@@ -35,12 +35,14 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
+	"gorm.io/gorm"
 
 	"github.com/wso2/agent-manager/agent-manager-service/clients/openchoreosvc/client"
 	"github.com/wso2/agent-manager/agent-manager-service/db"
 	"github.com/wso2/agent-manager/agent-manager-service/eventhub"
 	"github.com/wso2/agent-manager/agent-manager-service/middleware/jwtassertion"
 	"github.com/wso2/agent-manager/agent-manager-service/models"
+	"github.com/wso2/agent-manager/agent-manager-service/reconcile"
 	"github.com/wso2/agent-manager/agent-manager-service/repositories"
 	"github.com/wso2/agent-manager/agent-manager-service/services"
 	"github.com/wso2/agent-manager/agent-manager-service/tests/apitestutils"
@@ -167,7 +169,6 @@ func TestA2AAgentLifecycle(t *testing.T) {
 	}, authMiddleware)
 
 	gdb := db.GetDB()
-	pubRepo := repositories.NewA2APublicationRepository(gdb)
 	cardRepo := repositories.NewA2AAgentCardRepository(gdb)
 	deploymentRepo := repositories.NewDeploymentRepo(gdb)
 	gatewayRepo := repositories.NewGatewayRepo(gdb)
@@ -177,29 +178,34 @@ func TestA2AAgentLifecycle(t *testing.T) {
 	gatewayID := seedIngressGateway(t, ouID, environmentUUID)
 
 	hub := &lifecycleEventHub{}
-	reconciler := services.NewA2APublicationReconcilerService(
-		wiring.ProvideTxRunner(gdb),
-		pubRepo, cardRepo, repositories.NewA2AProxyRepository(gdb), deploymentRepo, gatewayRepo,
+	txRunner := wiring.ProvideTxRunner(gdb)
+	a2aKind := services.NewA2AAgentKind(
+		txRunner, cardRepo, repositories.NewA2AProxyRepository(gdb), deploymentRepo, gatewayRepo,
 		repositories.NewAgentConfigRepo(gdb),
 		openChoreoClient,
 		services.NewA2ACardFetcher(),
 		bytes.Repeat([]byte{7}, 32), // a platform agent has no upstream secret to decrypt
-		services.NewGatewayEventsService(hub),
 		testLifecycleLogger(),
 	)
+	core := reconcile.NewCore(reconcile.TxRunner(txRunner), repositories.NewDeployIntentRepository(gdb), deploymentRepo,
+		services.NewGatewayEventsService(hub), reconcile.DefaultConfig(), testLifecycleLogger(), a2aKind)
+	reconciler := reconcile.NewWorker(core)
 
+	// thisAgent selects this agent's deploy intents.
+	thisAgent := func(query *gorm.DB) *gorm.DB {
+		return query.Where("kind = ? AND ou_id = ? AND kind_data->>'projectName' = ? AND kind_data->>'agentName' = ?",
+			models.KindAgent, ouID, a2aLifecycleProjName, a2aLifecycleAgentName)
+	}
 	t.Cleanup(func() {
-		_ = pubRepo.DeleteForAgent(context.Background(), ouID, a2aLifecycleProjName, a2aLifecycleAgentName)
+		_ = thisAgent(gdb).Delete(&models.DeployIntent{}).Error
 		_ = cardRepo.DeleteForAgent(context.Background(), ouID, a2aLifecycleProjName, a2aLifecycleAgentName)
 	})
 
-	// duePublication returns the queue row for this agent, or nil.
-	duePublication := func(t *testing.T) *models.A2APublication {
+	// duePublication returns the agent's deploy intent, or nil.
+	duePublication := func(t *testing.T) *models.DeployIntent {
 		t.Helper()
-		var row models.A2APublication
-		err := gdb.Where("ou_id = ? AND project_name = ? AND agent_name = ?",
-			ouID, a2aLifecycleProjName, a2aLifecycleAgentName).First(&row).Error
-		if err != nil {
+		var row models.DeployIntent
+		if err := thisAgent(gdb).First(&row).Error; err != nil {
 			return nil
 		}
 		return &row
@@ -254,8 +260,8 @@ func TestA2AAgentLifecycle(t *testing.T) {
 
 		row := duePublication(t)
 		require.NotNil(t, row, "the deploy recorded its intent to publish")
-		assert.Equal(t, models.A2APublicationStatusPending, row.Status)
-		assert.Equal(t, environmentUUID, row.EnvironmentUUID)
+		assert.Equal(t, models.DeployIntentPending, row.State)
+		assert.Equal(t, environmentUUID, *row.EnvironmentUUID)
 		assert.NotEqual(t, uuid.Nil, row.ArtifactUUID, "keyed on the artifact the gateway is told about")
 
 		// The binding has published no ServiceURL, so an Agent with an empty
@@ -267,21 +273,21 @@ func TestA2AAgentLifecycle(t *testing.T) {
 
 		retried := duePublication(t)
 		require.NotNil(t, retried)
-		assert.Equal(t, models.A2APublicationStatusPending, retried.Status, "the row is retried, not failed")
+		assert.Equal(t, models.DeployIntentPending, retried.State, "the intent waits, it does not fail")
+		assert.Equal(t, "release binding has not published a service URL yet", retried.LastError,
+			"the status reads DEPLOYING with what it waits for")
 		assert.Equal(t, 0, retried.AttemptCount, "a not-ready wait is not charged against the budget")
 		require.NotNil(t, retried.NextAttemptAt)
 		assert.True(t, retried.NextAttemptAt.After(time.Now()), "and the next try is scheduled forward")
 	})
 
-	t.Run("the reconciler publishes once the binding reports a service URL", func(t *testing.T) {
+	t.Run("the worker publishes once the binding reports a service URL", func(t *testing.T) {
 		serviceURL = a2aLifecycleUpstream
 
 		// The failed attempt above scheduled the next try 30s out. Winding the
 		// clock back is what a real tick past that point would see; sleeping
 		// through the backoff would only make the test slow.
-		require.NoError(t, gdb.Model(&models.A2APublication{}).
-			Where("ou_id = ? AND project_name = ? AND agent_name = ?",
-				ouID, a2aLifecycleProjName, a2aLifecycleAgentName).
+		require.NoError(t, thisAgent(gdb.Model(&models.DeployIntent{})).
 			Update("next_attempt_at", time.Now().Add(-time.Second)).Error)
 
 		row := duePublication(t)
@@ -311,8 +317,9 @@ func TestA2AAgentLifecycle(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, models.KindAgent, artifact.Kind)
 
-		assert.Equal(t, models.A2APublicationStatusPublished, duePublication(t).Status,
-			"a published row is no longer due")
+		assert.Equal(t, models.DeployIntentDone, duePublication(t).State,
+			"a published intent is no longer due: the gateway's ack settles it in deployment_status")
+		assert.Equal(t, models.DeploymentStatusDeploying, *current.Status, "DEPLOYED only once the gateway acks")
 
 		events := hub.events()
 		require.Len(t, events, 1)
@@ -330,7 +337,7 @@ func TestA2AAgentLifecycle(t *testing.T) {
 
 		requeued := duePublication(t)
 		require.NotNil(t, requeued)
-		assert.Equal(t, models.A2APublicationStatusPending, requeued.Status, "a redeploy must re-publish")
+		assert.Equal(t, models.DeployIntentPending, requeued.State, "a redeploy must re-publish")
 		assert.Equal(t, 0, requeued.AttemptCount, "with a fresh attempt budget")
 
 		reconciler.RunOnce(context.Background())
@@ -346,10 +353,15 @@ func TestA2AAgentLifecycle(t *testing.T) {
 	t.Run("deploy settings republish card CORS and A2A-Version", func(t *testing.T) {
 		before := duePublication(t)
 		require.NotNil(t, before)
+		var recorded struct {
+			EnvironmentName string `json:"environmentName"`
+		}
+		require.NoError(t, json.Unmarshal(before.KindData, &recorded))
+		envName := recorded.EnvironmentName
 
 		body := new(bytes.Buffer)
 		require.NoError(t, json.NewEncoder(body).Encode(map[string]interface{}{
-			"environmentName": before.EnvironmentName,
+			"environmentName": envName,
 			"corsConfig": map[string]interface{}{
 				"enabled":      true,
 				"allowOrigin":  []string{"https://client.example"},
@@ -371,7 +383,7 @@ func TestA2AAgentLifecycle(t *testing.T) {
 
 		requeued := duePublication(t)
 		require.NotNil(t, requeued)
-		assert.Equal(t, models.A2APublicationStatusPending, requeued.Status, "a settings change must re-publish")
+		assert.Equal(t, models.DeployIntentPending, requeued.State, "a settings change must re-publish")
 
 		reconciler.RunOnce(context.Background())
 

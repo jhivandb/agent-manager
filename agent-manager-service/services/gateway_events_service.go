@@ -27,6 +27,7 @@ import (
 
 	"github.com/wso2/agent-manager/agent-manager-service/eventhub"
 	"github.com/wso2/agent-manager/agent-manager-service/models"
+	"github.com/wso2/agent-manager/agent-manager-service/reconcile"
 )
 
 const (
@@ -118,6 +119,11 @@ func (s *GatewayEventsService) broadcastEventContext(ctx context.Context, gatewa
 	return nil
 }
 
+// PublishGatewayEvent sends a kind's gateway event; it is how the reconcile core publishes.
+func (s *GatewayEventsService) PublishGatewayEvent(ctx context.Context, gatewayID string, event reconcile.Event) error {
+	return s.broadcastEventContext(ctx, gatewayID, event.Type, event.Action, event.EntityID, event.Payload)
+}
+
 // Public methods become thin one-liners:
 func (s *GatewayEventsService) BroadcastDeploymentEvent(gatewayID string, event *DeploymentEvent) error {
 	return s.broadcastEvent(gatewayID, "api.deployed", "CREATE", event.APIID, event)
@@ -160,24 +166,6 @@ func (s *GatewayEventsService) BroadcastLLMProviderDeletionEvent(ctx context.Con
 // is not enough.
 func (s *GatewayEventsService) BroadcastLLMProxyDeletionEvent(ctx context.Context, gatewayID string, event *models.LLMProxyDeletionEvent) error {
 	return s.broadcastEventContext(ctx, gatewayID, "llmproxy.deleted", "DELETE", event.ProxyID, event)
-}
-
-// BroadcastAgentDeploymentEvent tells a gateway that an A2A Agent has been
-// deployed. The gateway responds by fetching /agents/{agentId} back from this
-// service, so agentId must be the artifact UUID that route is keyed on.
-func (s *GatewayEventsService) BroadcastAgentDeploymentEvent(gatewayID string, event *models.AgentDeploymentEvent) error {
-	return s.broadcastEvent(gatewayID, "agent.deployed", "CREATE", event.AgentID, event)
-}
-
-// BroadcastAgentUndeploymentEvent tells a gateway to stop serving an A2A Agent but keep it, and
-// its API keys, for a redeploy. An empty deployment ID passes the gateway's deployment-ID guard.
-func (s *GatewayEventsService) BroadcastAgentUndeploymentEvent(ctx context.Context, gatewayID string, event *models.AgentUndeploymentEvent) error {
-	return s.broadcastEventContext(ctx, gatewayID, "agent.undeployed", "DELETE", event.AgentID, event)
-}
-
-// BroadcastAgentDeletionEvent tells a gateway to drop an A2A Agent together with its API keys.
-func (s *GatewayEventsService) BroadcastAgentDeletionEvent(ctx context.Context, gatewayID string, event *models.AgentDeletionEvent) error {
-	return s.broadcastEventContext(ctx, gatewayID, "agent.deleted", "DELETE", event.AgentID, event)
 }
 
 func (s *GatewayEventsService) BroadcastLLMProxyUndeploymentEvent(gatewayID string, event *models.LLMProxyUndeploymentEvent) error {

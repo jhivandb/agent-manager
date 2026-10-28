@@ -140,8 +140,8 @@ func (h *proxyHarness) assertNothingWritten(t *testing.T) {
 	assert.Empty(t, h.txCards.EnqueueCalls())
 	assert.Empty(t, h.txCards.ClearCardCalls())
 	assert.Empty(t, h.txCards.DeleteForAgentEnvCalls())
-	assert.Empty(t, h.txPubs.EnqueueCalls())
-	assert.Empty(t, h.txPubs.DeleteForAgentEnvCalls())
+	assert.Empty(t, h.txIntents.UpsertCalls())
+	assert.Empty(t, h.txIntents.DeleteCalls())
 	assert.Empty(t, h.txDeployments.DeleteForArtifactCalls())
 	assert.Empty(t, h.txDeployments.BeginUndeployCalls())
 }
@@ -155,8 +155,7 @@ func (h *proxyHarness) acceptsWrites() {
 	h.txCards.RequeueFunc = func(context.Context, string, string, string, string) error { return nil }
 	h.txCards.DeleteForAgentEnvFunc = func(context.Context, string, string, string, string) error { return nil }
 	h.txConfigs.CreateIfAbsentFunc = func(context.Context, *models.AgentConfig) error { return nil }
-	h.txPubs.EnqueueFunc = func(context.Context, *models.A2APublication) error { return nil }
-	h.txPubs.DeleteForAgentEnvFunc = func(context.Context, string, string, string, uuid.UUID) error { return nil }
+	h.txIntents.DeleteFunc = func(context.Context, repositories.DeployIntentFilter) error { return nil }
 	h.txDeployments.DeleteForArtifactFunc = func(context.Context, uuid.UUID, string) error { return nil }
 	h.txDeployments.BeginUndeployFunc = func(context.Context, string, string, string) (string, time.Time, error) { return "", time.Time{}, nil }
 	h.artifacts.CreateFunc = func(*gorm.DB, *models.Artifact) error { return nil }
@@ -202,10 +201,10 @@ func TestSetA2AProxySwitchesADirectEnvironmentToProxied(t *testing.T) {
 	require.Len(t, h.txCards.ClearCardCalls(), 1, "the card is parked")
 	assert.Empty(t, h.txCards.RequeueCalls(), "and not made due before the gateway has the Agent")
 
-	queued := h.txPubs.EnqueueCalls()
+	queued := h.txIntents.UpsertCalls()
 	require.Len(t, queued, 1)
-	assert.Equal(t, models.A2APublicationSourceExternal, queued[0].Pub.Source)
-	assert.Equal(t, h.artifactUUID, queued[0].Pub.ArtifactUUID)
+	assert.Equal(t, models.A2APublicationSourceExternal, queuedPublication(t, queued[0].Intent).Source)
+	assert.Equal(t, h.artifactUUID, queuedPublication(t, queued[0].Intent).ArtifactUUID)
 }
 
 func TestSetA2AProxyNeedsARegisteredCardURL(t *testing.T) {
@@ -285,7 +284,7 @@ func TestSetA2AProxyUpdatesAProxiedEnvironmentInPlace(t *testing.T) {
 	require.Len(t, upserted, 1)
 	assert.Equal(t, "X-New", upserted[0].Proxy.UpstreamAuthHeader)
 	assert.Equal(t, "b2xk", upserted[0].Proxy.UpstreamAuthSecret, "a header alone keeps the stored secret")
-	assert.Len(t, h.txPubs.EnqueueCalls(), 1)
+	assert.Len(t, h.txIntents.UpsertCalls(), 1)
 }
 
 func TestSetA2AProxySecretSemantics(t *testing.T) {
@@ -461,18 +460,30 @@ func TestStoreCardSourceQueuesADirectEnvironmentsURL(t *testing.T) {
 	assert.Equal(t, "dev", written[0].Card.EnvironmentName)
 	assert.Equal(t, uuid.MustParse(proxyTestEnvUUID), written[0].Card.EnvironmentUUID)
 	assert.Empty(t, h.txCards.ClearCardCalls(), "the card is fetched from the origin, not parked")
-	assert.Empty(t, h.txPubs.EnqueueCalls())
+	assert.Empty(t, h.txIntents.UpsertCalls())
 }
 
-// The row is read by the environment's UUID after resolving the agent and environment, as every other
+// listsPublication makes the environment's publication intent read as intent with status rows rows.
+func (h *proxyHarness) listsPublication(t *testing.T, intent models.DeployIntent, rows ...models.DeploymentStatusRecord) {
+	t.Helper()
+	h.intents.ListFunc = func(_ context.Context, filter repositories.DeployIntentFilter) ([]models.DeployIntent, error) {
+		require.NotNil(t, filter.EnvironmentUUID)
+		assert.Equal(t, uuid.MustParse(proxyTestEnvUUID), *filter.EnvironmentUUID)
+		assert.Equal(t, map[string]any{"projectName": "checkout", "agentName": "weather"}, filter.KindData)
+		return []models.DeployIntent{intent}, nil
+	}
+	h.intents.StatusRowsFunc = func(context.Context, models.DeployIntent) ([]models.DeploymentStatusRecord, error) {
+		return rows, nil
+	}
+}
+
+// The publication is read by the environment's UUID after resolving the agent and environment, as every other
 // operation does, so a partly failed cleanup cannot show a re-created name a stale status.
-func TestGetA2AProxyReportsThePublicationState(t *testing.T) {
+func TestGetA2AProxyReportsTheDeploymentStatus(t *testing.T) {
 	h := newProxyHarness(t)
 	h.proxied("X-Key", "c2VjcmV0")
-	h.pubs.GetFunc = func(_ context.Context, _, _, _ string, envUUID uuid.UUID) (*models.A2APublication, error) {
-		assert.Equal(t, uuid.MustParse(proxyTestEnvUUID), envUUID)
-		return &models.A2APublication{Status: models.A2APublicationStatusFailed, LastError: "HTTP 503"}, nil
-	}
+	h.listsPublication(t, models.DeployIntent{State: models.DeployIntentDone},
+		models.DeploymentStatusRecord{Status: models.DeploymentStatusFailed, StatusReason: "GATEWAY_PROCESSING_ERROR"})
 	h.gateways.ListWithFiltersFunc = func(f repositories.GatewayFilterOptions) ([]*models.Gateway, error) {
 		require.NotNil(t, f.EnvironmentID)
 		assert.Equal(t, proxyTestEnvUUID, *f.EnvironmentID)
@@ -483,7 +494,7 @@ func TestGetA2AProxyReportsThePublicationState(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, &models.A2AProxyStatus{
-		Status: models.A2APublicationStatusFailed, LastError: "HTTP 503", UpstreamAuthHeader: "X-Key",
+		Status: models.DeploymentStatusFailed, StatusReason: "GATEWAY_PROCESSING_ERROR", UpstreamAuthHeader: "X-Key",
 		GatewayURL: "https://agents.example.com/weather",
 	}, got)
 	require.Len(t, h.proxies.GetByEnvUUIDCalls(), 1)
@@ -491,27 +502,74 @@ func TestGetA2AProxyReportsThePublicationState(t *testing.T) {
 	assert.Empty(t, h.proxies.GetCalls(), "the name-keyed lookup is not used")
 }
 
+// A publication still waiting for its gateway reads DEPLOYING with what it waits for, and one that gave up FAILED
+// with why; a deployment reads what the gateway acked.
+func TestGetA2AProxyReportsAPublicationNotYetDeployed(t *testing.T) {
+	cases := []struct {
+		name   string
+		intent models.DeployIntent
+		rows   []models.DeploymentStatusRecord
+		want   models.DeploymentStatus
+		reason string
+	}{
+		{
+			"waiting",
+			models.DeployIntent{State: models.DeployIntentPending, LastError: "could not reach the agent card URL"},
+			nil,
+			models.DeploymentStatusDeploying, "could not reach the agent card URL",
+		},
+		{
+			"gave up",
+			models.DeployIntent{State: models.DeployIntentFailed, LastError: "the agent cannot be proxied"},
+			nil,
+			models.DeploymentStatusFailed, "the agent cannot be proxied",
+		},
+		{
+			"sent, not acked",
+			models.DeployIntent{State: models.DeployIntentDone},
+			[]models.DeploymentStatusRecord{{Status: models.DeploymentStatusDeploying}},
+			models.DeploymentStatusDeploying, "",
+		},
+		{
+			"acked",
+			models.DeployIntent{State: models.DeployIntentDone},
+			[]models.DeploymentStatusRecord{{Status: models.DeploymentStatusDeployed}},
+			models.DeploymentStatusDeployed, "",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newProxyHarness(t)
+			h.proxied("", "")
+			tc.intent.Desired = models.DeploymentStatusDeployed
+			h.listsPublication(t, tc.intent, tc.rows...)
+
+			got, err := h.svc.GetA2AProxy(tierOnlyCtx(), "org-1", "checkout", "weather", "dev")
+
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got.Status)
+			assert.Equal(t, tc.reason, got.StatusReason)
+		})
+	}
+}
+
 // The bootstrap job maps the ingress gateway after the environment exists, so until then there is no URL to show.
 func TestGetA2AProxyWithoutAnIngressGatewayHasNoURL(t *testing.T) {
 	h := newProxyHarness(t)
 	h.proxied("", "")
-	h.pubs.GetFunc = func(context.Context, string, string, string, uuid.UUID) (*models.A2APublication, error) {
-		return &models.A2APublication{Status: models.A2APublicationStatusPending}, nil
-	}
+	h.listsPublication(t, models.DeployIntent{State: models.DeployIntentPending})
 
 	got, err := h.svc.GetA2AProxy(tierOnlyCtx(), "org-1", "checkout", "weather", "dev")
 
 	require.NoError(t, err)
 	assert.Empty(t, got.GatewayURL)
-	assert.Equal(t, models.A2APublicationStatusPending, got.Status)
+	assert.Equal(t, models.DeploymentStatusDeploying, got.Status)
 }
 
 func TestGetA2AProxyReportsAGatewayLookupFailure(t *testing.T) {
 	h := newProxyHarness(t)
 	h.proxied("", "")
-	h.pubs.GetFunc = func(context.Context, string, string, string, uuid.UUID) (*models.A2APublication, error) {
-		return &models.A2APublication{Status: models.A2APublicationStatusPending}, nil
-	}
+	h.listsPublication(t, models.DeployIntent{State: models.DeployIntentPending})
 	h.gateways.ListWithFiltersFunc = func(repositories.GatewayFilterOptions) ([]*models.Gateway, error) {
 		return nil, assert.AnError
 	}
@@ -521,19 +579,19 @@ func TestGetA2AProxyReportsAGatewayLookupFailure(t *testing.T) {
 	assert.ErrorIs(t, err, assert.AnError)
 }
 
-// Both rows are written together, so a missing publication would otherwise read as pending forever.
+// Both rows are written together, so a missing publication would otherwise read as deploying forever.
 func TestGetA2AProxyWithoutAPublicationReportsFailed(t *testing.T) {
 	h := newProxyHarness(t)
 	h.proxied("", "")
-	h.pubs.GetFunc = func(context.Context, string, string, string, uuid.UUID) (*models.A2APublication, error) {
-		return nil, repositories.ErrA2APublicationNotFound
+	h.intents.ListFunc = func(context.Context, repositories.DeployIntentFilter) ([]models.DeployIntent, error) {
+		return nil, nil
 	}
 
 	got, err := h.svc.GetA2AProxy(tierOnlyCtx(), "org-1", "checkout", "weather", "dev")
 
 	require.NoError(t, err)
-	assert.Equal(t, models.A2APublicationStatusFailed, got.Status)
-	assert.NotEmpty(t, got.LastError)
+	assert.Equal(t, models.DeploymentStatusFailed, got.Status)
+	assert.NotEmpty(t, got.StatusReason)
 }
 
 // The artifact, and the API keys bound to it, survive a switch to direct: the gateway is told to
@@ -550,9 +608,9 @@ func TestDeleteA2AProxySwitchesOnlyThatEnvironmentToDirect(t *testing.T) {
 	undeploys := h.txDeployments.BeginUndeployCalls()
 	require.NotEmpty(t, undeploys)
 	assert.Equal(t, h.artifactUUID.String(), undeploys[0].ArtifactUUID)
-	publications := h.txPubs.DeleteForAgentEnvCalls()
+	publications := h.txIntents.DeleteCalls()
 	require.Len(t, publications, 1)
-	assert.Equal(t, uuid.MustParse(proxyTestEnvUUID), publications[0].EnvironmentUUID)
+	assert.Equal(t, uuid.MustParse(proxyTestEnvUUID), *publications[0].Filter.EnvironmentUUID)
 	require.Len(t, h.txProxies.DeleteCalls(), 1)
 	require.Len(t, h.txCards.ClearCardCalls(), 1, "the gateway's card goes")
 	require.Len(t, h.txCards.RequeueCalls(), 1, "and the origin's is fetched directly")
@@ -563,12 +621,11 @@ func TestDeleteA2AProxySwitchesOnlyThatEnvironmentToDirect(t *testing.T) {
 func TestRefreshA2AProxyQueuesAPublicationNeverARequeue(t *testing.T) {
 	h := newProxyHarness(t)
 	h.proxied("", "")
-	h.txPubs.EnqueueFunc = func(context.Context, *models.A2APublication) error { return nil }
 	// No card write is wired: a Requeue would un-park the card before the gateway has the Agent.
 
 	require.NoError(t, h.svc.RefreshA2AProxy(tierGrantedCtx(t), "org-1", "checkout", "weather", "dev"))
 
-	assert.Len(t, h.txPubs.EnqueueCalls(), 1)
+	assert.Len(t, h.txIntents.UpsertCalls(), 1)
 }
 
 func TestSetA2AProxyRejectsAnInternalOrNonA2AAgent(t *testing.T) {
@@ -623,7 +680,7 @@ func TestSetA2AProxyDropsItsWritesWhenTheAgentIsDeletedMeanwhile(t *testing.T) {
 	assert.ErrorIs(t, err, utils.ErrAgentNotFound)
 	assert.Len(t, h.artifacts.DeleteCalls(), 1)
 	assert.Len(t, h.txProxies.DeleteCalls(), 1)
-	assert.Len(t, h.txPubs.DeleteForAgentEnvCalls(), 1)
+	assert.Len(t, h.txIntents.DeleteCalls(), 1)
 	assert.Len(t, h.txCards.DeleteForAgentEnvCalls(), 1, "the card row the proxy service may have written goes too")
 }
 
@@ -707,7 +764,7 @@ func TestStoreCardSourceStoresTheURLParksTheCardAndRepublishes(t *testing.T) {
 	assert.Equal(t, models.A2AAgentCardSourceExternal, written[0].Card.Source)
 	assert.Equal(t, uuid.MustParse(proxyTestEnvUUID), written[0].Card.EnvironmentUUID)
 	assert.Len(t, h.txCards.ClearCardCalls(), 1)
-	assert.Len(t, h.txPubs.EnqueueCalls(), 1)
+	assert.Len(t, h.txIntents.UpsertCalls(), 1)
 	assert.Empty(t, h.txCards.RequeueCalls())
 	assert.Equal(t, 1, h.transactions)
 }
@@ -747,7 +804,7 @@ func TestStoreCardSourceRefusesToMoveAStoredSecretToAnotherOrigin(t *testing.T) 
 			assert.Len(t, h.txCards.GetCalls(), 1, "the registered URL is read inside the transaction")
 			assert.Empty(t, h.txCards.EnqueueCalls())
 			assert.Empty(t, h.txCards.ClearCardCalls())
-			assert.Empty(t, h.txPubs.EnqueueCalls())
+			assert.Empty(t, h.txIntents.UpsertCalls())
 			assert.Empty(t, h.artifacts.CreateCalls())
 		})
 	}
@@ -778,7 +835,7 @@ func TestStoreCardSourceKeepsTheSecretOnTheSameOrigin(t *testing.T) {
 	written := h.txCards.EnqueueCalls()
 	require.Len(t, written, 1)
 	assert.Equal(t, newURL, written[0].Card.SourceURL)
-	assert.Len(t, h.txPubs.EnqueueCalls(), 1)
+	assert.Len(t, h.txIntents.UpsertCalls(), 1)
 }
 
 func TestRemoveCardSourceTearsDownAndDeletesTheCard(t *testing.T) {
@@ -818,7 +875,7 @@ func TestRefreshCardSource(t *testing.T) {
 		requeued := h.txCards.RequeueCalls()
 		require.Len(t, requeued, 1, "update-only, so a removed row is not recreated")
 		assert.Equal(t, "dev", requeued[0].EnvironmentName)
-		assert.Empty(t, h.txPubs.EnqueueCalls())
+		assert.Empty(t, h.txIntents.UpsertCalls())
 	})
 	t.Run("a direct environment needs a registered source", func(t *testing.T) {
 		h := newProxyHarness(t)
@@ -837,7 +894,7 @@ func TestRefreshCardSource(t *testing.T) {
 
 		require.NoError(t, h.svc.RefreshCardSource(context.Background(), externalA2AAgent(), "org-1", "checkout", devEnv()))
 
-		assert.Len(t, h.txPubs.EnqueueCalls(), 1)
+		assert.Len(t, h.txIntents.UpsertCalls(), 1)
 		assert.Empty(t, h.txCards.RequeueCalls(), "a requeue would un-park the card before the gateway has the Agent")
 	})
 }

@@ -210,8 +210,8 @@ func newAgentArtifactDeletionFixture(t *testing.T, artifacts map[string]uuid.UUI
 			return []*models.Gateway{}, nil
 		},
 	}
-	pubRepo := &repomocks.A2APublicationRepositoryMock{
-		DeleteForAgentFunc: func(context.Context, string, string, string) error {
+	pubRepo := &repomocks.DeployIntentRepositoryMock{
+		DeleteFunc: func(context.Context, repositories.DeployIntentFilter) error {
 			f.steps = append(f.steps, "delete-queue")
 			f.queueDeletes++
 			return nil
@@ -231,7 +231,8 @@ func newAgentArtifactDeletionFixture(t *testing.T, artifacts map[string]uuid.UUI
 		},
 	}
 	events := NewGatewayEventsService(f.hub)
-	publisher := NewA2APublisher(nil, pubRepo, proxyRepo, cardRepo, artifactRepo, deploymentRepo, gatewayRepo, events, testLogger())
+	publisher := NewA2APublisher(nil, pubRepo, testDeployCore(pubRepo, deploymentRepo, events), nil,
+		proxyRepo, cardRepo, artifactRepo, deploymentRepo, gatewayRepo, events, testLogger())
 	f.svc = NewAgentManagerService(nil, oc, nil, nil, nil, nil, nil, nil, artifactRepo, nil, gatewayRepo, nil, nil, nil, nil, nil,
 		publisher, cardRepo, deploymentRepo, events, testLogger()).(*agentManagerService)
 	return f

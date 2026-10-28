@@ -152,15 +152,15 @@ func (s *a2aProxyService) GetA2AProxy(ctx context.Context, ouID, projectName, ag
 		return nil, err
 	}
 	status := &models.A2AProxyStatus{UpstreamAuthHeader: proxy.UpstreamAuthHeader, GatewayURL: gatewayURL}
-	pub, err := s.publisher.Publication(ctx, t.key.OUID, t.key.ProjectName, t.key.AgentName, t.key.EnvironmentUUID)
+	published, err := s.publisher.PublicationStatus(ctx, t.key)
 	switch {
-	case errors.Is(err, repositories.ErrA2APublicationNotFound):
+	case errors.Is(err, repositories.ErrDeployIntentNotFound):
 		// Enabling writes both rows together, so a missing publication never resolves on its own.
-		status.Status, status.LastError = models.A2APublicationStatusFailed, a2aProxyNoPublicationMsg
+		status.Status, status.StatusReason = models.DeploymentStatusFailed, a2aProxyNoPublicationMsg
 	case err != nil:
-		return nil, fmt.Errorf("failed to read the A2A publication: %w", err)
+		return nil, err
 	default:
-		status.Status, status.LastError = pub.Status, pub.LastError
+		status.Status, status.StatusReason = published.Status, published.Reason
 	}
 	return status, nil
 }
@@ -207,6 +207,7 @@ func (s *a2aProxyService) SetA2AProxy(
 		return s.enqueuePublication(ctx, tx, t)
 	})
 	if err == nil {
+		s.publisher.Nudge()
 		// Completed after the agent-gone check, so the record says whether the credential change stayed.
 		err = s.dropIfAgentGone(ctx, t)
 	}
@@ -268,6 +269,7 @@ func (s *a2aProxyService) StoreCardSource(
 	if err != nil {
 		return err
 	}
+	s.publisher.Nudge()
 	return s.dropIfAgentGone(ctx, t)
 }
 
@@ -435,6 +437,7 @@ func (s *a2aProxyService) republish(ctx context.Context, t a2aProxyTarget, ifDir
 	if err != nil {
 		return err
 	}
+	s.publisher.Nudge()
 	return s.dropIfAgentGone(ctx, t)
 }
 

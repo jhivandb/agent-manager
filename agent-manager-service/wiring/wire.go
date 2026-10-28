@@ -39,6 +39,7 @@ import (
 	"github.com/wso2/agent-manager/agent-manager-service/instrumentation"
 	"github.com/wso2/agent-manager/agent-manager-service/middleware"
 	"github.com/wso2/agent-manager/agent-manager-service/middleware/jwtassertion"
+	"github.com/wso2/agent-manager/agent-manager-service/reconcile"
 	"github.com/wso2/agent-manager/agent-manager-service/repositories"
 	"github.com/wso2/agent-manager/agent-manager-service/services"
 	"github.com/wso2/agent-manager/agent-manager-service/utils"
@@ -82,7 +83,9 @@ var serviceProviderSet = wire.NewSet(
 	// reconciler that consumes it is wired here.
 	ProvideAgentIdentityInjectionServiceWithEndpointResolver,
 	services.NewAgentThunderReconcilerService,
-	services.NewA2APublicationReconcilerService,
+	services.NewA2AAgentKind,
+	ProvideReconcileCore,
+	reconcile.NewWorker,
 	services.NewA2ACardFetcher,
 	services.NewA2ACardReconcilerService,
 	services.NewA2AAgentCardService,
@@ -383,7 +386,7 @@ var repositoryProviderSet = wire.NewSet(
 	ProvideMCPProxyRepository,
 	repositories.NewMCPProxyEndpointRepository,
 	ProvideDeploymentRepository,
-	ProvideA2APublicationRepository,
+	ProvideDeployIntentRepository,
 	ProvideA2AAgentCardRepository,
 	ProvideA2AProxyRepository,
 	ProvideArtifactRepository,
@@ -472,8 +475,9 @@ func ProvideWebSocketController(
 }
 
 // ProvideDeploymentAckHandler creates a new deployment ack handler
-func ProvideDeploymentAckHandler(deploymentRepo repositories.DeploymentRepository) *services.DeploymentAckHandler {
-	return services.NewDeploymentAckHandler(deploymentRepo)
+func ProvideDeploymentAckHandler(deploymentRepo repositories.DeploymentRepository, worker *reconcile.Worker) *services.DeploymentAckHandler {
+	// An acked deploy may have an AfterLive hook waiting, such as an A2A agent's card fetch.
+	return services.NewDeploymentAckHandler(deploymentRepo).WithAfterDeployed(worker.Nudge)
 }
 
 // ProvideDeploymentTimeoutService creates the sweeper that fails deployments a gateway never acked
@@ -525,8 +529,20 @@ func ProvideTxRunner(db *gorm.DB) services.TxRunner {
 	}
 }
 
-func ProvideA2APublicationRepository(db *gorm.DB) repositories.A2APublicationRepository {
-	return repositories.NewA2APublicationRepository(db)
+func ProvideDeployIntentRepository(db *gorm.DB) repositories.DeployIntentRepository {
+	return repositories.NewDeployIntentRepository(db)
+}
+
+// ProvideReconcileCore carries out deploy intents for every reconciled gateway artifact kind.
+func ProvideReconcileCore(
+	tx services.TxRunner,
+	intents repositories.DeployIntentRepository,
+	deployments repositories.DeploymentRepository,
+	events *services.GatewayEventsService,
+	a2aAgents *services.A2AAgentKind,
+	logger *slog.Logger,
+) *reconcile.Core {
+	return reconcile.NewCore(reconcile.TxRunner(tx), intents, deployments, events, reconcile.DefaultConfig(), logger, a2aAgents)
 }
 
 func ProvideArtifactRepository(db *gorm.DB) repositories.ArtifactRepository {

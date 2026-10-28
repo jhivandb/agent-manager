@@ -25,11 +25,13 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/wso2/agent-manager/agent-manager-service/reconcile"
 	"github.com/wso2/agent-manager/agent-manager-service/utils"
 )
 
 // errA2ANotProxyable means the card cannot be fronted by the gateway; retrying cannot help.
-var errA2ANotProxyable = errors.New("the agent cannot be proxied through the gateway")
+// It is permanent: the intent fails at once instead of retrying.
+var errA2ANotProxyable = reconcile.Permanent(errors.New("the agent cannot be proxied through the gateway"))
 
 // a2aCardInterface is the part of a supportedInterfaces entry route derivation reads.
 type a2aCardInterface struct {

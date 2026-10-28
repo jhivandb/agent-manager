@@ -22,11 +22,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/wso2/agent-manager/agent-manager-service/eventhub"
 	"github.com/wso2/agent-manager/agent-manager-service/models"
+	"github.com/wso2/agent-manager/agent-manager-service/reconcile"
 )
 
 // recordingEventHub captures what would be published, so the event's wire shape
@@ -64,16 +66,15 @@ func (h *recordingEventHub) Close() error                          { return nil 
 // The gateway parses these names and payloads verbatim
 // (pkg/controlplane/events.go and client.go's dispatch switch); they are fixed
 // by that code, not chosen here.
-func TestBroadcastAgentDeploymentEvent(t *testing.T) {
+func TestPublishAgentDeploymentEvent(t *testing.T) {
 	hub := &recordingEventHub{}
 	svc := NewGatewayEventsService(hub)
 
 	performedAt := time.Date(2026, 9, 9, 12, 0, 0, 0, time.UTC)
-	err := svc.BroadcastAgentDeploymentEvent("gw-1", &models.AgentDeploymentEvent{
-		AgentID:      "0192f4c1-9a7d-7c3e-b4f2-1a2b3c4d5e6f",
-		DeploymentID: "dep-1",
-		PerformedAt:  performedAt,
-	})
+	artifactUUID := uuid.MustParse("0192f4c1-9a7d-7c3e-b4f2-1a2b3c4d5e6f")
+	err := svc.PublishGatewayEvent(context.Background(), "gw-1", a2aAgentDeployEvent(reconcile.EventRef{
+		Intent: models.DeployIntent{ArtifactUUID: artifactUUID}, DeploymentID: "dep-1", PerformedAt: performedAt,
+	}))
 	require.NoError(t, err)
 	require.Len(t, hub.published, 1)
 
@@ -97,15 +98,13 @@ func TestBroadcastAgentDeploymentEvent(t *testing.T) {
 	assert.True(t, performedAt.Equal(envelope.Payload.PerformedAt))
 }
 
-func TestBroadcastAgentDeletionEvent(t *testing.T) {
+func TestPublishAgentDeletionEvent(t *testing.T) {
 	hub := &recordingEventHub{}
 	svc := NewGatewayEventsService(hub)
 
 	type ctxKey struct{}
 	ctx := context.WithValue(context.Background(), ctxKey{}, "trace-1")
-	err := svc.BroadcastAgentDeletionEvent(ctx, "gw-1", &models.AgentDeletionEvent{
-		AgentID: "0192f4c1-9a7d-7c3e-b4f2-1a2b3c4d5e6f",
-	})
+	err := svc.PublishGatewayEvent(ctx, "gw-1", a2aAgentDeleteEvent(uuid.MustParse("0192f4c1-9a7d-7c3e-b4f2-1a2b3c4d5e6f")))
 	require.NoError(t, err)
 	require.Len(t, hub.published, 1)
 	assert.Equal(t, "trace-1", hub.contexts[0].Value(ctxKey{}), "the caller's context reaches the hub")
@@ -125,17 +124,15 @@ func TestBroadcastAgentDeletionEvent(t *testing.T) {
 	assert.Equal(t, "0192f4c1-9a7d-7c3e-b4f2-1a2b3c4d5e6f", envelope.Payload.AgentID)
 }
 
-func TestBroadcastAgentUndeploymentEvent(t *testing.T) {
+func TestPublishAgentUndeploymentEvent(t *testing.T) {
 	hub := &recordingEventHub{}
 	svc := NewGatewayEventsService(hub)
 	performedAt := time.Date(2026, 10, 13, 9, 30, 0, 0, time.UTC)
 
 	type ctxKey struct{}
 	ctx := context.WithValue(context.Background(), ctxKey{}, "trace-1")
-	err := svc.BroadcastAgentUndeploymentEvent(ctx, "gw-1", &models.AgentUndeploymentEvent{
-		AgentID:     "0192f4c1-9a7d-7c3e-b4f2-1a2b3c4d5e6f",
-		PerformedAt: performedAt,
-	})
+	err := svc.PublishGatewayEvent(ctx, "gw-1",
+		a2aAgentUndeployEvent(uuid.MustParse("0192f4c1-9a7d-7c3e-b4f2-1a2b3c4d5e6f"), "", performedAt))
 	require.NoError(t, err)
 	require.Len(t, hub.published, 1)
 	assert.Equal(t, "trace-1", hub.contexts[0].Value(ctxKey{}), "the caller's context reaches the hub")

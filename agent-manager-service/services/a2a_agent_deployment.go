@@ -29,6 +29,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/wso2/agent-manager/agent-manager-service/models"
+	"github.com/wso2/agent-manager/agent-manager-service/reconcile"
 	"github.com/wso2/agent-manager/agent-manager-service/repositories"
 	"github.com/wso2/agent-manager/agent-manager-service/utils"
 )
@@ -186,8 +187,8 @@ func generateA2AAgentDeploymentYAML(in A2AAgentDeploymentInput) (string, error) 
 //
 // An empty upstream is refused rather than emitted: the release binding
 // publishes its ServiceURL only once it has reconciled, and an Agent published
-// before then would route nowhere while looking healthy. The publication
-// reconciler retries instead.
+// before then would route nowhere while looking healthy. The
+// publication's deploy intent waits for it instead.
 func buildA2AAgentDeploymentYAML(in A2AAgentDeploymentInput) (*A2AAgentDeploymentYAML, error) {
 	upstreamURL := strings.TrimSpace(in.UpstreamURL)
 	if upstreamURL == "" {
@@ -243,7 +244,7 @@ func buildA2AAgentDeploymentYAML(in A2AAgentDeploymentInput) (*A2AAgentDeploymen
 // same union gatewayIDsForDeletion builds for MCP proxies, because a gateway
 // left holding a deleted agent keeps routing to a workload that is gone.
 //
-// Only the A2A publication reconciler writes deployment rows for an agent
+// Only the A2A agent kind writes deployment rows for an agent
 // artifact, so their presence identifies an A2A agent even once the component,
 // and with it the subtype, is already gone.
 func collectA2AAgentDeletionTargets(
@@ -352,21 +353,19 @@ func sendA2AAgentWithdrawal(
 		return
 	}
 	ctx = context.WithoutCancel(ctx)
-	agentID := artifactUUID.String()
-	broadcast := func(gatewayID string) error {
-		return events.BroadcastAgentDeletionEvent(ctx, gatewayID, &models.AgentDeletionEvent{AgentID: agentID})
-	}
+	event := func(string) reconcile.Event { return a2aAgentDeleteEvent(artifactUUID) }
 	if keepKeys {
 		untracked := models.NewPerformedAt()
-		broadcast = func(gatewayID string) error {
+		event = func(gatewayID string) reconcile.Event {
 			undeploy, tracked := undeployIDs[gatewayID]
 			if !tracked {
 				undeploy.performedAt = untracked
 			}
-			return events.BroadcastAgentUndeploymentEvent(ctx, gatewayID, &models.AgentUndeploymentEvent{
-				AgentID: agentID, DeploymentID: undeploy.deploymentID, PerformedAt: undeploy.performedAt,
-			})
+			return a2aAgentUndeployEvent(artifactUUID, undeploy.deploymentID, undeploy.performedAt)
 		}
+	}
+	broadcast := func(gatewayID string) error {
+		return events.PublishGatewayEvent(ctx, gatewayID, event(gatewayID))
 	}
 	for _, gatewayID := range gatewayIDs {
 		if err := broadcast(gatewayID); err != nil {

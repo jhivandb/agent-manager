@@ -12283,17 +12283,20 @@ components:
       description: How an external A2A agent is published through the environment's ingress gateway.
       required:
         - status
-        - lastError
+        - statusReason
         - upstreamAuthHeader
         - gatewayUrl
       properties:
         status:
           type: string
-          enum: [pending, published, failed]
-          description: The gateway publication's state.
-        lastError:
+          enum: [DEPLOYING, DEPLOYED, UNDEPLOYING, UNDEPLOYED, FAILED]
+          description: >-
+            The gateway deployment's status. DEPLOYING while the agent waits for its gateway or the gateway has not
+            acknowledged it yet, DEPLOYED once the gateway serves it, FAILED when it could not be deployed.
+        statusReason:
           type: string
-          description: Why the last publish attempt failed; empty after a success.
+          description: >-
+            What a DEPLOYING deployment waits for, or why a FAILED one failed; empty otherwise.
         upstreamAuthHeader:
           type: string
           description: >-

@@ -29,6 +29,7 @@ import (
 
 	"github.com/wso2/agent-manager/agent-manager-service/eventhub"
 	"github.com/wso2/agent-manager/agent-manager-service/models"
+	"github.com/wso2/agent-manager/agent-manager-service/reconcile"
 	"github.com/wso2/agent-manager/agent-manager-service/repositories"
 	"github.com/wso2/agent-manager/agent-manager-service/repositories/repomocks"
 	"github.com/wso2/agent-manager/agent-manager-service/utils"
@@ -40,7 +41,7 @@ var txSentinel = &gorm.DB{}
 // publisherMocks keeps the plain and the transaction-bound mocks apart, so a write that
 // escapes the transaction reaches a nil func and panics.
 type publisherMocks struct {
-	pubs, txPubs               *repomocks.A2APublicationRepositoryMock
+	intents, txIntents         *repomocks.DeployIntentRepositoryMock
 	proxies                    *repomocks.A2AProxyRepositoryMock
 	envCards                   *repomocks.A2AAgentCardRepositoryMock
 	deployments, txDeployments *repomocks.DeploymentRepositoryMock
@@ -65,7 +66,11 @@ func (m *publisherMocks) tx() TxRunner {
 
 func newPublisherMocks(t *testing.T) *publisherMocks {
 	m := &publisherMocks{
-		txPubs:        &repomocks.A2APublicationRepositoryMock{},
+		txIntents: &repomocks.DeployIntentRepositoryMock{
+			// Queueing reads the agent's other publications, which it replaces, then upserts this one.
+			ListFunc:   func(context.Context, repositories.DeployIntentFilter) ([]models.DeployIntent, error) { return nil, nil },
+			UpsertFunc: func(context.Context, *models.DeployIntent) error { return nil },
+		},
 		proxies:       &repomocks.A2AProxyRepositoryMock{},
 		txDeployments: &repomocks.DeploymentRepositoryMock{},
 		gateways: &repomocks.GatewayRepositoryMock{
@@ -81,10 +86,10 @@ func newPublisherMocks(t *testing.T) *publisherMocks {
 		artifacts: &repomocks.ArtifactRepositoryMock{},
 		hub:       &recordingEventHub{},
 	}
-	m.pubs = &repomocks.A2APublicationRepositoryMock{
-		WithTxFunc: func(tx *gorm.DB) repositories.A2APublicationRepository {
+	m.intents = &repomocks.DeployIntentRepositoryMock{
+		WithTxFunc: func(tx *gorm.DB) repositories.DeployIntentRepository {
 			assert.Same(t, txSentinel, tx)
-			return m.txPubs
+			return m.txIntents
 		},
 	}
 	m.deployments = &repomocks.DeploymentRepositoryMock{
@@ -98,7 +103,35 @@ func newPublisherMocks(t *testing.T) *publisherMocks {
 }
 
 func (m *publisherMocks) publisher() *A2APublisher {
-	return NewA2APublisher(m.tx(), m.pubs, m.proxies, m.envCards, m.artifacts, m.deployments, m.gateways, NewGatewayEventsService(m.hub), testLogger())
+	events := NewGatewayEventsService(m.hub)
+	return NewA2APublisher(m.tx(), m.intents, testDeployCore(m.intents, m.deployments, events), nil,
+		m.proxies, m.envCards, m.artifacts, m.deployments, m.gateways, events, testLogger())
+}
+
+// testDeployCore is a reconcile core over intents with the A2A kind registered; a test drives the kind itself.
+func testDeployCore(
+	intents repositories.DeployIntentRepository, deployments repositories.DeploymentRepository, events *GatewayEventsService,
+) *reconcile.Core {
+	kind := NewA2AAgentKind(nil, nil, nil, nil, nil, nil, nil, nil, nil, testLogger())
+	return reconcile.NewCore(reconcile.TxRunner(sentinelTx), intents, deployments, events, reconcile.DefaultConfig(), testLogger(), kind)
+}
+
+// queuedPublication decodes a queued A2A deploy intent.
+func queuedPublication(t *testing.T, intent *models.DeployIntent) a2aPublication {
+	t.Helper()
+	pub, err := decodeA2APublication(*intent)
+	require.NoError(t, err)
+	return pub
+}
+
+// publicationIntent is the deploy intent of an A2A publication, as the repository lists it.
+func publicationIntent(pub a2aPublication) models.DeployIntent {
+	intent, err := a2aIntent(pub.key(), pub.Source, pub.ArtifactUUID)
+	if err != nil {
+		panic(err)
+	}
+	intent.ID = uuid.New()
+	return intent
 }
 
 func testA2AKey() a2aPublicationKey {
@@ -171,7 +204,6 @@ func TestA2APublisherSaveAndRepublishSkipsTheLockForAnInternalAgent(t *testing.T
 		Type: models.AgentType{Type: "agent-api", SubType: "a2a-agent"},
 	}
 	m.proxies.WithTxFunc = func(*gorm.DB) repositories.A2AProxyRepository { return m.proxies }
-	m.txPubs.EnqueueFunc = func(context.Context, *models.A2APublication) error { return nil }
 	var savedIn *gorm.DB
 
 	err := m.publisher().SaveAndRepublish(context.Background(), internal, testA2AKey(), uuid.New(), func(tx *gorm.DB) error {
@@ -183,8 +215,8 @@ func TestA2APublisherSaveAndRepublishSkipsTheLockForAnInternalAgent(t *testing.T
 	assert.Same(t, txSentinel, savedIn)
 	assert.Empty(t, m.proxies.LockAgentEnvCalls())
 	assert.Empty(t, m.proxies.GetByEnvUUIDCalls())
-	require.Len(t, m.txPubs.EnqueueCalls(), 1)
-	assert.Equal(t, models.A2APublicationSourcePlatform, m.txPubs.EnqueueCalls()[0].Pub.Source)
+	require.Len(t, m.txIntents.UpsertCalls(), 1)
+	assert.Equal(t, models.A2APublicationSourcePlatform, queuedPublication(t, m.txIntents.UpsertCalls()[0].Intent).Source)
 }
 
 func TestA2APublisherSaveAndRepublishDoesNotSaveWhenTheLockFails(t *testing.T) {
@@ -204,18 +236,17 @@ func TestA2APublisherSaveAndRepublishDoesNotSaveWhenTheLockFails(t *testing.T) {
 
 func TestA2APublisherEnqueueJoinsTheCallersTransaction(t *testing.T) {
 	m := newPublisherMocks(t)
-	m.txPubs.EnqueueFunc = func(context.Context, *models.A2APublication) error { return nil }
 	artifactUUID := uuid.New()
 
 	require.NoError(t, m.publisher().Enqueue(context.Background(), txSentinel, testA2AKey(),
 		models.A2APublicationSourceExternal, artifactUUID))
 
-	queued := m.txPubs.EnqueueCalls()
+	queued := m.txIntents.UpsertCalls()
 	require.Len(t, queued, 1)
-	assert.Equal(t, models.A2APublicationSourceExternal, queued[0].Pub.Source)
-	assert.Equal(t, artifactUUID, queued[0].Pub.ArtifactUUID)
-	assert.Equal(t, testA2AKey().EnvironmentUUID, queued[0].Pub.EnvironmentUUID)
-	assert.Equal(t, "dev", queued[0].Pub.EnvironmentName)
+	assert.Equal(t, models.A2APublicationSourceExternal, queuedPublication(t, queued[0].Intent).Source)
+	assert.Equal(t, artifactUUID, queuedPublication(t, queued[0].Intent).ArtifactUUID)
+	assert.Equal(t, testA2AKey().EnvironmentUUID, queuedPublication(t, queued[0].Intent).EnvironmentUUID)
+	assert.Equal(t, "dev", queuedPublication(t, queued[0].Intent).EnvironmentName)
 }
 
 // The artifact stays so the environment's API keys survive a switch back to proxied, and its
@@ -225,7 +256,7 @@ func TestA2APublisherTeardownEnvKeepsTheArtifactAndWaitsToTellTheGateway(t *test
 	m.txDeployments.BeginUndeployFunc = func(context.Context, string, string, string) (string, time.Time, error) {
 		return "dep-1", time.Time{}, nil
 	}
-	m.txPubs.DeleteForAgentEnvFunc = func(context.Context, string, string, string, uuid.UUID) error { return nil }
+	m.txIntents.DeleteFunc = func(context.Context, repositories.DeployIntentFilter) error { return nil }
 	artifactUUID := uuid.New()
 	publisher := m.publisher()
 
@@ -237,7 +268,7 @@ func TestA2APublisherTeardownEnvKeepsTheArtifactAndWaitsToTellTheGateway(t *test
 	require.Len(t, undeploys, 1)
 	assert.Equal(t, artifactUUID.String(), undeploys[0].ArtifactUUID)
 	assert.Equal(t, "gw-1", undeploys[0].GatewayID)
-	require.Len(t, m.txPubs.DeleteForAgentEnvCalls(), 1)
+	require.Len(t, m.txIntents.DeleteCalls(), 1)
 	assert.Empty(t, m.hub.published, "nothing is sent before the transaction commits")
 
 	publisher.SendTeardown(context.Background(), teardown)
@@ -260,7 +291,7 @@ func TestA2APublisherTeardownEnvTellsGatewaysWithoutARowWithoutAnID(t *testing.T
 		}
 		return "", time.Time{}, utils.ErrDeploymentNotActive
 	}
-	m.txPubs.DeleteForAgentEnvFunc = func(context.Context, string, string, string, uuid.UUID) error { return nil }
+	m.txIntents.DeleteFunc = func(context.Context, repositories.DeployIntentFilter) error { return nil }
 	publisher := m.publisher()
 
 	teardown, err := publisher.TeardownEnv(context.Background(), txSentinel, testA2AKey(), uuid.New())
@@ -283,23 +314,23 @@ func TestA2APublisherTeardownEnvFailsOnAnUndeployError(t *testing.T) {
 	_, err := m.publisher().TeardownEnv(context.Background(), txSentinel, testA2AKey(), uuid.New())
 
 	assert.ErrorIs(t, err, assert.AnError)
-	assert.Empty(t, m.txPubs.DeleteForAgentEnvCalls())
+	assert.Empty(t, m.txIntents.DeleteCalls())
 }
 
 func TestA2APublisherDeleteForAgentDropsPublicationsAndProxies(t *testing.T) {
 	m := newPublisherMocks(t)
-	m.pubs.DeleteForAgentFunc = func(context.Context, string, string, string) error { return nil }
+	m.intents.DeleteFunc = func(context.Context, repositories.DeployIntentFilter) error { return nil }
 	m.proxies.DeleteForAgentFunc = func(context.Context, string, string, string) error { return nil }
 
 	require.NoError(t, m.publisher().DeleteForAgent(context.Background(), "org-1", "checkout", "weather"))
-	assert.Len(t, m.pubs.DeleteForAgentCalls(), 1)
+	assert.Len(t, m.intents.DeleteCalls(), 1)
 	assert.Len(t, m.proxies.DeleteForAgentCalls(), 1)
 }
 
 func TestA2APublisherTeardownEnvAndDropArtifactDeletesTheArtifactInTheTransaction(t *testing.T) {
 	m := newPublisherMocks(t)
 	m.txDeployments.DeleteForArtifactFunc = func(context.Context, uuid.UUID, string) error { return nil }
-	m.txPubs.DeleteForAgentEnvFunc = func(context.Context, string, string, string, uuid.UUID) error { return nil }
+	m.txIntents.DeleteFunc = func(context.Context, repositories.DeployIntentFilter) error { return nil }
 	m.artifacts.DeleteFunc = func(tx *gorm.DB, _ string) error {
 		assert.Same(t, txSentinel, tx)
 		return gorm.ErrRecordNotFound // already gone is not a failure
@@ -312,25 +343,25 @@ func TestA2APublisherTeardownEnvAndDropArtifactDeletesTheArtifactInTheTransactio
 	assert.Equal(t, artifactUUID, teardown.artifactUUID)
 	require.Len(t, m.artifacts.DeleteCalls(), 1)
 	assert.Equal(t, artifactUUID.String(), m.artifacts.DeleteCalls()[0].UUID)
-	assert.Len(t, m.txPubs.DeleteForAgentEnvCalls(), 1)
+	assert.Len(t, m.txIntents.DeleteCalls(), 1)
 }
 
 func TestA2APublisherTeardownEnvAndDropArtifactSkipsAMissingArtifact(t *testing.T) {
 	m := newPublisherMocks(t)
-	m.txPubs.DeleteForAgentEnvFunc = func(context.Context, string, string, string, uuid.UUID) error { return nil }
+	m.txIntents.DeleteFunc = func(context.Context, repositories.DeployIntentFilter) error { return nil }
 	// artifacts.DeleteFunc is nil: deleting would panic.
 
 	_, err := m.publisher().TeardownEnvAndDropArtifact(context.Background(), txSentinel, testA2AKey(), uuid.Nil)
 
 	require.NoError(t, err)
 	assert.Empty(t, m.txDeployments.DeleteForArtifactCalls())
-	assert.Len(t, m.txPubs.DeleteForAgentEnvCalls(), 1)
+	assert.Len(t, m.txIntents.DeleteCalls(), 1)
 }
 
 func TestA2APublisherTeardownEnvAndDropArtifactReportsAFailedDelete(t *testing.T) {
 	m := newPublisherMocks(t)
 	m.txDeployments.DeleteForArtifactFunc = func(context.Context, uuid.UUID, string) error { return nil }
-	m.txPubs.DeleteForAgentEnvFunc = func(context.Context, string, string, string, uuid.UUID) error { return nil }
+	m.txIntents.DeleteFunc = func(context.Context, repositories.DeployIntentFilter) error { return nil }
 	m.artifacts.DeleteFunc = func(*gorm.DB, string) error { return assert.AnError }
 
 	_, err := m.publisher().TeardownEnvAndDropArtifact(context.Background(), txSentinel, testA2AKey(), uuid.New())
@@ -341,17 +372,18 @@ func TestA2APublisherTeardownEnvAndDropArtifactReportsAFailedDelete(t *testing.T
 func TestA2APublisherTeardownEnvironmentRemovesEverythingAndTellsTheGateways(t *testing.T) {
 	m := newPublisherMocks(t)
 	envUUID, artifactUUID := uuid.New(), uuid.New()
-	pub := models.A2APublication{
+	pub := a2aPublication{
 		OUID: "org-1", ProjectName: "checkout", AgentName: "weather", EnvironmentName: "dev",
 		EnvironmentUUID: envUUID, ArtifactUUID: artifactUUID, Source: models.A2APublicationSourceExternal,
 	}
-	m.pubs.ListForEnvironmentFunc = func(context.Context, string, uuid.UUID) ([]models.A2APublication, error) {
-		return []models.A2APublication{pub}, nil
+	m.intents.ListFunc = func(_ context.Context, filter repositories.DeployIntentFilter) ([]models.DeployIntent, error) {
+		assert.Equal(t, envUUID, *filter.EnvironmentUUID)
+		return []models.DeployIntent{publicationIntent(pub)}, nil
 	}
-	m.pubs.DeleteForEnvironmentFunc = func(context.Context, string, uuid.UUID) error { return nil }
+	m.intents.DeleteFunc = func(context.Context, repositories.DeployIntentFilter) error { return nil }
 	m.proxies.DeleteForEnvironmentFunc = func(context.Context, string, uuid.UUID) error { return nil }
 	m.txDeployments.DeleteForArtifactFunc = func(context.Context, uuid.UUID, string) error { return nil }
-	m.txPubs.DeleteForAgentEnvFunc = func(context.Context, string, string, string, uuid.UUID) error { return nil }
+	m.txIntents.DeleteFunc = func(context.Context, repositories.DeployIntentFilter) error { return nil }
 	m.artifacts.DeleteFunc = func(tx *gorm.DB, _ string) error {
 		assert.Same(t, txSentinel, tx)
 		return nil
@@ -360,7 +392,7 @@ func TestA2APublisherTeardownEnvironmentRemovesEverythingAndTellsTheGateways(t *
 	require.NoError(t, m.publisher().TeardownEnvironment(context.Background(), "org-1", envUUID))
 
 	require.Len(t, m.artifacts.DeleteCalls(), 1, "a deleted environment needs no artifact")
-	assert.Len(t, m.pubs.DeleteForEnvironmentCalls(), 1)
+	assert.Len(t, m.intents.DeleteCalls(), 1)
 	assert.Len(t, m.proxies.DeleteForEnvironmentCalls(), 1)
 	require.Len(t, m.hub.published, 1)
 	assert.Equal(t, artifactUUID.String(), deletedAgentID(t, m.hub.published[0]))
@@ -372,8 +404,8 @@ func TestA2APublisherTeardownEnvironmentDropsTheArtifactOfADirectEnvironment(t *
 	m := newPublisherMocks(t)
 	envUUID, gwUUID := uuid.New(), uuid.New()
 	leftover := &models.Artifact{UUID: uuid.New(), Handle: "checkout/weather/" + envUUID.String(), Kind: models.KindAgent}
-	m.pubs.ListForEnvironmentFunc = func(context.Context, string, uuid.UUID) ([]models.A2APublication, error) {
-		return []models.A2APublication{}, nil
+	m.intents.ListFunc = func(_ context.Context, filter repositories.DeployIntentFilter) ([]models.DeployIntent, error) {
+		return []models.DeployIntent{}, nil
 	}
 	m.envCards.ListForEnvironmentFunc = func(context.Context, string, uuid.UUID) ([]models.A2AAgentCard, error) {
 		return []models.A2AAgentCard{{ProjectName: "checkout", AgentName: "weather", EnvironmentUUID: envUUID}}, nil
@@ -383,7 +415,7 @@ func TestA2APublisherTeardownEnvironmentDropsTheArtifactOfADirectEnvironment(t *
 	m.gateways.ListWithFiltersFunc = func(repositories.GatewayFilterOptions) ([]*models.Gateway, error) {
 		return []*models.Gateway{{UUID: gwUUID}}, nil
 	}
-	m.pubs.DeleteForEnvironmentFunc = func(context.Context, string, uuid.UUID) error { return nil }
+	m.intents.DeleteFunc = func(context.Context, repositories.DeployIntentFilter) error { return nil }
 	m.proxies.DeleteForEnvironmentFunc = func(context.Context, string, uuid.UUID) error { return nil }
 	m.artifacts.GetByHandleFunc = func(handle, ouID string) (*models.Artifact, error) {
 		assert.Equal(t, leftover.Handle, handle)
@@ -414,15 +446,15 @@ func TestA2APublisherTeardownEnvironmentDropsTheArtifactOfADirectEnvironment(t *
 func TestA2APublisherTeardownEnvironmentDoesNotDropAnArtifactTwice(t *testing.T) {
 	m := newPublisherMocks(t)
 	envUUID, artifactUUID := uuid.New(), uuid.New()
-	m.pubs.ListForEnvironmentFunc = func(context.Context, string, uuid.UUID) ([]models.A2APublication, error) {
-		return []models.A2APublication{{
+	m.intents.ListFunc = func(_ context.Context, filter repositories.DeployIntentFilter) ([]models.DeployIntent, error) {
+		return []models.DeployIntent{publicationIntent(a2aPublication{
 			OUID: "org-1", AgentName: "weather", EnvironmentUUID: envUUID, ArtifactUUID: artifactUUID,
-		}}, nil
+		})}, nil
 	}
-	m.pubs.DeleteForEnvironmentFunc = func(context.Context, string, uuid.UUID) error { return nil }
+	m.intents.DeleteFunc = func(context.Context, repositories.DeployIntentFilter) error { return nil }
 	m.proxies.DeleteForEnvironmentFunc = func(context.Context, string, uuid.UUID) error { return nil }
 	m.txDeployments.DeleteForArtifactFunc = func(context.Context, uuid.UUID, string) error { return nil }
-	m.txPubs.DeleteForAgentEnvFunc = func(context.Context, string, string, string, uuid.UUID) error { return nil }
+	m.txIntents.DeleteFunc = func(context.Context, repositories.DeployIntentFilter) error { return nil }
 	m.envCards.ListForEnvironmentFunc = func(context.Context, string, uuid.UUID) ([]models.A2AAgentCard, error) {
 		return []models.A2AAgentCard{{ProjectName: "checkout", AgentName: "weather", EnvironmentUUID: envUUID}}, nil
 	}
@@ -468,17 +500,17 @@ func TestA2APublisherTeardownEnvironmentReportsAnArtifactItCannotListOrDelete(t 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			m := newPublisherMocks(t)
-			m.pubs.ListForEnvironmentFunc = func(context.Context, string, uuid.UUID) ([]models.A2APublication, error) {
-				return []models.A2APublication{}, nil
+			m.intents.ListFunc = func(_ context.Context, filter repositories.DeployIntentFilter) ([]models.DeployIntent, error) {
+				return []models.DeployIntent{}, nil
 			}
-			m.pubs.DeleteForEnvironmentFunc = func(context.Context, string, uuid.UUID) error { return nil }
+			m.intents.DeleteFunc = func(context.Context, repositories.DeployIntentFilter) error { return nil }
 			m.proxies.DeleteForEnvironmentFunc = func(context.Context, string, uuid.UUID) error { return nil }
 			tc.setup(m)
 
 			err := m.publisher().TeardownEnvironment(context.Background(), "org-1", envUUID)
 
 			assert.ErrorIs(t, err, assert.AnError)
-			assert.Len(t, m.pubs.DeleteForEnvironmentCalls(), 1, "the rest of the teardown still runs")
+			assert.Len(t, m.intents.DeleteCalls(), 1, "the rest of the teardown still runs")
 			assert.Len(t, m.proxies.DeleteForEnvironmentCalls(), 1)
 		})
 	}
@@ -489,8 +521,8 @@ func TestA2APublisherTeardownEnvironmentReportsAnArtifactItCannotListOrDelete(t 
 func TestA2APublisherTeardownEnvironmentSweepsOnlyA2AAgents(t *testing.T) {
 	m := newPublisherMocks(t)
 	envUUID := uuid.New()
-	m.pubs.ListForEnvironmentFunc = func(context.Context, string, uuid.UUID) ([]models.A2APublication, error) {
-		return []models.A2APublication{}, nil
+	m.intents.ListFunc = func(_ context.Context, filter repositories.DeployIntentFilter) ([]models.DeployIntent, error) {
+		return []models.DeployIntent{}, nil
 	}
 	m.envCards.ListForEnvironmentFunc = func(_ context.Context, ouID string, env uuid.UUID) ([]models.A2AAgentCard, error) {
 		assert.Equal(t, "org-1", ouID)
@@ -501,7 +533,7 @@ func TestA2APublisherTeardownEnvironmentSweepsOnlyA2AAgents(t *testing.T) {
 		assert.Equal(t, agentEnvAPIArtifactHandle("checkout", "direct-now", envUUID.String()), handle)
 		return nil, utils.ErrArtifactNotFound
 	}
-	m.pubs.DeleteForEnvironmentFunc = func(context.Context, string, uuid.UUID) error { return nil }
+	m.intents.DeleteFunc = func(context.Context, repositories.DeployIntentFilter) error { return nil }
 	m.proxies.DeleteForEnvironmentFunc = func(context.Context, string, uuid.UUID) error { return nil }
 
 	require.NoError(t, m.publisher().TeardownEnvironment(context.Background(), "org-1", envUUID))
@@ -516,17 +548,19 @@ func TestA2APublisherTeardownEnvironmentSweepsOnlyA2AAgents(t *testing.T) {
 func TestA2APublisherTeardownEnvironmentStillDropsTheRowsAfterAFailure(t *testing.T) {
 	m := newPublisherMocks(t)
 	artifactUUID := uuid.New()
-	m.pubs.ListForEnvironmentFunc = func(context.Context, string, uuid.UUID) ([]models.A2APublication, error) {
-		return []models.A2APublication{{AgentName: "weather", ArtifactUUID: artifactUUID}}, nil
+	m.intents.ListFunc = func(_ context.Context, filter repositories.DeployIntentFilter) ([]models.DeployIntent, error) {
+		return []models.DeployIntent{publicationIntent(a2aPublication{
+			AgentName: "weather", ArtifactUUID: artifactUUID, EnvironmentUUID: *filter.EnvironmentUUID,
+		})}, nil
 	}
 	m.txErr = assert.AnError // every per-row transaction fails to commit
-	m.pubs.DeleteForEnvironmentFunc = func(context.Context, string, uuid.UUID) error { return nil }
+	m.intents.DeleteFunc = func(context.Context, repositories.DeployIntentFilter) error { return nil }
 	m.proxies.DeleteForEnvironmentFunc = func(context.Context, string, uuid.UUID) error { return nil }
 
 	err := m.publisher().TeardownEnvironment(context.Background(), "org-1", uuid.New())
 
 	assert.ErrorIs(t, err, assert.AnError)
-	assert.Len(t, m.pubs.DeleteForEnvironmentCalls(), 1)
+	assert.Len(t, m.intents.DeleteCalls(), 1)
 	assert.Len(t, m.proxies.DeleteForEnvironmentCalls(), 1)
 	require.Len(t, m.hub.published, 1)
 	assert.Equal(t, "gw-1", m.hub.published[0].GatewayID)
@@ -536,7 +570,7 @@ func TestA2APublisherTeardownEnvironmentStillDropsTheRowsAfterAFailure(t *testin
 func TestA2APublisherEnvironmentUUIDsListsProxiesWhenPublicationsFail(t *testing.T) {
 	id := uuid.MustParse("55555555-5555-5555-5555-555555555555")
 	m := newPublisherMocks(t)
-	m.pubs.ListEnvironmentUUIDsFunc = func(context.Context, string, string) ([]uuid.UUID, error) {
+	m.intents.ListEnvironmentUUIDsFunc = func(context.Context, repositories.DeployIntentFilter) ([]uuid.UUID, error) {
 		return nil, errors.New("publication listing down")
 	}
 	m.proxies.ListEnvironmentUUIDsFunc = func(context.Context, string, string) ([]uuid.UUID, error) {
@@ -547,4 +581,39 @@ func TestA2APublisherEnvironmentUUIDsListsProxiesWhenPublicationsFail(t *testing
 
 	require.Error(t, err)
 	assert.Contains(t, ids, id)
+}
+
+// One publication per agent and environment: queueing replaces the agent's publication of a deleted same-named
+// environment, and this environment's publication under an artifact since replaced.
+func TestA2APublisherEnqueueReplacesWhatTheNewPublicationSupersedes(t *testing.T) {
+	m := newPublisherMocks(t)
+	key, artifactUUID := testA2AKey(), uuid.New()
+	at := func(envName string, envUUID, artifact uuid.UUID) a2aPublication {
+		return a2aPublication{
+			OUID: key.OUID, ProjectName: key.ProjectName, AgentName: key.AgentName,
+			EnvironmentName: envName, EnvironmentUUID: envUUID, ArtifactUUID: artifact,
+		}
+	}
+	current := at("dev", key.EnvironmentUUID, artifactUUID)
+	oldArtifact := at("dev", key.EnvironmentUUID, uuid.New())
+	deletedEnv := at("dev", uuid.New(), uuid.New())
+	otherEnv := at("staging", uuid.New(), uuid.New())
+	m.txIntents.ListFunc = func(_ context.Context, filter repositories.DeployIntentFilter) ([]models.DeployIntent, error) {
+		assert.Equal(t, a2aAgentFilter(key.OUID, key.ProjectName, key.AgentName), filter)
+		return []models.DeployIntent{
+			publicationIntent(current), publicationIntent(oldArtifact), publicationIntent(deletedEnv), publicationIntent(otherEnv),
+		}, nil
+	}
+	m.txIntents.DeleteFunc = func(context.Context, repositories.DeployIntentFilter) error { return nil }
+
+	require.NoError(t, m.publisher().Enqueue(context.Background(), txSentinel, key, models.A2APublicationSourcePlatform, artifactUUID))
+
+	var deleted []uuid.UUID
+	for _, call := range m.txIntents.DeleteCalls() {
+		deleted = append(deleted, *call.Filter.ArtifactUUID)
+	}
+	assert.ElementsMatch(t, []uuid.UUID{oldArtifact.ArtifactUUID, deletedEnv.ArtifactUUID}, deleted)
+	require.Len(t, m.txIntents.UpsertCalls(), 1)
+	queued := queuedPublication(t, m.txIntents.UpsertCalls()[0].Intent)
+	assert.Equal(t, artifactUUID, queued.ArtifactUUID)
 }

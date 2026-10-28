@@ -26,6 +26,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/wso2/agent-manager/agent-manager-service/models"
+	"github.com/wso2/agent-manager/agent-manager-service/reconcile"
 	"github.com/wso2/agent-manager/agent-manager-service/repositories"
 	"github.com/wso2/agent-manager/agent-manager-service/utils"
 )
@@ -37,7 +38,7 @@ type a2aPublicationKey struct {
 	AgentName       string
 	EnvironmentName string
 	EnvironmentUUID uuid.UUID
-	// AgentUUID is nil when unknown; the reconciler then checks the agent by name.
+	// AgentUUID is nil when unknown; the A2A kind then checks the agent by name.
 	AgentUUID *uuid.UUID
 }
 
@@ -54,10 +55,13 @@ type a2aTeardown struct {
 // TxRunner opens one database transaction and runs fn inside it, so a unit test can hand fn a sentinel.
 type TxRunner func(ctx context.Context, fn func(tx *gorm.DB) error) error
 
-// A2APublisher holds the gateway-publication steps agentManagerService and a2aProxyService share.
+// A2APublisher holds the gateway-publication steps agentManagerService and a2aProxyService share. A publication is an
+// A2A agent's deploy intent for one environment, which the reconcile core carries out through A2AAgentKind.
 type A2APublisher struct {
 	tx             TxRunner
-	pubRepo        repositories.A2APublicationRepository
+	intents        repositories.DeployIntentRepository
+	deploys        *reconcile.Core
+	worker         *reconcile.Worker
 	proxyRepo      repositories.A2AProxyRepository
 	cardRepo       repositories.A2AAgentCardRepository
 	artifactRepo   repositories.ArtifactRepository
@@ -70,7 +74,9 @@ type A2APublisher struct {
 // NewA2APublisher creates an A2APublisher.
 func NewA2APublisher(
 	tx TxRunner,
-	pubRepo repositories.A2APublicationRepository,
+	intents repositories.DeployIntentRepository,
+	deploys *reconcile.Core,
+	worker *reconcile.Worker,
 	proxyRepo repositories.A2AProxyRepository,
 	cardRepo repositories.A2AAgentCardRepository,
 	artifactRepo repositories.ArtifactRepository,
@@ -81,7 +87,9 @@ func NewA2APublisher(
 ) *A2APublisher {
 	return &A2APublisher{
 		tx:             tx,
-		pubRepo:        pubRepo,
+		intents:        intents,
+		deploys:        deploys,
+		worker:         worker,
 		proxyRepo:      proxyRepo,
 		cardRepo:       cardRepo,
 		artifactRepo:   artifactRepo,
@@ -100,24 +108,74 @@ func a2aPublicationSourceFor(agent *models.AgentResponse) models.A2APublicationS
 	return models.A2APublicationSourcePlatform
 }
 
-// Enqueue queues the environment's publication; a non-nil tx makes it part of the caller's transaction.
+// Enqueue records the environment's publication as a deploy intent, due at once with a fresh attempt budget; a
+// non-nil tx makes it part of the caller's transaction. Call Nudge once that has committed. A publication recorded
+// for the agent under the environment's name or UUID before, e.g. for a deleted environment of the same name, is
+// replaced.
 func (p *A2APublisher) Enqueue(
 	ctx context.Context, tx *gorm.DB, key a2aPublicationKey, source models.A2APublicationSource, artifactUUID uuid.UUID,
 ) error {
-	pub := &models.A2APublication{
-		OUID:            key.OUID,
-		ProjectName:     key.ProjectName,
-		AgentName:       key.AgentName,
-		EnvironmentName: key.EnvironmentName,
-		EnvironmentUUID: key.EnvironmentUUID,
-		ArtifactUUID:    artifactUUID,
-		AgentUUID:       key.AgentUUID,
-		Source:          source,
+	intent, err := a2aIntent(key, source, artifactUUID)
+	if err != nil {
+		return err
 	}
-	if err := p.publications(tx).Enqueue(ctx, pub); err != nil {
+	if err := p.dropReplacedPublications(ctx, tx, key, artifactUUID); err != nil {
+		return err
+	}
+	if err := p.deploys.Want(ctx, tx, &intent); err != nil {
 		return fmt.Errorf("failed to queue the A2A gateway publication: %w", err)
 	}
 	return nil
+}
+
+// dropReplacedPublications deletes the agent's publications that the one for key and artifactUUID replaces: those of
+// a same-named environment, and those of this environment under another artifact.
+func (p *A2APublisher) dropReplacedPublications(ctx context.Context, tx *gorm.DB, key a2aPublicationKey, artifactUUID uuid.UUID) error {
+	intents := p.publications(tx)
+	existing, err := intents.List(ctx, a2aAgentFilter(key.OUID, key.ProjectName, key.AgentName))
+	if err != nil {
+		return fmt.Errorf("failed to read the agent's A2A publications: %w", err)
+	}
+	for _, intent := range existing {
+		pub, err := decodeA2APublication(intent)
+		if err != nil {
+			return err
+		}
+		sameEnv := pub.EnvironmentUUID == key.EnvironmentUUID
+		if (sameEnv && pub.ArtifactUUID == artifactUUID) || (!sameEnv && pub.EnvironmentName != key.EnvironmentName) {
+			continue
+		}
+		replaced := a2aEnvFilter(pub.key())
+		replaced.ArtifactUUID = &pub.ArtifactUUID
+		if err := intents.Delete(ctx, replaced); err != nil {
+			return fmt.Errorf("failed to replace the agent's A2A publication: %w", err)
+		}
+	}
+	return nil
+}
+
+// a2aAgentFilter selects every environment's publication of an agent.
+func a2aAgentFilter(ouID, projectName, agentName string) repositories.DeployIntentFilter {
+	return repositories.DeployIntentFilter{
+		Kind: models.KindAgent, OUID: ouID,
+		KindData: map[string]any{"projectName": projectName, "agentName": agentName},
+	}
+}
+
+// a2aEnvFilter selects the agent's publication in key's environment.
+func a2aEnvFilter(key a2aPublicationKey) repositories.DeployIntentFilter {
+	filter := a2aAgentFilter(key.OUID, key.ProjectName, key.AgentName)
+	envUUID := key.EnvironmentUUID
+	filter.EnvironmentUUID = &envUUID
+	return filter
+}
+
+// Nudge has the worker publish recorded publications now rather than at its next tick; call it once they have
+// committed.
+func (p *A2APublisher) Nudge() {
+	if p.worker != nil {
+		p.worker.Nudge()
+	}
 }
 
 // ShouldPublish is true for every internal A2A agent, and for an external one only while its environment is
@@ -147,7 +205,7 @@ func (p *A2APublisher) ShouldPublish(
 func (p *A2APublisher) SaveAndRepublish(
 	ctx context.Context, agent *models.AgentResponse, key a2aPublicationKey, artifactUUID uuid.UUID, save func(tx *gorm.DB) error,
 ) error {
-	return p.tx(ctx, func(tx *gorm.DB) error {
+	err := p.tx(ctx, func(tx *gorm.DB) error {
 		if isExternalProvisioned(agent) {
 			if err := lockA2AProxyEnv(ctx, p.proxies(tx), key); err != nil {
 				return err
@@ -165,6 +223,10 @@ func (p *A2APublisher) SaveAndRepublish(
 		}
 		return p.Enqueue(ctx, tx, key, a2aPublicationSourceFor(agent), artifactUUID)
 	})
+	if err == nil {
+		p.Nudge()
+	}
+	return err
 }
 
 // GatewayURL is where the environment's ingress gateway serves the agent, or "" while none is mapped to it yet.
@@ -176,9 +238,18 @@ func (p *A2APublisher) GatewayURL(ouID string, envUUID uuid.UUID, agentName stri
 	return a2aGatewayURL(gateway, agentName), nil
 }
 
-// Publication returns the environment's publication row.
-func (p *A2APublisher) Publication(ctx context.Context, ouID, projectName, agentName string, envUUID uuid.UUID) (*models.A2APublication, error) {
-	return p.pubRepo.Get(ctx, ouID, projectName, agentName, envUUID)
+// PublicationStatus is where the environment's publication stands: DEPLOYING while it waits for the agent's endpoint
+// or the gateway's ack, then what the gateway acked. It returns repositories.ErrDeployIntentNotFound when the
+// environment has no publication.
+func (p *A2APublisher) PublicationStatus(ctx context.Context, key a2aPublicationKey) (reconcile.Status, error) {
+	intents, err := p.intents.List(ctx, a2aEnvFilter(key))
+	if err != nil {
+		return reconcile.Status{}, fmt.Errorf("failed to read the A2A publication: %w", err)
+	}
+	if len(intents) == 0 {
+		return reconcile.Status{}, repositories.ErrDeployIntentNotFound
+	}
+	return p.deploys.Status(ctx, intents[0])
 }
 
 // TeardownEnv drops one environment's publication in tx and starts undeploying the Agent from its gateways, but keeps the
@@ -225,8 +296,7 @@ func (p *A2APublisher) TeardownEnvAndDropArtifact(
 }
 
 func (p *A2APublisher) deletePublication(ctx context.Context, tx *gorm.DB, key a2aPublicationKey) error {
-	err := p.publications(tx).DeleteForAgentEnv(ctx, key.OUID, key.ProjectName, key.AgentName, key.EnvironmentUUID)
-	if err != nil {
+	if err := p.publications(tx).Delete(ctx, a2aEnvFilter(key)); err != nil {
 		return fmt.Errorf("failed to delete the A2A publication: %w", err)
 	}
 	return nil
@@ -240,7 +310,7 @@ func (p *A2APublisher) SendTeardown(ctx context.Context, t a2aTeardown) {
 // DeleteForAgent drops the agent's publication and proxy rows; deleteAgentAPIArtifact tells the gateways.
 func (p *A2APublisher) DeleteForAgent(ctx context.Context, ouID, projectName, agentName string) error {
 	var errs []error
-	if err := p.pubRepo.DeleteForAgent(ctx, ouID, projectName, agentName); err != nil {
+	if err := p.intents.Delete(ctx, a2aAgentFilter(ouID, projectName, agentName)); err != nil {
 		errs = append(errs, fmt.Errorf("failed to delete A2A publications: %w", err))
 	}
 	if err := p.proxyRepo.DeleteForAgent(ctx, ouID, projectName, agentName); err != nil {
@@ -252,13 +322,19 @@ func (p *A2APublisher) DeleteForAgent(ctx context.Context, ouID, projectName, ag
 // TeardownEnvironment removes a deleted environment's A2A rows, deployments and A2A agent artifacts, then tells the
 // gateways; one failure does not stop the rest. Call it before the environment's card rows go: they name the agents.
 func (p *A2APublisher) TeardownEnvironment(ctx context.Context, ouID string, envUUID uuid.UUID) error {
-	pubs, err := p.pubRepo.ListForEnvironment(ctx, ouID, envUUID)
+	envFilter := repositories.DeployIntentFilter{Kind: models.KindAgent, OUID: ouID, EnvironmentUUID: &envUUID}
+	intents, err := p.intents.List(ctx, envFilter)
 	if err != nil {
 		return fmt.Errorf("failed to list the environment's A2A publications: %w", err)
 	}
 	var errs []error
 	var teardowns []a2aTeardown
-	for _, pub := range pubs {
+	for _, intent := range intents {
+		pub, err := decodeA2APublication(intent)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
 		teardown, err := p.teardownDeletedEnv(ctx, pub)
 		if err != nil {
 			errs = append(errs, err)
@@ -272,7 +348,7 @@ func (p *A2APublisher) TeardownEnvironment(ctx context.Context, ouID string, env
 	}
 	teardowns = append(teardowns, swept...)
 	// Rows a failed teardown left, and proxies that never published, go regardless: the environment is gone.
-	if err := p.pubRepo.DeleteForEnvironment(ctx, ouID, envUUID); err != nil {
+	if err := p.intents.Delete(ctx, envFilter); err != nil {
 		errs = append(errs, fmt.Errorf("failed to delete the environment's A2A publications: %w", err))
 	}
 	if err := p.proxyRepo.DeleteForEnvironment(ctx, ouID, envUUID); err != nil {
@@ -287,7 +363,9 @@ func (p *A2APublisher) TeardownEnvironment(ctx context.Context, ouID string, env
 // EnvironmentUUIDs lists every environment UUID with publication or proxy rows recorded under name, even when one listing fails.
 func (p *A2APublisher) EnvironmentUUIDs(ctx context.Context, ouID, name string) ([]uuid.UUID, error) {
 	var errs []error
-	pubs, err := p.pubRepo.ListEnvironmentUUIDs(ctx, ouID, name)
+	pubs, err := p.intents.ListEnvironmentUUIDs(ctx, repositories.DeployIntentFilter{
+		Kind: models.KindAgent, OUID: ouID, KindData: map[string]any{"environmentName": name},
+	})
 	if err != nil {
 		errs = append(errs, fmt.Errorf("failed to list A2A publication environments: %w", err))
 	}
@@ -300,11 +378,8 @@ func (p *A2APublisher) EnvironmentUUIDs(ctx context.Context, ouID, name string) 
 
 // teardownDeletedEnv removes one publication together with its artifact, which a deleted environment no longer needs.
 // On failure it still returns the teardown to send; agent deletion sweeps the artifact left behind.
-func (p *A2APublisher) teardownDeletedEnv(ctx context.Context, pub models.A2APublication) (a2aTeardown, error) {
-	key := a2aPublicationKey{
-		OUID: pub.OUID, ProjectName: pub.ProjectName, AgentName: pub.AgentName,
-		EnvironmentName: pub.EnvironmentName, EnvironmentUUID: pub.EnvironmentUUID,
-	}
+func (p *A2APublisher) teardownDeletedEnv(ctx context.Context, pub a2aPublication) (a2aTeardown, error) {
+	key := pub.key()
 	var teardown a2aTeardown
 	err := p.tx(ctx, func(tx *gorm.DB) error {
 		var err error
@@ -359,11 +434,11 @@ func (p *A2APublisher) dropLeftoverArtifacts(ctx context.Context, ouID string, e
 	return teardowns, errors.Join(errs...)
 }
 
-func (p *A2APublisher) publications(tx *gorm.DB) repositories.A2APublicationRepository {
+func (p *A2APublisher) publications(tx *gorm.DB) repositories.DeployIntentRepository {
 	if tx == nil {
-		return p.pubRepo
+		return p.intents
 	}
-	return p.pubRepo.WithTx(tx)
+	return p.intents.WithTx(tx)
 }
 
 func (p *A2APublisher) proxies(tx *gorm.DB) repositories.A2AProxyRepository {

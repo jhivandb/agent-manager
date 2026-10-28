@@ -27,6 +27,7 @@ import (
 	"github.com/wso2/agent-manager/agent-manager-service/clients/clientmocks"
 	"github.com/wso2/agent-manager/agent-manager-service/clients/openchoreosvc/client"
 	"github.com/wso2/agent-manager/agent-manager-service/models"
+	"github.com/wso2/agent-manager/agent-manager-service/repositories"
 	"github.com/wso2/agent-manager/agent-manager-service/repositories/repomocks"
 	"github.com/wso2/agent-manager/agent-manager-service/spec"
 	"github.com/wso2/agent-manager/agent-manager-service/utils"
@@ -120,13 +121,15 @@ func TestPromoteAgent_A2AInheritsSourceCardCORSAndRepublishes(t *testing.T) {
 			return &models.Artifact{UUID: artifactUUID, Kind: models.KindAgent}, nil
 		},
 	}
-	pubRepo := &repomocks.A2APublicationRepositoryMock{
-		EnqueueFunc: func(_ context.Context, _ *models.A2APublication) error {
+	pubRepo := &repomocks.DeployIntentRepositoryMock{
+		ListFunc: func(context.Context, repositories.DeployIntentFilter) ([]models.DeployIntent, error) { return nil, nil },
+		UpsertFunc: func(context.Context, *models.DeployIntent) error {
 			events = append(events, "enqueue")
 			return nil
 		},
 	}
-	s.a2aPublisher = NewA2APublisher(nil, pubRepo, &repomocks.A2AProxyRepositoryMock{}, nil, nil, nil, nil, nil, testLogger())
+	s.a2aPublisher = NewA2APublisher(nil, pubRepo, testDeployCore(pubRepo, nil, nil), nil,
+		&repomocks.A2AProxyRepositoryMock{}, nil, nil, nil, nil, nil, testLogger())
 
 	err := s.PromoteAgent(tierGrantedCtx(t), "acme", "proj1", "my-agent", &spec.PromoteAgentRequest{
 		SourceEnvironment: "dev",
@@ -142,10 +145,10 @@ func TestPromoteAgent_A2AInheritsSourceCardCORSAndRepublishes(t *testing.T) {
 	assert.Equal(t, []string{"Content-Type"}, upserted.CardCORSAllowHeaders)
 	assert.Equal(t, sourceOverride.CardCORSAllowCredentials, upserted.CardCORSAllowCredentials)
 
-	enqueued := pubRepo.EnqueueCalls()
+	enqueued := pubRepo.UpsertCalls()
 	require.Len(t, enqueued, 1, "the target is queued for gateway publication")
-	assert.Equal(t, "staging", enqueued[0].Pub.EnvironmentName)
-	assert.Equal(t, stagingUUID, enqueued[0].Pub.EnvironmentUUID)
-	assert.Equal(t, artifactUUID, enqueued[0].Pub.ArtifactUUID)
+	assert.Equal(t, "staging", queuedPublication(t, enqueued[0].Intent).EnvironmentName)
+	assert.Equal(t, stagingUUID, queuedPublication(t, enqueued[0].Intent).EnvironmentUUID)
+	assert.Equal(t, artifactUUID, queuedPublication(t, enqueued[0].Intent).ArtifactUUID)
 	assert.Equal(t, []string{"upsert", "enqueue"}, events, "queued only after the config it is built from is saved")
 }

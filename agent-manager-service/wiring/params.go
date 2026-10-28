@@ -35,6 +35,7 @@ import (
 	"github.com/wso2/agent-manager/agent-manager-service/eventhub"
 	"github.com/wso2/agent-manager/agent-manager-service/middleware"
 	"github.com/wso2/agent-manager/agent-manager-service/middleware/jwtassertion"
+	"github.com/wso2/agent-manager/agent-manager-service/reconcile"
 	"github.com/wso2/agent-manager/agent-manager-service/services"
 	"github.com/wso2/agent-manager/agent-manager-service/websocket"
 )
@@ -79,7 +80,7 @@ type AppParams struct {
 	AgentIdentityController          controllers.AgentIdentityController
 	MonitorScheduler                 services.MonitorSchedulerService
 	AgentThunderReconciler           services.AgentThunderReconcilerService
-	A2APublicationReconciler         services.A2APublicationReconcilerService
+	DeployIntentWorker               *reconcile.Worker
 	A2ACardReconciler                services.A2ACardReconcilerService
 	DeploymentTimeoutService         *services.DeploymentTimeoutService
 

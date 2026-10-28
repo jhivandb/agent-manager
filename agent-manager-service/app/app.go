@@ -241,16 +241,17 @@ func Run(authProvider occlient.AuthProvider, secretProvider secretmanagersvc.Pro
 		}
 	}
 
-	// Start the A2A publication reconciler. It runs unconditionally: it is a
-	// no-op for an org with no A2A agents, and gating it on a feature flag would
-	// leave a deploy's queued publication stranded if the flag were ever off.
-	a2aReconcilerCtx, a2aReconcilerCancel := context.WithCancel(backgroundCtx)
-	if err := dependencies.A2APublicationReconciler.Start(a2aReconcilerCtx); err != nil {
-		slog.Error("failed to start A2A publication reconciler", "error", err)
+	// Start the deploy intent worker. It runs unconditionally: it is a no-op for an
+	// org with nothing to deploy, and gating it on a feature flag would leave a
+	// recorded intent, such as an A2A agent's publication, stranded if the flag
+	// were ever off.
+	deployIntentWorkerCtx, deployIntentWorkerCancel := context.WithCancel(backgroundCtx)
+	if err := dependencies.DeployIntentWorker.Start(deployIntentWorkerCtx); err != nil {
+		slog.Error("failed to start deploy intent worker", "error", err)
 		os.Exit(1)
 	}
 
-	// Started unconditionally, like the publication reconciler that feeds it.
+	// Started unconditionally, like the deploy intent worker that feeds it.
 	a2aCardReconcilerCtx, a2aCardReconcilerCancel := context.WithCancel(backgroundCtx)
 	if err := dependencies.A2ACardReconciler.Start(a2aCardReconcilerCtx); err != nil {
 		slog.Error("failed to start A2A card reconciler", "error", err)
@@ -318,9 +319,9 @@ func Run(authProvider occlient.AuthProvider, secretProvider secretmanagersvc.Pro
 			}
 		}
 
-		a2aReconcilerCancel()
-		if err := dependencies.A2APublicationReconciler.Stop(); err != nil {
-			slog.Error("error stopping A2A publication reconciler", "error", err)
+		deployIntentWorkerCancel()
+		if err := dependencies.DeployIntentWorker.Stop(); err != nil {
+			slog.Error("error stopping deploy intent worker", "error", err)
 		}
 
 		a2aCardReconcilerCancel()

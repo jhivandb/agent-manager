@@ -136,3 +136,29 @@ func TestDeploymentAckHandlerSurvivesARepositoryError(t *testing.T) {
 	assert.True(t, NewDeploymentAckHandler(repo).HandleMessage("gw-1", msg))
 	assert.Len(t, repo.ApplyAckCalls(), 1)
 }
+
+// A deploy the gateway acked has work waiting on it (an A2A agent's card fetch), so the handler wakes the worker.
+func TestDeploymentAckHandlerWakesTheWorkerOnAnAppliedDeploySuccess(t *testing.T) {
+	for _, tc := range []struct {
+		name, payload string
+		applied       bool
+		wakes         bool
+	}{
+		{"deploy success", `{"deploymentId":"d-1","artifactId":"a-1","resourceType":"Agent","action":"deploy","status":"success"}`, true, true},
+		{"not applied", `{"deploymentId":"d-1","artifactId":"a-1","resourceType":"Agent","action":"deploy","status":"success"}`, false, false},
+		{"deploy failure", `{"deploymentId":"d-1","artifactId":"a-1","resourceType":"Agent","action":"deploy","status":"failed"}`, true, false},
+		{"undeploy", `{"deploymentId":"d-1","artifactId":"a-1","resourceType":"Agent","action":"undeploy","status":"success"}`, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := &repomocks.DeploymentRepositoryMock{
+				ApplyAckFunc: func(context.Context, string, models.DeploymentAck) (bool, error) { return tc.applied, nil },
+			}
+			wakes := 0
+			handler := NewDeploymentAckHandler(repo).WithAfterDeployed(func() { wakes++ })
+
+			handler.HandleMessage("gw-1", ackMessage(tc.payload))
+
+			assert.Equal(t, tc.wakes, wakes == 1)
+		})
+	}
+}

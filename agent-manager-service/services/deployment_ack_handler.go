@@ -28,6 +28,8 @@ import (
 // DeploymentAckHandler processes deployment acknowledgment messages from gateways
 type DeploymentAckHandler struct {
 	deploymentRepo repositories.DeploymentRepository
+	// afterDeployed runs once an ack settles a deploy as DEPLOYED; nil when nothing waits on that.
+	afterDeployed func()
 }
 
 // NewDeploymentAckHandler creates a new deployment ack handler
@@ -35,6 +37,12 @@ func NewDeploymentAckHandler(deploymentRepo repositories.DeploymentRepository) *
 	return &DeploymentAckHandler{
 		deploymentRepo: deploymentRepo,
 	}
+}
+
+// WithAfterDeployed makes the handler call fn, which must not block, each time an ack settles a deploy as DEPLOYED.
+func (h *DeploymentAckHandler) WithAfterDeployed(fn func()) *DeploymentAckHandler {
+	h.afterDeployed = fn
+	return h
 }
 
 // HandleMessage parses a raw WebSocket message and processes it if it's a known event type.
@@ -102,6 +110,9 @@ func (h *DeploymentAckHandler) handleDeploymentAck(gatewayID string, payload jso
 		log.Info("DeploymentAckHandler: ack matched no pending deployment, status unchanged")
 	default:
 		log.Info("DeploymentAckHandler: deployment status updated")
+		if statusAck.Success && statusAck.Action == models.DeploymentAckActionDeploy && h.afterDeployed != nil {
+			h.afterDeployed()
+		}
 	}
 }
 

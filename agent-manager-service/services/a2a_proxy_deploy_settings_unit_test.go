@@ -89,8 +89,8 @@ func deploySettingsMocks(t *testing.T) *publisherMocks {
 func TestUpdateAgentDeploySettingsRepublishesAProxiedExternalAgent(t *testing.T) {
 	var steps []string
 	m := deploySettingsMocks(t)
-	m.txPubs.EnqueueFunc = func(_ context.Context, pub *models.A2APublication) error {
-		steps = append(steps, "enqueue:"+string(pub.Source))
+	m.txIntents.UpsertFunc = func(_ context.Context, intent *models.DeployIntent) error {
+		steps = append(steps, "enqueue:"+string(queuedPublication(t, intent).Source))
 		return nil
 	}
 	m.proxies.LockAgentEnvFunc = func(_ context.Context, _, _, _ string, envUUID uuid.UUID) error {
@@ -135,14 +135,14 @@ func TestUpdateAgentDeploySettingsSeesASwitchToDirectUnderTheLock(t *testing.T) 
 
 	require.NoError(t, err)
 	assert.Len(t, txConfigs.UpsertCalls(), 1)
-	assert.Empty(t, m.txPubs.EnqueueCalls(), "no external row is left behind for the reconciler to fail")
+	assert.Empty(t, m.txIntents.UpsertCalls(), "no external row is left behind for the reconciler to fail")
 }
 
 // Nothing is half-applied: a republish that cannot be queued rolls the settings back with it.
 func TestUpdateAgentDeploySettingsFailsWhenTheRepublishCannotBeQueued(t *testing.T) {
 	boom := errors.New("boom")
 	m := deploySettingsMocks(t)
-	m.txPubs.EnqueueFunc = func(context.Context, *models.A2APublication) error { return boom }
+	m.txIntents.UpsertFunc = func(context.Context, *models.DeployIntent) error { return boom }
 	m.proxies.GetByEnvUUIDFunc = func(context.Context, string, string, string, uuid.UUID) (*models.A2AProxy, error) {
 		return &models.A2AProxy{}, nil
 	}

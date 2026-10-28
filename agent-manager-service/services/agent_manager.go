@@ -6659,7 +6659,7 @@ func a2aGatewayRouteTrait(upstreamPort int32) client.TraitRequest {
 // binding's status, which OpenChoreo populates only once the binding
 // reconciles — after this call returns — so an inline publish would emit an
 // Agent with an empty upstream that routes nowhere while looking healthy. The
-// A2A publication reconciler picks the row up and finishes the job.
+// reconcile worker picks the intent up, waits for the URL and finishes the job.
 //
 // Best effort: the agent is deployed and running by this point, and failing the
 // deploy over a queue write would report a false failure for work that
@@ -6674,7 +6674,9 @@ func (s *agentManagerService) enqueueA2APublication(
 	if err := s.a2aPublisher.Enqueue(ctx, nil, key, source, artifactUUID); err != nil {
 		s.logger.Error("Failed to queue A2A agent gateway publication; the agent is deployed but will not reach its gateway until it is next deployed, promoted, or its deploy settings are saved",
 			"agentName", key.AgentName, "environment", key.EnvironmentName, "error", err)
+		return
 	}
+	s.a2aPublisher.Nudge()
 }
 
 // enqueueCreatedA2AAgent queues a new A2A agent's first-environment publication,
@@ -6704,7 +6706,7 @@ func (s *agentManagerService) enqueueCreatedA2AAgent(
 	s.enqueueA2APublication(ctx, key, models.A2APublicationSourcePlatform, artifact.UUID)
 }
 
-// parseAgentUUID returns nil for a missing or malformed UUID; the reconciler then checks by name.
+// parseAgentUUID returns nil for a missing or malformed UUID; the A2A kind then checks by name.
 func parseAgentUUID(raw string) *uuid.UUID {
 	id, err := uuid.Parse(raw)
 	if err != nil {
