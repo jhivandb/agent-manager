@@ -58,7 +58,6 @@ type DeploymentRepository interface {
 	// SetCurrentCtx is SetCurrent with context propagation — see GetWithStateCtx.
 	SetCurrentCtx(ctx context.Context, artifactUUID, orgUUID, gatewayID, deploymentID string, status models.DeploymentStatus) (performedAt time.Time, err error)
 	GetStatus(artifactUUID, orgUUID, gatewayID string) (deploymentID string, status models.DeploymentStatus, updatedAt *time.Time, err error)
-	DeleteStatus(artifactUUID, orgUUID, gatewayID string) error
 
 	// BeginUndeploy moves the artifact's row on the gateway to UNDEPLOYING, desired UNDEPLOYED,
 	// and returns the deployment id the undeploy event must carry: the row's id when the gateway
@@ -82,11 +81,7 @@ type DeploymentRepository interface {
 	GetDeployedGatewaysByProvider(artifactUUID uuid.UUID, orgUUID string) ([]string, error)
 	// GetLiveGatewaysByProvider returns the gateways that acked holding the artifact (DEPLOYED).
 	GetLiveGatewaysByProvider(artifactUUID uuid.UUID, orgUUID string) ([]string, error)
-	GetTrackedGatewaysByProvider(artifactUUID uuid.UUID, orgUUID string) ([]string, error)
 	GetTrackedGatewaysByProviderCtx(ctx context.Context, artifactUUID uuid.UUID, orgUUID string) ([]string, error)
-	GetDeployedProvidersByGateway(gatewayUUID uuid.UUID, orgUUID string) ([]string, error)
-	IsProviderDeployedToGateway(artifactUUID uuid.UUID, gatewayUUID uuid.UUID, orgUUID string) (bool, error)
-	GetByArtifactAndGateway(artifactUUID, gatewayUUID, orgUUID string) (*models.Deployment, error)
 
 	// DeleteForArtifact removes every deployment of the artifact; their deployment_status rows cascade.
 	DeleteForArtifact(ctx context.Context, artifactUUID uuid.UUID, orgUUID string) error
@@ -468,13 +463,6 @@ func (r *DeploymentRepo) GetStatus(artifactUUID, orgUUID, gatewayID string) (str
 	return result.DeploymentID, models.DeploymentStatus(result.Status), &result.UpdatedAt, nil
 }
 
-// DeleteStatus deletes the status entry for an artifact on a gateway
-func (r *DeploymentRepo) DeleteStatus(artifactUUID, orgUUID, gatewayID string) error {
-	return r.db.Where("artifact_uuid = ? AND ou_id = ? AND gateway_uuid = ?",
-		artifactUUID, orgUUID, gatewayID).
-		Delete(&models.DeploymentStatusRecord{}).Error
-}
-
 // GetWithState retrieves a deployment with its lifecycle state populated (without content)
 func (r *DeploymentRepo) GetWithState(deploymentID, artifactUUID, orgUUID string) (*models.Deployment, error) {
 	return r.GetWithStateCtx(context.Background(), deploymentID, artifactUUID, orgUUID)
@@ -611,14 +599,9 @@ func (r *DeploymentRepo) GetLiveGatewaysByProvider(artifactUUID uuid.UUID, orgUU
 	return gatewayUUIDs, nil
 }
 
-// GetTrackedGatewaysByProvider returns all gateway UUIDs where this provider has a
-// deployment_status row, regardless of whether the current status is DEPLOYED or
-// UNDEPLOYED. Used by save-time redeploy flows that must reach every gateway the proxy
-// has ever been pushed to, including ones whose last deploy ack failed.
-func (r *DeploymentRepo) GetTrackedGatewaysByProvider(artifactUUID uuid.UUID, orgUUID string) ([]string, error) {
-	return r.GetTrackedGatewaysByProviderCtx(context.Background(), artifactUUID, orgUUID)
-}
-
+// GetTrackedGatewaysByProviderCtx returns all gateway UUIDs where this provider has a
+// deployment_status row, whatever its status. Used by save-time redeploy flows that must reach
+// every gateway the proxy has ever been pushed to, including ones whose last deploy ack failed.
 func (r *DeploymentRepo) GetTrackedGatewaysByProviderCtx(ctx context.Context, artifactUUID uuid.UUID, orgUUID string) ([]string, error) {
 	var gatewayUUIDs []string
 	err := r.db.WithContext(ctx).Table("deployment_status").
@@ -629,58 +612,4 @@ func (r *DeploymentRepo) GetTrackedGatewaysByProviderCtx(ctx context.Context, ar
 	}
 
 	return gatewayUUIDs, nil
-}
-
-// GetDeployedProvidersByGateway returns all provider UUIDs currently deployed to this gateway
-func (r *DeploymentRepo) GetDeployedProvidersByGateway(gatewayUUID uuid.UUID, orgUUID string) ([]string, error) {
-	var providerUUIDs []string
-	err := r.db.Table("deployment_status").
-		Where("gateway_uuid = ? AND ou_id = ? AND status = ?",
-			gatewayUUID, orgUUID, models.DeploymentStatusDeployed).
-		Pluck("artifact_uuid", &providerUUIDs).Error
-	if err != nil {
-		return nil, err
-	}
-
-	return providerUUIDs, nil
-}
-
-// IsProviderDeployedToGateway checks if a provider is currently deployed to a gateway
-func (r *DeploymentRepo) IsProviderDeployedToGateway(artifactUUID uuid.UUID, gatewayUUID uuid.UUID, orgUUID string) (bool, error) {
-	var count int64
-	err := r.db.Table("deployment_status").
-		Where("artifact_uuid = ? AND gateway_uuid = ? AND ou_id = ? AND status = ?",
-			artifactUUID, gatewayUUID, orgUUID, models.DeploymentStatusDeployed).
-		Count(&count).Error
-
-	return count > 0, err
-}
-
-// GetByArtifactAndGateway retrieves deployment by artifact and gateway
-func (r *DeploymentRepo) GetByArtifactAndGateway(artifactUUID, gatewayUUID, orgUUID string) (*models.Deployment, error) {
-	var deploymentID string
-	var status models.DeploymentStatus
-	var updatedAt *time.Time
-
-	// First get the deployment ID and status from deployment_status table
-	err := r.db.Table("deployment_status").
-		Select("deployment_id, status, updated_at").
-		Where("artifact_uuid = ? AND gateway_uuid = ? AND ou_id = ?",
-			artifactUUID, gatewayUUID, orgUUID).
-		Row().
-		Scan(&deploymentID, &status, &updatedAt)
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, utils.ErrArtifactNotFound
-		}
-		return nil, fmt.Errorf("failed to query deployment status: %w", err)
-	}
-
-	// Return a minimal deployment object with status information
-	deployment := &models.Deployment{
-		Status:    &status,
-		UpdatedAt: updatedAt,
-	}
-
-	return deployment, nil
 }

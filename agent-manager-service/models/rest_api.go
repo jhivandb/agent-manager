@@ -85,13 +85,3 @@ type Policy struct {
 	Params             *map[string]interface{} `json:"params,omitempty"`
 	Version            string                  `json:"version"`
 }
-
-// APIMetadata contains minimal API information for handle-to-UUID resolution
-type APIMetadata struct {
-	UUID             uuid.UUID `json:"id" db:"uuid"`
-	Handle           string    `json:"handle" db:"handle"`
-	Name             string    `json:"name" db:"name"`
-	Version          string    `json:"version" db:"version"`
-	Kind             string    `json:"kind" db:"kind"`
-	OrganizationName string    `json:"organizationId" db:"organization_name"`
-}
