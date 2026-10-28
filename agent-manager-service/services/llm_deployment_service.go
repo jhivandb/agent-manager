@@ -24,7 +24,6 @@ import (
 	"log/slog"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 	"gopkg.in/yaml.v3"
@@ -246,7 +245,7 @@ func (s *LLMProviderDeploymentService) DeployLLMProvider(providerID string, req 
 	deploymentEvent := &models.LLMProviderDeploymentEvent{
 		ProviderID:     provider.UUID.String(),
 		DeploymentID:   deploymentID.String(),
-		PerformedAt:    time.Now(),
+		PerformedAt:    *deployment.PerformedAt,
 		GatewayID:      req.GatewayID,
 		OrganizationID: ouID,
 		Status:         string(models.DeploymentStatusDeployed),
@@ -305,12 +304,12 @@ func (s *LLMProviderDeploymentService) UndeployLLMProviderDeployment(providerID,
 	}
 
 	slog.Info("LLMProviderDeploymentService.UndeployLLMProviderDeployment: setting status to undeploying", "providerID", providerID, "deploymentID", deploymentID)
-	eventDeploymentID, err := s.deploymentRepo.BeginUndeploy(context.Background(), provider.UUID.String(), ouID, gatewayID)
+	eventDeploymentID, performedAt, err := s.deploymentRepo.BeginUndeploy(context.Background(), provider.UUID.String(), ouID, gatewayID)
 	if err != nil {
 		slog.Error("LLMProviderDeploymentService.UndeployLLMProviderDeployment: failed to undeploy", "providerID", providerID, "deploymentID", deploymentID, "error", err)
 		return nil, fmt.Errorf("failed to undeploy: %w", err)
 	}
-	markUndeploying(deployment)
+	markUndeploying(deployment, performedAt)
 
 	slog.Info("LLMProviderDeploymentService.UndeployLLMProviderDeployment: undeploy started", "providerID", providerID, "deploymentID", deploymentID)
 
@@ -318,7 +317,7 @@ func (s *LLMProviderDeploymentService) UndeployLLMProviderDeployment(providerID,
 	undeploymentEvent := &models.LLMProviderUndeploymentEvent{
 		ProviderID:     provider.UUID.String(),
 		DeploymentID:   eventDeploymentID,
-		PerformedAt:    time.Now(),
+		PerformedAt:    performedAt,
 		GatewayID:      gatewayID,
 		OrganizationID: ouID,
 	}
@@ -366,17 +365,17 @@ func (s *LLMProviderDeploymentService) RestoreLLMProviderDeployment(providerID, 
 		return nil, utils.ErrDeploymentAlreadyDeployed
 	}
 
-	updatedAt, err := s.deploymentRepo.SetCurrent(provider.UUID.String(), ouID, gatewayID, deploymentID, models.DeploymentStatusDeploying)
+	performedAt, err := s.deploymentRepo.SetCurrent(provider.UUID.String(), ouID, gatewayID, deploymentID, models.DeploymentStatusDeploying)
 	if err != nil {
 		return nil, fmt.Errorf("failed to restore deployment: %w", err)
 	}
-	markDeploying(deployment, updatedAt)
+	markDeploying(deployment, performedAt)
 
 	// Broadcast deployment event to gateway (restore is treated as a deployment)
 	deploymentEvent := &models.LLMProviderDeploymentEvent{
 		ProviderID:     provider.UUID.String(),
 		DeploymentID:   deploymentID,
-		PerformedAt:    time.Now(),
+		PerformedAt:    performedAt,
 		GatewayID:      gatewayID,
 		OrganizationID: ouID,
 		Status:         string(models.DeploymentStatusDeployed),

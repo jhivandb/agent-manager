@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -221,7 +222,9 @@ func TestA2APublisherEnqueueJoinsTheCallersTransaction(t *testing.T) {
 // deployment is undeployed rather than deleted, so the gateway's ack has a row to settle.
 func TestA2APublisherTeardownEnvKeepsTheArtifactAndWaitsToTellTheGateway(t *testing.T) {
 	m := newPublisherMocks(t)
-	m.txDeployments.BeginUndeployFunc = func(context.Context, string, string, string) (string, error) { return "dep-1", nil }
+	m.txDeployments.BeginUndeployFunc = func(context.Context, string, string, string) (string, time.Time, error) {
+		return "dep-1", time.Time{}, nil
+	}
 	m.txPubs.DeleteForAgentEnvFunc = func(context.Context, string, string, string, uuid.UUID) error { return nil }
 	artifactUUID := uuid.New()
 	publisher := m.publisher()
@@ -251,11 +254,11 @@ func TestA2APublisherTeardownEnvTellsGatewaysWithoutARowWithoutAnID(t *testing.T
 	m.gateways.ListWithFiltersFunc = func(repositories.GatewayFilterOptions) ([]*models.Gateway, error) {
 		return []*models.Gateway{{UUID: uuid.MustParse("22222222-2222-2222-2222-222222222222")}}, nil
 	}
-	m.txDeployments.BeginUndeployFunc = func(_ context.Context, _, _, gatewayID string) (string, error) {
+	m.txDeployments.BeginUndeployFunc = func(_ context.Context, _, _, gatewayID string) (string, time.Time, error) {
 		if gatewayID == "gw-1" {
-			return "", nil // placed but never acked
+			return "", time.Time{}, nil // placed but never acked
 		}
-		return "", utils.ErrDeploymentNotActive
+		return "", time.Time{}, utils.ErrDeploymentNotActive
 	}
 	m.txPubs.DeleteForAgentEnvFunc = func(context.Context, string, string, string, uuid.UUID) error { return nil }
 	publisher := m.publisher()
@@ -273,7 +276,9 @@ func TestA2APublisherTeardownEnvTellsGatewaysWithoutARowWithoutAnID(t *testing.T
 
 func TestA2APublisherTeardownEnvFailsOnAnUndeployError(t *testing.T) {
 	m := newPublisherMocks(t)
-	m.txDeployments.BeginUndeployFunc = func(context.Context, string, string, string) (string, error) { return "", assert.AnError }
+	m.txDeployments.BeginUndeployFunc = func(context.Context, string, string, string) (string, time.Time, error) {
+		return "", time.Time{}, assert.AnError
+	}
 
 	_, err := m.publisher().TeardownEnv(context.Background(), txSentinel, testA2AKey(), uuid.New())
 

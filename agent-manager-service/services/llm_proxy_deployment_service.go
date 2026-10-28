@@ -221,6 +221,7 @@ func (s *LLMProxyDeploymentService) DeployLLMProxy(proxyID string, req *models.D
 	deploymentEvent := &models.LLMProxyDeploymentEvent{
 		ProxyID:        proxyID,
 		DeploymentID:   deploymentID.String(),
+		PerformedAt:    *deployment.PerformedAt,
 		Vhost:          vhost,
 		Environment:    "production",
 		GatewayID:      req.GatewayID,
@@ -285,12 +286,12 @@ func (s *LLMProxyDeploymentService) UndeployLLMProxyDeployment(ctx context.Conte
 	}
 
 	slog.Info("LLMProxyDeploymentService.UndeployLLMProxyDeployment: setting status to undeploying", "proxyID", proxyID, "deploymentID", deploymentID)
-	eventDeploymentID, err := s.deploymentRepo.BeginUndeploy(ctx, proxy.UUID.String(), ouID, gatewayID)
+	eventDeploymentID, performedAt, err := s.deploymentRepo.BeginUndeploy(ctx, proxy.UUID.String(), ouID, gatewayID)
 	if err != nil {
 		slog.Error("LLMProxyDeploymentService.UndeployLLMProxyDeployment: failed to undeploy", "proxyID", proxyID, "deploymentID", deploymentID, "error", err)
 		return nil, fmt.Errorf("failed to undeploy: %w", err)
 	}
-	markUndeploying(deployment)
+	markUndeploying(deployment, performedAt)
 
 	slog.Info("LLMProxyDeploymentService.UndeployLLMProxyDeployment: undeploy started", "proxyID", proxyID, "deploymentID", deploymentID)
 
@@ -303,6 +304,7 @@ func (s *LLMProxyDeploymentService) UndeployLLMProxyDeployment(ctx context.Conte
 	undeploymentEvent := &models.LLMProxyUndeploymentEvent{
 		ProxyID:        proxyID,
 		DeploymentID:   eventDeploymentID,
+		PerformedAt:    performedAt,
 		Vhost:          vhost,
 		Environment:    "production",
 		GatewayID:      gatewayID,
@@ -355,11 +357,11 @@ func (s *LLMProxyDeploymentService) RestoreLLMProxyDeployment(proxyID, deploymen
 		return nil, utils.ErrDeploymentAlreadyDeployed
 	}
 
-	updatedAt, err := s.deploymentRepo.SetCurrent(proxy.UUID.String(), ouID, gatewayID, deploymentID, models.DeploymentStatusDeploying)
+	performedAt, err := s.deploymentRepo.SetCurrent(proxy.UUID.String(), ouID, gatewayID, deploymentID, models.DeploymentStatusDeploying)
 	if err != nil {
 		return nil, fmt.Errorf("failed to restore deployment: %w", err)
 	}
-	markDeploying(deployment, updatedAt)
+	markDeploying(deployment, performedAt)
 
 	// Broadcast deployment event to gateway (restore is treated as a deployment)
 	vhost := ""
@@ -370,6 +372,7 @@ func (s *LLMProxyDeploymentService) RestoreLLMProxyDeployment(proxyID, deploymen
 	deploymentEvent := &models.LLMProxyDeploymentEvent{
 		ProxyID:        proxyID,
 		DeploymentID:   deploymentID,
+		PerformedAt:    performedAt,
 		Vhost:          vhost,
 		Environment:    "production",
 		GatewayID:      gatewayID,

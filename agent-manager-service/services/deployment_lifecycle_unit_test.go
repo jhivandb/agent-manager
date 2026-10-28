@@ -40,14 +40,17 @@ type lifecycleRig struct {
 	artifactUUID uuid.UUID
 	gatewayID    uuid.UUID
 	deploymentID uuid.UUID
-	deployments  *repomocks.DeploymentRepositoryMock
-	hub          *recordingEventHub
+	// performedAt is the performed_at the repository writes for every transition.
+	performedAt time.Time
+	deployments *repomocks.DeploymentRepositoryMock
+	hub         *recordingEventHub
 }
 
 func newLifecycleRig() *lifecycleRig {
 	return &lifecycleRig{
 		ouID: "org-1", handle: "my-artifact",
 		artifactUUID: uuid.New(), gatewayID: uuid.New(), deploymentID: uuid.New(),
+		performedAt: time.Date(2026, 10, 28, 9, 30, 0, 123_000_000, time.UTC),
 		deployments: &repomocks.DeploymentRepositoryMock{},
 		hub:         &recordingEventHub{},
 	}
@@ -92,10 +95,18 @@ func (r *lifecycleRig) withDeployment(status, desired models.DeploymentStatus) {
 	}
 }
 
+// storesDeployment stands in for DeploymentRepository.CreateWithLimitEnforcement: it starts the
+// new deployment's transition as the repository does.
+func storesDeployment(d *models.Deployment, _ int) error {
+	performedAt := models.NewPerformedAt()
+	d.PerformedAt = &performedAt
+	return nil
+}
+
 // beginsUndeploy makes BeginUndeploy succeed, handing the event eventDeploymentID.
 func (r *lifecycleRig) beginsUndeploy(eventDeploymentID string) {
-	r.deployments.BeginUndeployFunc = func(context.Context, string, string, string) (string, error) {
-		return eventDeploymentID, nil
+	r.deployments.BeginUndeployFunc = func(context.Context, string, string, string) (string, time.Time, error) {
+		return eventDeploymentID, r.performedAt, nil
 	}
 }
 
@@ -115,7 +126,7 @@ func TestLLMProviderDeployStartsDeployingAndNamesTheProviderByUUID(t *testing.T)
 	r := newLifecycleRig()
 	r.withDeployment(models.DeploymentStatusDeployed, models.DeploymentStatusDeployed)
 	r.deployments.GetDeployedGatewaysByProviderFunc = func(uuid.UUID, string) ([]string, error) { return nil, nil }
-	r.deployments.CreateWithLimitEnforcementFunc = func(*models.Deployment, int) error { return nil }
+	r.deployments.CreateWithLimitEnforcementFunc = storesDeployment
 
 	_, err := r.providerService().DeployLLMProvider(r.handle, &models.DeployAPIRequest{
 		Name: "dep", Base: r.deploymentID.String(), GatewayID: r.gatewayID.String(),
@@ -272,4 +283,66 @@ func TestLLMProxyRestoreStartsDeploying(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, models.DeploymentStatusDeploying, r.deployments.SetCurrentCalls()[0].Status)
 	assert.Equal(t, models.DeploymentStatusDeploying, *got.Status)
+}
+
+// Every deploy and undeploy event carries the status row's performed_at: the gateway echoes it in
+// its ack, which must match the row to settle it.
+func TestLLMEventsCarryTheRowPerformedAt(t *testing.T) {
+	restores := func(r *lifecycleRig) {
+		r.withDeployment(models.DeploymentStatusFailed, models.DeploymentStatusDeployed)
+		r.deployments.SetCurrentFunc = func(string, string, string, string, models.DeploymentStatus) (time.Time, error) {
+			return r.performedAt, nil
+		}
+	}
+	undeploys := func(r *lifecycleRig) {
+		r.withDeployment(models.DeploymentStatusDeployed, models.DeploymentStatusDeployed)
+		r.beginsUndeploy("row-id")
+	}
+	for _, tc := range []struct {
+		name  string
+		setup func(r *lifecycleRig)
+		run   func(r *lifecycleRig) error
+	}{
+		{"provider deploy", func(r *lifecycleRig) {
+			r.withDeployment(models.DeploymentStatusDeployed, models.DeploymentStatusDeployed)
+			r.deployments.GetDeployedGatewaysByProviderFunc = func(uuid.UUID, string) ([]string, error) { return nil, nil }
+			r.deployments.CreateWithLimitEnforcementFunc = func(d *models.Deployment, _ int) error {
+				d.PerformedAt = &r.performedAt
+				return nil
+			}
+		}, func(r *lifecycleRig) error {
+			_, err := r.providerService().DeployLLMProvider(r.handle, &models.DeployAPIRequest{
+				Name: "dep", Base: r.deploymentID.String(), GatewayID: r.gatewayID.String(),
+			}, r.ouID)
+			return err
+		}},
+		{"provider undeploy", undeploys, func(r *lifecycleRig) error {
+			_, err := r.providerService().UndeployLLMProviderDeployment(r.handle, r.deploymentID.String(), r.gatewayID.String(), r.ouID)
+			return err
+		}},
+		{"provider restore", restores, func(r *lifecycleRig) error {
+			_, err := r.providerService().RestoreLLMProviderDeployment(r.handle, r.deploymentID.String(), r.gatewayID.String(), r.ouID)
+			return err
+		}},
+		{"proxy undeploy", undeploys, func(r *lifecycleRig) error {
+			_, err := r.proxyService().UndeployLLMProxyDeployment(context.Background(), r.handle, r.deploymentID.String(), r.gatewayID.String(), r.ouID)
+			return err
+		}},
+		{"proxy restore", restores, func(r *lifecycleRig) error {
+			_, err := r.proxyService().RestoreLLMProxyDeployment(r.handle, r.deploymentID.String(), r.gatewayID.String(), r.ouID)
+			return err
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newLifecycleRig()
+			tc.setup(r)
+			require.NoError(t, tc.run(r))
+
+			var event struct {
+				PerformedAt time.Time `json:"performedAt"`
+			}
+			r.payload(t, &event)
+			assert.True(t, r.performedAt.Equal(event.PerformedAt), "event performedAt %s", event.PerformedAt)
+		})
+	}
 }

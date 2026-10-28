@@ -46,13 +46,13 @@ func isDeployedOrDeploying(status models.DeploymentStatus) bool {
 }
 
 // markDeploying updates a loaded deployment to the status row a deploy or restore just wrote.
-func markDeploying(d *models.Deployment, updatedAt time.Time) {
+func markDeploying(d *models.Deployment, performedAt time.Time) {
 	status, desired := models.DeploymentStatusDeploying, models.DeploymentStatusDeployed
-	d.Status, d.StatusDesired, d.StatusReason, d.UpdatedAt = &status, &desired, nil, &updatedAt
+	d.Status, d.StatusDesired, d.StatusReason, d.UpdatedAt, d.PerformedAt = &status, &desired, nil, &performedAt, &performedAt
 }
 
 // markUndeploying updates a loaded deployment to the status row BeginUndeploy just wrote.
-func markUndeploying(d *models.Deployment) {
-	status, desired, updatedAt := models.DeploymentStatusUndeploying, models.DeploymentStatusUndeployed, time.Now()
-	d.Status, d.StatusDesired, d.StatusReason, d.UpdatedAt = &status, &desired, nil, &updatedAt
+func markUndeploying(d *models.Deployment, performedAt time.Time) {
+	status, desired := models.DeploymentStatusUndeploying, models.DeploymentStatusUndeployed
+	d.Status, d.StatusDesired, d.StatusReason, d.UpdatedAt, d.PerformedAt = &status, &desired, nil, &performedAt, &performedAt
 }

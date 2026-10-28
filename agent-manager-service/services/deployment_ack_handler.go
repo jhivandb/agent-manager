@@ -126,5 +126,6 @@ func toDeploymentAck(ack models.DeploymentAckPayload) (models.DeploymentAck, boo
 		Action:       ack.Action,
 		Success:      ack.Status == "success",
 		ErrorCode:    ack.ErrorCode,
+		PerformedAt:  ack.PerformedAt,
 	}, true
 }

@@ -104,7 +104,7 @@ func newA2AReconcilerHarness(serviceURL string) *a2aReconcilerHarness {
 		},
 	}
 	deploymentRepo := &repomocks.DeploymentRepositoryMock{
-		CreateWithLimitEnforcementFunc: func(deployment *models.Deployment, maxDeployments int) error { return nil },
+		CreateWithLimitEnforcementFunc: storesDeployment,
 	}
 	ocClient := &clientmocks.OpenChoreoClientMock{
 		GetReleaseBindingServiceURLFunc: func(ctx context.Context, ouID, componentName, environment string) (string, error) {
@@ -917,7 +917,7 @@ func TestReconcilerWithdrawsAnAgentTornDownMidPublish(t *testing.T) {
 	h.pubRepo.GetFunc = func(context.Context, string, string, string, uuid.UUID) (*models.A2APublication, error) {
 		return nil, repositories.ErrA2APublicationNotFound
 	}
-	h.deploymentRepo.BeginUndeployFunc = func(context.Context, string, string, string) (string, error) { return "", nil }
+	h.deploymentRepo.BeginUndeployFunc = func(context.Context, string, string, string) (string, time.Time, error) { return "", time.Time{}, nil }
 
 	h.svc.publishOne(context.Background(), pub)
 

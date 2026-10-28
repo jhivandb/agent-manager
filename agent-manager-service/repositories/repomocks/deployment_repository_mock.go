@@ -23,7 +23,7 @@ import (
 //			ApplyAckFunc: func(ctx context.Context, gatewayID string, ack models.DeploymentAck) (bool, error) {
 //				panic("mock out the ApplyAck method")
 //			},
-//			BeginUndeployFunc: func(ctx context.Context, artifactUUID string, orgUUID string, gatewayID string) (string, error) {
+//			BeginUndeployFunc: func(ctx context.Context, artifactUUID string, orgUUID string, gatewayID string) (string, time.Time, error) {
 //				panic("mock out the BeginUndeploy method")
 //			},
 //			CreateWithLimitEnforcementFunc: func(deployment *models.Deployment, hardLimit int) error {
@@ -106,7 +106,7 @@ type DeploymentRepositoryMock struct {
 	ApplyAckFunc func(ctx context.Context, gatewayID string, ack models.DeploymentAck) (bool, error)
 
 	// BeginUndeployFunc mocks the BeginUndeploy method.
-	BeginUndeployFunc func(ctx context.Context, artifactUUID string, orgUUID string, gatewayID string) (string, error)
+	BeginUndeployFunc func(ctx context.Context, artifactUUID string, orgUUID string, gatewayID string) (string, time.Time, error)
 
 	// CreateWithLimitEnforcementFunc mocks the CreateWithLimitEnforcement method.
 	CreateWithLimitEnforcementFunc func(deployment *models.Deployment, hardLimit int) error
@@ -477,7 +477,7 @@ func (mock *DeploymentRepositoryMock) ApplyAckCalls() []struct {
 }
 
 // BeginUndeploy calls BeginUndeployFunc.
-func (mock *DeploymentRepositoryMock) BeginUndeploy(ctx context.Context, artifactUUID string, orgUUID string, gatewayID string) (string, error) {
+func (mock *DeploymentRepositoryMock) BeginUndeploy(ctx context.Context, artifactUUID string, orgUUID string, gatewayID string) (string, time.Time, error) {
 	if mock.BeginUndeployFunc == nil {
 		panic("DeploymentRepositoryMock.BeginUndeployFunc: method is nil but DeploymentRepository.BeginUndeploy was just called")
 	}

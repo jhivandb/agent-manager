@@ -43,6 +43,9 @@ type Deployment struct {
 	StatusDesired *DeploymentStatus `gorm:"column:status_desired;->" json:"statusDesired,omitempty"`
 	StatusReason  *string           `gorm:"column:status_reason;->" json:"statusReason,omitempty"`
 	UpdatedAt     *time.Time        `gorm:"column:status_updated_at;->" json:"updatedAt,omitempty"`
+	// PerformedAt is when the row's current transition began, to the millisecond. Events carry it
+	// as performedAt and the gateway echoes it in its ack.
+	PerformedAt *time.Time `gorm:"column:performed_at;->" json:"-"`
 }
 
 // IsPlaced reports whether this deployment is the one its gateway is meant to hold:
@@ -94,6 +97,12 @@ const (
 	DeploymentStatusArchived    DeploymentStatus = "ARCHIVED" // Derived state: exists in history but not in status table
 )
 
+// NewPerformedAt is the performed_at of a transition starting now. It has the millisecond precision
+// the gateway keeps, so the value an event carries is the one an ack echoes and the row stores.
+func NewPerformedAt() time.Time {
+	return time.Now().Truncate(time.Millisecond)
+}
+
 // DeploymentReasonTimeout is the status_reason the sweeper records on a row that got no ack in time.
 const DeploymentReasonTimeout = "DEPLOYMENT_TIMEOUT"
 
@@ -143,6 +152,8 @@ type DeploymentAck struct {
 	Action    string
 	Success   bool
 	ErrorCode string
+	// PerformedAt is the event's performedAt the gateway echoes; zero when it sent none.
+	PerformedAt time.Time
 }
 
 // Deployment ack actions, as the gateway reports them.

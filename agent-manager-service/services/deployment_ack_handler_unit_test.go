@@ -19,6 +19,7 @@ package services
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -68,6 +69,14 @@ func TestDeploymentAckHandlerPassesOutcomeAndErrorCode(t *testing.T) {
 			want: models.DeploymentAck{
 				DeploymentID: "d-1", ArtifactID: "p-1", Action: models.DeploymentAckActionDeploy,
 				Success: false, ErrorCode: "GATEWAY_PROCESSING_ERROR",
+			},
+		},
+		{
+			name:    "the echoed performedAt",
+			payload: `{"deploymentId":"d-1","artifactId":"p-1","resourceType":"llmproxy","action":"deploy","status":"success","performedAt":"2026-10-28T09:30:00.123Z"}`,
+			want: models.DeploymentAck{
+				DeploymentID: "d-1", ArtifactID: "p-1", Action: models.DeploymentAckActionDeploy, Success: true,
+				PerformedAt: time.Date(2026, 10, 28, 9, 30, 0, 123_000_000, time.UTC),
 			},
 		},
 		{

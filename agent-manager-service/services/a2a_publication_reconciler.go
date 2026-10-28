@@ -610,7 +610,7 @@ func (s *a2aPublicationReconcilerService) attemptPublish(ctx context.Context, pu
 	event := &models.AgentDeploymentEvent{
 		AgentID:      pub.ArtifactUUID.String(),
 		DeploymentID: deploymentID.String(),
-		PerformedAt:  time.Now().Truncate(time.Millisecond),
+		PerformedAt:  *deployment.PerformedAt,
 	}
 	if err := s.events.BroadcastAgentDeploymentEvent(gateway.UUID.String(), event); err != nil {
 		return a2aPublishResult{}, fmt.Errorf("failed to broadcast agent deployment event: %w", err)

@@ -47,8 +47,8 @@ type a2aTeardown struct {
 	gatewayIDs   []string
 	// dropsArtifact deletes the gateway's Agent with its API keys; otherwise it is undeployed and keeps them.
 	dropsArtifact bool
-	// undeployIDs is the deployment id each gateway's undeploy event carries; a gateway not in it gets none.
-	undeployIDs map[string]string
+	// undeployIDs is what each gateway's undeploy event carries; a gateway not in it gets no id.
+	undeployIDs map[string]agentUndeploy
 }
 
 // TxRunner opens one database transaction and runs fn inside it, so a unit test can hand fn a sentinel.

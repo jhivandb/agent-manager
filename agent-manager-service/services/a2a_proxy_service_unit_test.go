@@ -21,6 +21,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -157,7 +158,7 @@ func (h *proxyHarness) acceptsWrites() {
 	h.txPubs.EnqueueFunc = func(context.Context, *models.A2APublication) error { return nil }
 	h.txPubs.DeleteForAgentEnvFunc = func(context.Context, string, string, string, uuid.UUID) error { return nil }
 	h.txDeployments.DeleteForArtifactFunc = func(context.Context, uuid.UUID, string) error { return nil }
-	h.txDeployments.BeginUndeployFunc = func(context.Context, string, string, string) (string, error) { return "", nil }
+	h.txDeployments.BeginUndeployFunc = func(context.Context, string, string, string) (string, time.Time, error) { return "", time.Time{}, nil }
 	h.artifacts.CreateFunc = func(*gorm.DB, *models.Artifact) error { return nil }
 }
 

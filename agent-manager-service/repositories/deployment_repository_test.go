@@ -247,7 +247,7 @@ func TestDeploymentBeginUndeploy(t *testing.T) {
 		f := seedLifecycle(t)
 		f.setRow(t, models.DeploymentStatusDeployed, models.DeploymentStatusDeployed, nil, time.Now())
 
-		id, err := f.repo.BeginUndeploy(ctx, f.artifactUUID.String(), f.ouID, f.gatewayID.String())
+		id, _, err := f.repo.BeginUndeploy(ctx, f.artifactUUID.String(), f.ouID, f.gatewayID.String())
 		require.NoError(t, err)
 		assert.Equal(t, f.deploymentID.String(), id)
 		rec := f.row(t)
@@ -261,7 +261,7 @@ func TestDeploymentBeginUndeploy(t *testing.T) {
 			f := seedLifecycle(t)
 			f.setRow(t, status, models.DeploymentStatusDeployed, timeoutReason(), time.Now().Add(-time.Hour))
 
-			id, err := f.repo.BeginUndeploy(ctx, f.artifactUUID.String(), f.ouID, f.gatewayID.String())
+			id, _, err := f.repo.BeginUndeploy(ctx, f.artifactUUID.String(), f.ouID, f.gatewayID.String())
 			require.NoError(t, err)
 			assert.Empty(t, id)
 			rec := f.row(t)
@@ -275,7 +275,7 @@ func TestDeploymentBeginUndeploy(t *testing.T) {
 		f := seedLifecycle(t)
 		f.setRow(t, models.DeploymentStatusFailed, models.DeploymentStatusUndeployed, timeoutReason(), time.Now().Add(-time.Hour))
 
-		id, err := f.repo.BeginUndeploy(ctx, f.artifactUUID.String(), f.ouID, f.gatewayID.String())
+		id, _, err := f.repo.BeginUndeploy(ctx, f.artifactUUID.String(), f.ouID, f.gatewayID.String())
 		require.NoError(t, err)
 		assert.Empty(t, id)
 		rec := f.row(t)
@@ -287,14 +287,14 @@ func TestDeploymentBeginUndeploy(t *testing.T) {
 
 	t.Run("nothing to undeploy", func(t *testing.T) {
 		f := seedLifecycle(t)
-		_, err := f.repo.BeginUndeploy(ctx, f.artifactUUID.String(), f.ouID, uuid.NewString())
+		_, _, err := f.repo.BeginUndeploy(ctx, f.artifactUUID.String(), f.ouID, uuid.NewString())
 		assert.ErrorIs(t, err, utils.ErrDeploymentNotActive, "no row")
 
 		for _, status := range []models.DeploymentStatus{
 			models.DeploymentStatusUndeploying, models.DeploymentStatusUndeployed,
 		} {
 			f.setRow(t, status, models.DeploymentStatusUndeployed, nil, time.Now())
-			_, err := f.repo.BeginUndeploy(ctx, f.artifactUUID.String(), f.ouID, f.gatewayID.String())
+			_, _, err := f.repo.BeginUndeploy(ctx, f.artifactUUID.String(), f.ouID, f.gatewayID.String())
 			assert.ErrorIs(t, err, utils.ErrDeploymentNotActive, string(status))
 		}
 	})
@@ -402,6 +402,59 @@ func TestDeploymentApplyAck(t *testing.T) {
 		_, err = f.repo.ApplyAck(context.Background(), f.gatewayID.String(), models.DeploymentAck{DeploymentID: f.deploymentID.String(), Action: "redeploy"})
 		assert.Error(t, err)
 	})
+}
+
+// Every transition records performed_at to the millisecond, the precision the gateway keeps and
+// echoes in its ack, and hands it back for the event.
+func TestDeploymentTransitionsReturnTheirPerformedAt(t *testing.T) {
+	f := seedLifecycle(t)
+	d := &models.Deployment{
+		Name: "dep", ArtifactUUID: f.artifactUUID, OUID: f.ouID, GatewayUUID: f.gatewayID, Content: []byte("kind: LlmProxy\n"),
+	}
+	require.NoError(t, f.repo.CreateWithLimitEnforcement(d, 10))
+	require.NotNil(t, d.PerformedAt)
+	assertSamePerformedAt(t, *d.PerformedAt, f.row(t).PerformedAt)
+
+	performedAt, err := f.repo.SetCurrent(f.artifactUUID.String(), f.ouID, f.gatewayID.String(), f.deploymentID.String(), models.DeploymentStatusDeploying)
+	require.NoError(t, err)
+	assertSamePerformedAt(t, performedAt, f.row(t).PerformedAt)
+
+	_, performedAt, err = f.repo.BeginUndeploy(context.Background(), f.artifactUUID.String(), f.ouID, f.gatewayID.String())
+	require.NoError(t, err)
+	assertSamePerformedAt(t, performedAt, f.row(t).PerformedAt)
+}
+
+func assertSamePerformedAt(t *testing.T, returned, stored time.Time) {
+	t.Helper()
+	assert.Equal(t, returned.Truncate(time.Millisecond), returned, "millisecond precision")
+	assert.True(t, returned.Equal(stored), "returned %s, stored %s", returned, stored)
+}
+
+// An ack echoes the event's performedAt. A deployment id is reused when a deployment is restored,
+// so an ack replayed for an earlier operation on it must not settle the restore.
+func TestDeploymentApplyAckGuardsOnPerformedAt(t *testing.T) {
+	f := seedLifecycle(t)
+	firstPerformedAt := f.row(t).PerformedAt
+	deployAck := func(performedAt time.Time) models.DeploymentAck {
+		return models.DeploymentAck{
+			DeploymentID: f.deploymentID.String(), Action: models.DeploymentAckActionDeploy, Success: true, PerformedAt: performedAt,
+		}
+	}
+	require.True(t, f.ack(t, deployAck(firstPerformedAt)))
+
+	f.deploy(t)
+	time.Sleep(2 * time.Millisecond)
+	restoredAt, err := f.repo.SetCurrent(f.artifactUUID.String(), f.ouID, f.gatewayID.String(), f.deploymentID.String(), models.DeploymentStatusDeploying)
+	require.NoError(t, err)
+
+	assert.False(t, f.ack(t, deployAck(firstPerformedAt)), "an ack for the first deploy of the restored id")
+	assert.Equal(t, models.DeploymentStatusDeploying, f.row(t).Status)
+	assert.True(t, f.ack(t, deployAck(restoredAt.In(time.FixedZone("ack", 3600)))), "the restore's own ack, in any zone")
+	assert.Equal(t, models.DeploymentStatusDeployed, f.row(t).Status)
+
+	_, err = f.repo.SetCurrent(f.artifactUUID.String(), f.ouID, f.gatewayID.String(), f.deploymentID.String(), models.DeploymentStatusDeploying)
+	require.NoError(t, err)
+	assert.True(t, f.ack(t, deployAck(time.Time{})), "an ack without performedAt is matched on the id alone")
 }
 
 func TestDeploymentFailStaleTransitional(t *testing.T) {

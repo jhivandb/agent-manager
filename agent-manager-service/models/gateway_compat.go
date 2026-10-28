@@ -72,13 +72,14 @@ type LLMProviderUndeploymentEvent struct {
 
 // LLMProxyDeploymentEvent represents an LLM proxy deployment event
 type LLMProxyDeploymentEvent struct {
-	ProxyID        string `json:"proxyId"`
-	DeploymentID   string `json:"deploymentId"`
-	Vhost          string `json:"vhost"`
-	Environment    string `json:"environment"`
-	GatewayID      string `json:"gatewayId"`
-	OrganizationID string `json:"organizationId"`
-	Status         string `json:"status"`
+	ProxyID        string    `json:"proxyId"`
+	DeploymentID   string    `json:"deploymentId"`
+	PerformedAt    time.Time `json:"performedAt"`
+	Vhost          string    `json:"vhost"`
+	Environment    string    `json:"environment"`
+	GatewayID      string    `json:"gatewayId"`
+	OrganizationID string    `json:"organizationId"`
+	Status         string    `json:"status"`
 }
 
 // MCPProxyDeploymentEvent represents an MCP proxy deployment event.
@@ -116,12 +117,13 @@ type LLMProxyDeletionEvent struct {
 // LLMProxyUndeploymentEvent represents an LLM proxy undeployment event. DeploymentID is the
 // acked deployment being undeployed, or empty to undeploy whichever version the gateway holds.
 type LLMProxyUndeploymentEvent struct {
-	ProxyID        string `json:"proxyId"`
-	DeploymentID   string `json:"deploymentId"`
-	Vhost          string `json:"vhost"`
-	Environment    string `json:"environment"`
-	GatewayID      string `json:"gatewayId"`
-	OrganizationID string `json:"organizationId"`
+	ProxyID        string    `json:"proxyId"`
+	DeploymentID   string    `json:"deploymentId"`
+	PerformedAt    time.Time `json:"performedAt"`
+	Vhost          string    `json:"vhost"`
+	Environment    string    `json:"environment"`
+	GatewayID      string    `json:"gatewayId"`
+	OrganizationID string    `json:"organizationId"`
 }
 
 // ApplicationAPIKeyMapping represents a single API key bound to an application.

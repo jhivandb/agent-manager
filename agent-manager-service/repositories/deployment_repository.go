@@ -53,18 +53,20 @@ type DeploymentRepository interface {
 	// Deployment status methods (mutable state tracking)
 	// SetCurrent points the status row at deploymentID and starts a transition to status's
 	// desired state: DEPLOYING for a restore.
-	SetCurrent(artifactUUID, orgUUID, gatewayID, deploymentID string, status models.DeploymentStatus) (updatedAt time.Time, err error)
+	// It returns the transition's performed_at, which the event carries.
+	SetCurrent(artifactUUID, orgUUID, gatewayID, deploymentID string, status models.DeploymentStatus) (performedAt time.Time, err error)
 	// SetCurrentCtx is SetCurrent with context propagation — see GetWithStateCtx.
-	SetCurrentCtx(ctx context.Context, artifactUUID, orgUUID, gatewayID, deploymentID string, status models.DeploymentStatus) (updatedAt time.Time, err error)
+	SetCurrentCtx(ctx context.Context, artifactUUID, orgUUID, gatewayID, deploymentID string, status models.DeploymentStatus) (performedAt time.Time, err error)
 	GetStatus(artifactUUID, orgUUID, gatewayID string) (deploymentID string, status models.DeploymentStatus, updatedAt *time.Time, err error)
 	DeleteStatus(artifactUUID, orgUUID, gatewayID string) error
 
 	// BeginUndeploy moves the artifact's row on the gateway to UNDEPLOYING, desired UNDEPLOYED,
 	// and returns the deployment id the undeploy event must carry: the row's id when the gateway
 	// acked it (DEPLOYED), "" otherwise, so the gateway undeploys whichever version it holds.
+	// It also returns the transition's performed_at, which the event carries.
 	// A FAILED undeploy may be retried. It returns utils.ErrDeploymentNotActive when there is no
 	// row, or it is UNDEPLOYING or UNDEPLOYED.
-	BeginUndeploy(ctx context.Context, artifactUUID, orgUUID, gatewayID string) (eventDeploymentID string, err error)
+	BeginUndeploy(ctx context.Context, artifactUUID, orgUUID, gatewayID string) (eventDeploymentID string, performedAt time.Time, err error)
 
 	// Deployment ack methods
 	// ApplyAck settles the transition the ack answers, and reports whether a row changed. An ack
@@ -101,7 +103,7 @@ type DeploymentRepository interface {
 }
 
 // statusColumns selects the deployment_status fields models.Deployment reads, from a join aliased s.
-const statusColumns = "s.status, s.status_desired, s.status_reason, s.updated_at AS status_updated_at"
+const statusColumns = "s.status, s.status_desired, s.status_reason, s.performed_at, s.updated_at AS status_updated_at"
 
 // DeploymentRepo implements DeploymentRepository using GORM
 type DeploymentRepo struct {
@@ -133,8 +135,9 @@ func (r *DeploymentRepo) CreateWithLimitEnforcement(deployment *models.Deploymen
 		deployment.StatusDesired = &desired
 		deployment.StatusReason = nil
 
-		updatedAt := time.Now()
+		updatedAt := models.NewPerformedAt()
 		deployment.UpdatedAt = &updatedAt
+		deployment.PerformedAt = &updatedAt
 
 		// Count total deployments for this artifact+Gateway
 		var count int64
@@ -282,7 +285,7 @@ func (r *DeploymentRepo) SetCurrent(artifactUUID, orgUUID, gatewayID, deployment
 
 // SetCurrentCtx is SetCurrent with context propagation — see the interface doc comment.
 func (r *DeploymentRepo) SetCurrentCtx(ctx context.Context, artifactUUID, orgUUID, gatewayID, deploymentID string, status models.DeploymentStatus) (time.Time, error) {
-	updatedAt := time.Now()
+	updatedAt := models.NewPerformedAt()
 
 	artifactUUID_uuid, err := uuid.Parse(artifactUUID)
 	if err != nil {
@@ -317,8 +320,9 @@ func (r *DeploymentRepo) SetCurrentCtx(ctx context.Context, artifactUUID, orgUUI
 }
 
 // BeginUndeploy moves the artifact's placed row on the gateway to UNDEPLOYING — see the interface doc comment.
-func (r *DeploymentRepo) BeginUndeploy(ctx context.Context, artifactUUID, orgUUID, gatewayID string) (string, error) {
+func (r *DeploymentRepo) BeginUndeploy(ctx context.Context, artifactUUID, orgUUID, gatewayID string) (string, time.Time, error) {
 	var eventDeploymentID string
+	performedAt := models.NewPerformedAt()
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var row struct {
 			DeploymentID  string
@@ -338,15 +342,14 @@ func (r *DeploymentRepo) BeginUndeploy(ctx context.Context, artifactUUID, orgUUI
 			return utils.ErrDeploymentNotActive
 		}
 
-		now := time.Now()
 		if err := tx.Table("deployment_status").
 			Where("artifact_uuid = ? AND ou_id = ? AND gateway_uuid = ?", artifactUUID, orgUUID, gatewayID).
 			Updates(map[string]interface{}{
 				"status":         models.DeploymentStatusUndeploying,
 				"status_desired": models.DeploymentStatusUndeployed,
 				"status_reason":  nil,
-				"performed_at":   now,
-				"updated_at":     now,
+				"performed_at":   performedAt,
+				"updated_at":     performedAt,
 			}).Error; err != nil {
 			return err
 		}
@@ -358,9 +361,9 @@ func (r *DeploymentRepo) BeginUndeploy(ctx context.Context, artifactUUID, orgUUI
 		return nil
 	})
 	if err != nil {
-		return "", err
+		return "", time.Time{}, err
 	}
-	return eventDeploymentID, nil
+	return eventDeploymentID, performedAt, nil
 }
 
 // ApplyAck settles the transition a gateway ack answers — see the interface doc comment.
@@ -370,6 +373,9 @@ func (r *DeploymentRepo) BeginUndeploy(ctx context.Context, artifactUUID, orgUUI
 // that was offline delivers queued events late, and the row must end up saying what the
 // gateway holds. An ack with an id matches that deployment; an undeploy ack without one
 // answers an undeploy sent without one and matches the artifact on the gateway instead.
+//
+// An ack that echoes a performedAt must also match the row's performed_at: a restore reuses a
+// deployment id, and an ack for an earlier operation on that id must not settle it.
 func (r *DeploymentRepo) ApplyAck(ctx context.Context, gatewayID string, ack models.DeploymentAck) (bool, error) {
 	var transitional, desired, settled models.DeploymentStatus
 	switch ack.Action {
@@ -405,6 +411,12 @@ func (r *DeploymentRepo) ApplyAck(ctx context.Context, gatewayID string, ack mod
 			Where("a.ou_id = deployment_status.ou_id AND (a.uuid::text = ? OR a.handle = ?)", ack.ArtifactID, ack.ArtifactID))
 	default:
 		return false, nil
+	}
+	if !ack.PerformedAt.IsZero() {
+		// Rows written before performed_at had millisecond precision are compared at that precision.
+		// The column holds local wall-clock time, so the ack's instant is compared in that zone.
+		query = query.Where("date_trunc('milliseconds', performed_at) = ?",
+			ack.PerformedAt.Truncate(time.Millisecond).In(time.Local))
 	}
 
 	result := query.Updates(map[string]interface{}{

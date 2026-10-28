@@ -114,11 +114,10 @@ func (s *MCPProxyService) deployMCPProxyToGateway(ctx context.Context, proxy *mo
 		return fmt.Errorf("failed to create deployment: %w", err)
 	}
 
-	performedAt := time.Now().Truncate(time.Millisecond)
 	event := &models.MCPProxyDeploymentEvent{
 		ProxyID:      proxy.UUID.String(),
 		DeploymentID: deployment.DeploymentID.String(),
-		PerformedAt:  performedAt,
+		PerformedAt:  *deployment.PerformedAt,
 	}
 	if err := s.gatewayEventsService.BroadcastMCPProxyDeploymentEvent(gateway.UUID.String(), event); err != nil {
 		s.logger.Warn("Failed to broadcast MCP proxy deployment event",

@@ -299,36 +299,43 @@ func collectA2AAgentDeletionTargets(
 	return targets
 }
 
+// agentUndeploy is what one gateway's Agent undeploy event carries: the deployment id (see
+// DeploymentRepository.BeginUndeploy) and the status row's performed_at.
+type agentUndeploy struct {
+	deploymentID string
+	performedAt  time.Time
+}
+
 // beginA2AAgentUndeploy moves the artifact's deployment on each gateway to UNDEPLOYING and returns
-// the deployment id each undeploy event must carry. A gateway with nothing placed is skipped: its
-// event carries no id, which undeploys whatever version it may still hold.
+// what each undeploy event must carry. A gateway with nothing placed is skipped: its event carries
+// no id, which undeploys whatever version it may still hold.
 func beginA2AAgentUndeploy(
 	ctx context.Context,
 	deploymentRepo repositories.DeploymentRepository,
 	artifactUUID uuid.UUID,
 	ouID string,
 	gatewayIDs []string,
-) (map[string]string, error) {
-	undeployIDs := make(map[string]string, len(gatewayIDs))
+) (map[string]agentUndeploy, error) {
+	undeployIDs := make(map[string]agentUndeploy, len(gatewayIDs))
 	if artifactUUID == uuid.Nil {
 		return undeployIDs, nil
 	}
 	for _, gatewayID := range gatewayIDs {
-		id, err := deploymentRepo.BeginUndeploy(ctx, artifactUUID.String(), ouID, gatewayID)
+		id, performedAt, err := deploymentRepo.BeginUndeploy(ctx, artifactUUID.String(), ouID, gatewayID)
 		if errors.Is(err, utils.ErrDeploymentNotActive) {
 			continue
 		}
 		if err != nil {
 			return nil, fmt.Errorf("failed to undeploy the A2A agent from gateway %s: %w", gatewayID, err)
 		}
-		undeployIDs[gatewayID] = id
+		undeployIDs[gatewayID] = agentUndeploy{deploymentID: id, performedAt: performedAt}
 	}
 	return undeployIDs, nil
 }
 
 // sendA2AAgentWithdrawal tells each gateway to stop serving the artifact's Agent: undeployed when
 // keepKeys, so a later publish reuses its API keys, else deleted together with them. An undeploy
-// event carries the gateway's id from undeployIDs (see beginA2AAgentUndeploy).
+// event carries the gateway's id and performed_at from undeployIDs (see beginA2AAgentUndeploy).
 //
 // Best effort and detached from request cancellation: the change has committed, so a returning
 // handler must not strand a gateway still serving the Agent.
@@ -338,7 +345,7 @@ func sendA2AAgentWithdrawal(
 	artifactUUID uuid.UUID,
 	gatewayIDs []string,
 	keepKeys bool,
-	undeployIDs map[string]string,
+	undeployIDs map[string]agentUndeploy,
 	logger *slog.Logger,
 ) {
 	if events == nil || artifactUUID == uuid.Nil {
@@ -350,10 +357,14 @@ func sendA2AAgentWithdrawal(
 		return events.BroadcastAgentDeletionEvent(ctx, gatewayID, &models.AgentDeletionEvent{AgentID: agentID})
 	}
 	if keepKeys {
-		performedAt := time.Now().Truncate(time.Millisecond)
+		untracked := models.NewPerformedAt()
 		broadcast = func(gatewayID string) error {
+			undeploy, tracked := undeployIDs[gatewayID]
+			if !tracked {
+				undeploy.performedAt = untracked
+			}
 			return events.BroadcastAgentUndeploymentEvent(ctx, gatewayID, &models.AgentUndeploymentEvent{
-				AgentID: agentID, DeploymentID: undeployIDs[gatewayID], PerformedAt: performedAt,
+				AgentID: agentID, DeploymentID: undeploy.deploymentID, PerformedAt: undeploy.performedAt,
 			})
 		}
 	}

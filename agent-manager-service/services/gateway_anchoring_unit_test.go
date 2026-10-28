@@ -87,7 +87,7 @@ func TestAnchoring_MCPProxyUpdate(t *testing.T) {
 				GetDeployedGatewaysByProviderFunc: func(uuid.UUID, string) ([]string, error) {
 					return []string{both.UUID.String()}, nil
 				},
-				CreateWithLimitEnforcementFunc: func(*models.Deployment, int) error { return nil },
+				CreateWithLimitEnforcementFunc: storesDeployment,
 			},
 			gatewayEventsService: &GatewayEventsService{hub: hub},
 			logger:               discardLogger(),
@@ -131,7 +131,7 @@ func TestAnchoring_MCPProxyUpdate(t *testing.T) {
 				GetDeployedGatewaysByProviderFunc: func(uuid.UUID, string) ([]string, error) {
 					return nil, nil
 				},
-				CreateWithLimitEnforcementFunc: func(*models.Deployment, int) error { return nil },
+				CreateWithLimitEnforcementFunc: storesDeployment,
 			},
 			gatewayEventsService: &GatewayEventsService{hub: hub},
 			logger:               discardLogger(),
