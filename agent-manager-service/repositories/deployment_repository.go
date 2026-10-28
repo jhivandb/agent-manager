@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -67,7 +66,6 @@ type DeploymentRepository interface {
 	BeginUndeploy(ctx context.Context, artifactUUID, orgUUID, gatewayID string) (eventDeploymentID string, err error)
 
 	// Deployment ack methods
-	UpdateStatusByDeploymentID(deploymentID, gatewayUUID string, status models.DeploymentStatus) (time.Time, error)
 	// ApplyAck settles the transition the ack answers, and reports whether a row changed. An ack
 	// for a superseded deployment, or for a row no longer waiting on it, changes nothing.
 	ApplyAck(ctx context.Context, gatewayID string, ack models.DeploymentAck) (applied bool, err error)
@@ -307,26 +305,6 @@ func (r *DeploymentRepo) SetCurrentCtx(ctx context.Context, artifactUUID, orgUUI
 	})
 
 	return updatedAt, err
-}
-
-// UpdateStatusByDeploymentID updates the status of a deployment_status record identified by deployment_id and gateway_uuid.
-// This is used to process deployment ack messages from the gateway.
-func (r *DeploymentRepo) UpdateStatusByDeploymentID(deploymentID, gatewayUUID string, status models.DeploymentStatus) (time.Time, error) {
-	updatedAt := time.Now()
-	result := r.db.Table("deployment_status").
-		Where("deployment_id = ? AND gateway_uuid = ?", deploymentID, gatewayUUID).
-		Updates(map[string]interface{}{
-			"status":     status,
-			"updated_at": updatedAt,
-		})
-	if result.Error != nil {
-		return time.Time{}, result.Error
-	}
-	if result.RowsAffected == 0 {
-		slog.Warn("UpdateStatusByDeploymentID: no matching deployment_status record found", "deploymentID", deploymentID)
-		return time.Time{}, fmt.Errorf("deployment_status not found for deploymentID %s", deploymentID)
-	}
-	return updatedAt, nil
 }
 
 // BeginUndeploy moves the artifact's placed row on the gateway to UNDEPLOYING — see the interface doc comment.

@@ -86,9 +86,6 @@ import (
 //			SetCurrentCtxFunc: func(ctx context.Context, artifactUUID string, orgUUID string, gatewayID string, deploymentID string, status models.DeploymentStatus) (time.Time, error) {
 //				panic("mock out the SetCurrentCtx method")
 //			},
-//			UpdateStatusByDeploymentIDFunc: func(deploymentID string, gatewayUUID string, status models.DeploymentStatus) (time.Time, error) {
-//				panic("mock out the UpdateStatusByDeploymentID method")
-//			},
 //			WithTxFunc: func(tx *gorm.DB) repositories.DeploymentRepository {
 //				panic("mock out the WithTx method")
 //			},
@@ -164,9 +161,6 @@ type DeploymentRepositoryMock struct {
 
 	// SetCurrentCtxFunc mocks the SetCurrentCtx method.
 	SetCurrentCtxFunc func(ctx context.Context, artifactUUID string, orgUUID string, gatewayID string, deploymentID string, status models.DeploymentStatus) (time.Time, error)
-
-	// UpdateStatusByDeploymentIDFunc mocks the UpdateStatusByDeploymentID method.
-	UpdateStatusByDeploymentIDFunc func(deploymentID string, gatewayUUID string, status models.DeploymentStatus) (time.Time, error)
 
 	// WithTxFunc mocks the WithTx method.
 	WithTxFunc func(tx *gorm.DB) repositories.DeploymentRepository
@@ -377,15 +371,6 @@ type DeploymentRepositoryMock struct {
 			// Status is the status argument value.
 			Status models.DeploymentStatus
 		}
-		// UpdateStatusByDeploymentID holds details about calls to the UpdateStatusByDeploymentID method.
-		UpdateStatusByDeploymentID []struct {
-			// DeploymentID is the deploymentID argument value.
-			DeploymentID string
-			// GatewayUUID is the gatewayUUID argument value.
-			GatewayUUID string
-			// Status is the status argument value.
-			Status models.DeploymentStatus
-		}
 		// WithTx holds details about calls to the WithTx method.
 		WithTx []struct {
 			// Tx is the tx argument value.
@@ -414,7 +399,6 @@ type DeploymentRepositoryMock struct {
 	lockIsProviderDeployedToGateway     sync.RWMutex
 	lockSetCurrent                      sync.RWMutex
 	lockSetCurrentCtx                   sync.RWMutex
-	lockUpdateStatusByDeploymentID      sync.RWMutex
 	lockWithTx                          sync.RWMutex
 }
 
@@ -1307,46 +1291,6 @@ func (mock *DeploymentRepositoryMock) SetCurrentCtxCalls() []struct {
 	mock.lockSetCurrentCtx.RLock()
 	calls = mock.calls.SetCurrentCtx
 	mock.lockSetCurrentCtx.RUnlock()
-	return calls
-}
-
-// UpdateStatusByDeploymentID calls UpdateStatusByDeploymentIDFunc.
-func (mock *DeploymentRepositoryMock) UpdateStatusByDeploymentID(deploymentID string, gatewayUUID string, status models.DeploymentStatus) (time.Time, error) {
-	if mock.UpdateStatusByDeploymentIDFunc == nil {
-		panic("DeploymentRepositoryMock.UpdateStatusByDeploymentIDFunc: method is nil but DeploymentRepository.UpdateStatusByDeploymentID was just called")
-	}
-	callInfo := struct {
-		DeploymentID string
-		GatewayUUID  string
-		Status       models.DeploymentStatus
-	}{
-		DeploymentID: deploymentID,
-		GatewayUUID:  gatewayUUID,
-		Status:       status,
-	}
-	mock.lockUpdateStatusByDeploymentID.Lock()
-	mock.calls.UpdateStatusByDeploymentID = append(mock.calls.UpdateStatusByDeploymentID, callInfo)
-	mock.lockUpdateStatusByDeploymentID.Unlock()
-	return mock.UpdateStatusByDeploymentIDFunc(deploymentID, gatewayUUID, status)
-}
-
-// UpdateStatusByDeploymentIDCalls gets all the calls that were made to UpdateStatusByDeploymentID.
-// Check the length with:
-//
-//	len(mockedDeploymentRepository.UpdateStatusByDeploymentIDCalls())
-func (mock *DeploymentRepositoryMock) UpdateStatusByDeploymentIDCalls() []struct {
-	DeploymentID string
-	GatewayUUID  string
-	Status       models.DeploymentStatus
-} {
-	var calls []struct {
-		DeploymentID string
-		GatewayUUID  string
-		Status       models.DeploymentStatus
-	}
-	mock.lockUpdateStatusByDeploymentID.RLock()
-	calls = mock.calls.UpdateStatusByDeploymentID
-	mock.lockUpdateStatusByDeploymentID.RUnlock()
 	return calls
 }
 

@@ -17,6 +17,7 @@
 package services
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 
@@ -81,35 +82,49 @@ func (h *DeploymentAckHandler) handleDeploymentAck(gatewayID string, payload jso
 	// The gateway sends "agentproxy" for Agent acks up to v2026.09.24 and "Agent" after.
 	switch ack.ResourceType {
 	case "llmprovider", "llmproxy", "mcpproxy", "agentproxy", "Agent":
-		// Update deployment status based on ack
-		if ack.DeploymentID == "" {
-			log.Warn("DeploymentAckHandler: missing deploymentID in ack, skipping status update")
-			return
-		}
-
-		var status models.DeploymentStatus
-		switch {
-		case ack.Action == "deploy" && ack.Status == "success":
-			status = models.DeploymentStatusDeployed
-		case ack.Action == "undeploy" && ack.Status == "success":
-			status = models.DeploymentStatusUndeployed
-		case ack.Action == "deploy" && ack.Status == "failed":
-			// Deploy failed — mark as undeployed so the user knows the deployment didn't succeed
-			status = models.DeploymentStatusUndeployed
-		case ack.Action == "undeploy" && ack.Status == "failed":
-			// Undeploy failed — keep as deployed since the artifact is still running on the gateway
-			status = models.DeploymentStatusDeployed
-		default:
-			log.Debug("DeploymentAckHandler: no status update needed for ack")
-			return
-		}
-
-		if _, err := h.deploymentRepo.UpdateStatusByDeploymentID(ack.DeploymentID, gatewayID, status); err != nil {
-			log.Error("DeploymentAckHandler: failed to update deployment status", "targetStatus", status, "error", err)
-		} else {
-			log.Info("DeploymentAckHandler: deployment status updated", "newStatus", status)
-		}
 	default:
 		log.Debug("DeploymentAckHandler: skipping ack for unsupported resource type")
+		return
 	}
+
+	statusAck, ok := toDeploymentAck(ack)
+	if !ok {
+		log.Warn("DeploymentAckHandler: ack names no deployment or has an unknown action or outcome, skipping status update")
+		return
+	}
+
+	applied, err := h.deploymentRepo.ApplyAck(context.Background(), gatewayID, statusAck)
+	switch {
+	case err != nil:
+		log.Error("DeploymentAckHandler: failed to apply deployment ack", "error", err)
+	case !applied:
+		// A superseded deployment, or a row no longer waiting on this ack.
+		log.Info("DeploymentAckHandler: ack matched no pending deployment, status unchanged")
+	default:
+		log.Info("DeploymentAckHandler: deployment status updated")
+	}
+}
+
+// toDeploymentAck reduces a gateway ack to what the status update needs. It reports false for an
+// ack that cannot be applied: an unknown action or outcome, a deploy ack without a deployment id,
+// or an undeploy ack naming neither a deployment nor an artifact.
+func toDeploymentAck(ack models.DeploymentAckPayload) (models.DeploymentAck, bool) {
+	if ack.Action != models.DeploymentAckActionDeploy && ack.Action != models.DeploymentAckActionUndeploy {
+		return models.DeploymentAck{}, false
+	}
+	if ack.Status != "success" && ack.Status != "failed" {
+		return models.DeploymentAck{}, false
+	}
+	// The gateway echoes the event's id, which an undeploy leaves empty when AMS could not
+	// know which version the gateway holds; such an ack is matched on the artifact instead.
+	if ack.DeploymentID == "" && (ack.Action == models.DeploymentAckActionDeploy || ack.ArtifactID == "") {
+		return models.DeploymentAck{}, false
+	}
+	return models.DeploymentAck{
+		DeploymentID: ack.DeploymentID,
+		ArtifactID:   ack.ArtifactID,
+		Action:       ack.Action,
+		Success:      ack.Status == "success",
+		ErrorCode:    ack.ErrorCode,
+	}, true
 }
