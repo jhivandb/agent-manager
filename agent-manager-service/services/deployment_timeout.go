@@ -50,12 +50,13 @@ func NewDeploymentTimeoutService(
 	}
 }
 
-// Start sweeps once per interval in the background until ctx is cancelled. Every replica may run
-// it: each sweep is one guarded update, so a row is failed once.
+// Start sweeps at once, then once per interval, in the background until ctx is cancelled. Every
+// replica may run it: each sweep is one guarded update, so a row is failed once.
 func (s *DeploymentTimeoutService) Start(ctx context.Context) {
 	s.logger.Info("Deployment timeout sweeper started", "interval", s.cfg.Interval, "timeout", s.cfg.Timeout)
 	go func() {
 		defer close(s.done)
+		s.RunOnce(ctx)
 		ticker := time.NewTicker(s.cfg.Interval)
 		defer ticker.Stop()
 		for {

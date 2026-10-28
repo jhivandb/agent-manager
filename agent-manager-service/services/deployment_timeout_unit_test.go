@@ -74,3 +74,21 @@ func TestDeploymentTimeoutStartSweepsEachIntervalUntilCancelled(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 	assert.Equal(t, stopped, sweeps.Load(), "no sweep after cancellation")
 }
+
+func TestDeploymentTimeoutStartSweepsImmediately(t *testing.T) {
+	var sweeps atomic.Int32
+	repo := &repomocks.DeploymentRepositoryMock{
+		FailStaleTransitionalFunc: func(context.Context, time.Time) (int64, error) {
+			sweeps.Add(1)
+			return 0, nil
+		},
+	}
+	svc := NewDeploymentTimeoutService(repo, config.DeploymentTimeoutConfig{Timeout: time.Minute, Interval: time.Hour}, testLogger())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	svc.Start(ctx)
+
+	require.Eventually(t, func() bool { return sweeps.Load() == 1 }, time.Second, time.Millisecond,
+		"a restart must not postpone timeouts by an interval")
+}
