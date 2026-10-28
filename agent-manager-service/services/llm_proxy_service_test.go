@@ -65,3 +65,16 @@ func TestLLMProxyService_Create_PropagatesProviderBeingDeletedFromRepo(t *testin
 	require.Error(t, err)
 	assert.ErrorIs(t, err, utils.ErrLLMProviderBeingDeleted)
 }
+
+func TestLLMProxyService_Create_RejectsANonUUIDProviderAsInvalidInput(t *testing.T) {
+	providerRepo := &repomocks.LLMProviderRepositoryMock{}
+	svc := NewLLMProxyService(&repomocks.LLMProxyRepositoryMock{}, providerRepo, make([]byte, 32))
+
+	_, err := svc.Create(context.Background(), "ou-1", "alice", &models.LLMProxy{
+		ProjectUUID:   uuid.New(),
+		Configuration: models.LLMProxyConfig{Name: "my-proxy", Version: "v1", Provider: "openai-handle"},
+	})
+
+	assert.ErrorIs(t, err, utils.ErrInvalidInput)
+	assert.Empty(t, providerRepo.GetByUUIDCalls(), "a non-UUID provider never reaches the query")
+}

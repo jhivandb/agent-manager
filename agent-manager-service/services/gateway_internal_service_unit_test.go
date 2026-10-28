@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
+	"gorm.io/gorm"
 
 	"github.com/wso2/agent-manager/agent-manager-service/models"
 	"github.com/wso2/agent-manager/agent-manager-service/repositories/repomocks"
@@ -156,4 +157,27 @@ func TestActiveArtifactDeploymentByGatewayUnparseableYaml(t *testing.T) {
 			assert.NotErrorIs(t, err, tt.notFound)
 		})
 	}
+}
+
+func TestActiveLLMProviderDeploymentByGatewayMissingProviderIsNotFound(t *testing.T) {
+	providers := &repomocks.LLMProviderRepositoryMock{
+		GetByUUIDFunc: func(string, string) (*models.LLMProvider, error) { return nil, gorm.ErrRecordNotFound },
+	}
+	svc := NewGatewayInternalAPIService(providers, nil, &repomocks.DeploymentRepositoryMock{}, nil, nil, nil, nil)
+
+	_, err := svc.GetActiveLLMProviderDeploymentByGateway(context.Background(), "p-1", "ou-1", "gw-1")
+
+	assert.ErrorIs(t, err, utils.ErrLLMProviderNotFound)
+}
+
+func TestActiveLLMProviderDeploymentByGatewayRepoErrorIsNotNotFound(t *testing.T) {
+	providers := &repomocks.LLMProviderRepositoryMock{
+		GetByUUIDFunc: func(string, string) (*models.LLMProvider, error) { return nil, assert.AnError },
+	}
+	svc := NewGatewayInternalAPIService(providers, nil, &repomocks.DeploymentRepositoryMock{}, nil, nil, nil, nil)
+
+	_, err := svc.GetActiveLLMProviderDeploymentByGateway(context.Background(), "p-1", "ou-1", "gw-1")
+
+	assert.ErrorIs(t, err, assert.AnError)
+	assert.NotErrorIs(t, err, utils.ErrLLMProviderNotFound)
 }

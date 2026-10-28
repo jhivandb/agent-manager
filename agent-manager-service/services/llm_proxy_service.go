@@ -67,8 +67,12 @@ func (s *LLMProxyService) Create(ctx context.Context, ouID, createdBy string, pr
 	handle := name
 
 	if handle == "" || name == "" || version == "" || provider == "" {
-		slog.Error("handle, name, version or provider is empty", handle, name, version, provider)
+		slog.Error("LLM proxy handle, name, version or provider is empty",
+			"handle", handle, "name", name, "version", version, "provider", provider)
 		return nil, utils.ErrInvalidInput
+	}
+	if _, err := uuid.Parse(provider); err != nil {
+		return nil, fmt.Errorf("%w: provider must be the LLM provider's UUID", utils.ErrInvalidInput)
 	}
 
 	if proxy.ProjectUUID == uuid.Nil {

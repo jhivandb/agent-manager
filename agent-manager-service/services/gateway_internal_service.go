@@ -170,10 +170,13 @@ func (s *GatewayInternalAPIService) GetActiveDeploymentByGateway(apiID, ouID, ga
 func (s *GatewayInternalAPIService) GetActiveLLMProviderDeploymentByGateway(ctx context.Context, providerID, ouID, gatewayID string) (map[string]string, error) {
 	provider, err := s.providerRepo.GetByUUID(providerID, ouID)
 	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, utils.ErrLLMProviderNotFound
+		}
 		return nil, fmt.Errorf("failed to get LLM provider: %w", err)
 	}
 	if provider == nil {
-		return nil, fmt.Errorf("LLM provider not found")
+		return nil, utils.ErrLLMProviderNotFound
 	}
 
 	deployment, err := s.deploymentRepo.GetCurrentByGateway(provider.UUID.String(), gatewayID, ouID)
