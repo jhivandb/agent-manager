@@ -413,6 +413,7 @@ var websocketProviderSet = wire.NewSet(
 	ProvideGatewayConnectionChecker,
 	services.NewGatewayEventsService,
 	ProvideDeploymentAckHandler,
+	ProvideDeploymentTimeoutService,
 )
 
 // ProvideGatewayConnectionChecker exposes the websocket manager through the
@@ -473,6 +474,11 @@ func ProvideWebSocketController(
 // ProvideDeploymentAckHandler creates a new deployment ack handler
 func ProvideDeploymentAckHandler(deploymentRepo repositories.DeploymentRepository) *services.DeploymentAckHandler {
 	return services.NewDeploymentAckHandler(deploymentRepo)
+}
+
+// ProvideDeploymentTimeoutService creates the sweeper that fails deployments a gateway never acked
+func ProvideDeploymentTimeoutService(cfg config.Config, deploymentRepo repositories.DeploymentRepository, logger *slog.Logger) *services.DeploymentTimeoutService {
+	return services.NewDeploymentTimeoutService(deploymentRepo, cfg.DeploymentTimeout, logger)
 }
 
 func ProvideGatewayRepository(db *gorm.DB) repositories.GatewayRepository {

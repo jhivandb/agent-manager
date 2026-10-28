@@ -373,6 +373,13 @@ agentManagerService:
       # token is stored there under the distinct key "workflow-plane-openbao-token".
       existingSecretKey: "openbao-token"
 
+    # How long a gateway deployment may stay DEPLOYING or UNDEPLOYING without the
+    # gateway's ack before it is marked FAILED (DEPLOYMENT_TIMEOUT), and how often that
+    # is checked. Go duration strings. A late ack still settles the deployment.
+    deploymentTimeout:
+      timeout: "5m"
+      interval: "1m"
+
     # Gateway-reported policy manifest cache. Manifests are large and every gateway
     # re-pushes its whole manifest on a fixed heartbeat, so they are cached in-process
     # rather than persisted to the database.

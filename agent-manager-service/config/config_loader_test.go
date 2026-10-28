@@ -22,6 +22,7 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestThunderConfigResolvedSystemResourceIdentifier(t *testing.T) {
@@ -1095,6 +1096,62 @@ func TestValidateOpenChoreoBuildWorkflowKind(t *testing.T) {
 			}
 			if !tc.wantErr && len(r.errors) != 0 {
 				t.Fatalf("unexpected errors for %q: %v", tc.kind, r.errors)
+			}
+		})
+	}
+}
+
+func TestReadDeploymentTimeoutConfig(t *testing.T) {
+	tests := []struct {
+		name        string
+		timeout     string
+		interval    string
+		want        DeploymentTimeoutConfig
+		wantErrors  int
+		errContains string
+	}{
+		{
+			name: "defaults to five minutes, swept every minute",
+			want: DeploymentTimeoutConfig{Timeout: 5 * time.Minute, Interval: time.Minute},
+		},
+		{
+			name:     "overrides accepted",
+			timeout:  "90s",
+			interval: "10s",
+			want:     DeploymentTimeoutConfig{Timeout: 90 * time.Second, Interval: 10 * time.Second},
+		},
+		{
+			name:        "malformed timeout rejected",
+			timeout:     "soon",
+			wantErrors:  1,
+			errContains: "DEPLOYMENT_TIMEOUT",
+		},
+		{
+			name:        "zero interval rejected",
+			interval:    "0s",
+			wantErrors:  1,
+			errContains: "DEPLOYMENT_TIMEOUT_INTERVAL must be a positive duration",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("DEPLOYMENT_TIMEOUT", tc.timeout)
+			t.Setenv("DEPLOYMENT_TIMEOUT_INTERVAL", tc.interval)
+			r := &configReader{}
+			got := readDeploymentTimeoutConfig(r)
+
+			if len(r.errors) != tc.wantErrors {
+				t.Fatalf("expected %d errors, got %d: %v", tc.wantErrors, len(r.errors), r.errors)
+			}
+			if tc.errContains != "" {
+				if !strings.Contains(r.errors[0].Error(), tc.errContains) {
+					t.Errorf("expected an error containing %q, got %v", tc.errContains, r.errors)
+				}
+				return
+			}
+			if got != tc.want {
+				t.Errorf("readDeploymentTimeoutConfig() = %+v, want %+v", got, tc.want)
 			}
 		})
 	}

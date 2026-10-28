@@ -16,7 +16,18 @@
 
 package config
 
-import "strings"
+import (
+	"strings"
+	"time"
+)
+
+// DeploymentTimeoutConfig bounds how long a deployment may wait for its gateway's ack.
+type DeploymentTimeoutConfig struct {
+	// Timeout is how long a row may stay DEPLOYING or UNDEPLOYING before it is failed.
+	Timeout time.Duration
+	// Interval is how often the sweeper looks for such rows.
+	Interval time.Duration
+}
 
 // Config holds all configuration for the application
 type Config struct {
@@ -50,6 +61,9 @@ type Config struct {
 	InstrumentationURL string
 
 	IsLocalDevEnv bool
+
+	// DeploymentTimeout configures the sweeper that fails deployments a gateway never acked.
+	DeploymentTimeout DeploymentTimeoutConfig
 
 	// Default Chat API configuration
 	DefaultChatAPI     DefaultChatAPIConfig

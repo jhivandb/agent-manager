@@ -9,9 +9,6 @@ package wiring
 import (
 	"context"
 	"fmt"
-	"log/slog"
-	"time"
-
 	"github.com/google/wire"
 	"github.com/wso2/agent-manager/agent-manager-service/audit"
 	"github.com/wso2/agent-manager/agent-manager-service/clients/observersvc"
@@ -29,6 +26,8 @@ import (
 	"github.com/wso2/agent-manager/agent-manager-service/utils"
 	"github.com/wso2/agent-manager/agent-manager-service/websocket"
 	"gorm.io/gorm"
+	"log/slog"
+	"time"
 )
 
 // Injectors from wire.go:
@@ -187,6 +186,7 @@ func InitializeAppParamsWithEnvThunderEndpoints(cfg *config.Config, db *gorm.DB,
 	a2ACardFetcher := services.NewA2ACardFetcher()
 	a2APublicationReconcilerService := services.NewA2APublicationReconcilerService(txRunner, a2APublicationRepository, a2AAgentCardRepository, a2AProxyRepository, deploymentRepository, gatewayRepository, agentConfigRepository, openChoreoClient, a2ACardFetcher, v, gatewayEventsService, logger)
 	a2ACardReconcilerService := services.NewA2ACardReconcilerService(a2AAgentCardRepository, a2AProxyRepository, gatewayRepository, a2ACardFetcher, openChoreoClient, logger)
+	deploymentTimeoutService := ProvideDeploymentTimeoutService(configConfig, deploymentRepository, logger)
 	appParams := &AppParams{
 		AuthMiddleware:                   middleware,
 		Logger:                           logger,
@@ -225,6 +225,7 @@ func InitializeAppParamsWithEnvThunderEndpoints(cfg *config.Config, db *gorm.DB,
 		AgentThunderReconciler:           agentThunderReconcilerService,
 		A2APublicationReconciler:         a2APublicationReconcilerService,
 		A2ACardReconciler:                a2ACardReconcilerService,
+		DeploymentTimeoutService:         deploymentTimeoutService,
 		LLMTemplateStore:                 llmTemplateStore,
 		InfraResourceManager:             infraResourceManager,
 		AgentManagerService:              agentManagerService,
@@ -387,6 +388,7 @@ func InitializeTestAppParamsWithClientMocks(cfg *config.Config, db *gorm.DB, aut
 	a2ACardFetcher := services.NewA2ACardFetcher()
 	a2APublicationReconcilerService := services.NewA2APublicationReconcilerService(txRunner, a2APublicationRepository, a2AAgentCardRepository, a2AProxyRepository, deploymentRepository, gatewayRepository, agentConfigRepository, openChoreoClient, a2ACardFetcher, v, gatewayEventsService, logger)
 	a2ACardReconcilerService := services.NewA2ACardReconcilerService(a2AAgentCardRepository, a2AProxyRepository, gatewayRepository, a2ACardFetcher, openChoreoClient, logger)
+	deploymentTimeoutService := ProvideDeploymentTimeoutService(configConfig, deploymentRepository, logger)
 	appParams := &AppParams{
 		AuthMiddleware:                   authMiddleware,
 		Logger:                           logger,
@@ -425,6 +427,7 @@ func InitializeTestAppParamsWithClientMocks(cfg *config.Config, db *gorm.DB, aut
 		AgentThunderReconciler:           agentThunderReconcilerService,
 		A2APublicationReconciler:         a2APublicationReconcilerService,
 		A2ACardReconciler:                a2ACardReconcilerService,
+		DeploymentTimeoutService:         deploymentTimeoutService,
 		LLMTemplateStore:                 llmTemplateStore,
 		InfraResourceManager:             infraResourceManager,
 		AgentManagerService:              agentManagerService,
@@ -710,6 +713,7 @@ var websocketProviderSet = wire.NewSet(
 	ProvideEventHub,
 	ProvideWebSocketManager,
 	ProvideGatewayConnectionChecker, services.NewGatewayEventsService, ProvideDeploymentAckHandler,
+	ProvideDeploymentTimeoutService,
 )
 
 // ProvideGatewayConnectionChecker exposes the websocket manager through the
@@ -770,6 +774,11 @@ func ProvideWebSocketController(
 // ProvideDeploymentAckHandler creates a new deployment ack handler
 func ProvideDeploymentAckHandler(deploymentRepo repositories.DeploymentRepository) *services.DeploymentAckHandler {
 	return services.NewDeploymentAckHandler(deploymentRepo)
+}
+
+// ProvideDeploymentTimeoutService creates the sweeper that fails deployments a gateway never acked
+func ProvideDeploymentTimeoutService(cfg config.Config, deploymentRepo repositories.DeploymentRepository, logger *slog.Logger) *services.DeploymentTimeoutService {
+	return services.NewDeploymentTimeoutService(deploymentRepo, cfg.DeploymentTimeout, logger)
 }
 
 func ProvideGatewayRepository(db *gorm.DB) repositories.GatewayRepository {

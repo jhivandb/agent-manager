@@ -22,6 +22,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type configReader struct {
@@ -132,4 +133,17 @@ func (c *configReader) readOptionalBool(envVarName string, defaultValue bool) bo
 		return defaultValue
 	}
 	return value
+}
+
+// readPositiveDuration reads a Go duration string, recording an error unless it is positive.
+func (c *configReader) readPositiveDuration(envVarName, defaultValue string) time.Duration {
+	raw := c.readOptionalString(envVarName, defaultValue)
+	d, err := time.ParseDuration(raw)
+	switch {
+	case err != nil:
+		c.errors = append(c.errors, fmt.Errorf("%s %q is not a valid duration: %w", envVarName, raw, err))
+	case d <= 0:
+		c.errors = append(c.errors, fmt.Errorf("%s must be a positive duration, got %q", envVarName, raw))
+	}
+	return d
 }

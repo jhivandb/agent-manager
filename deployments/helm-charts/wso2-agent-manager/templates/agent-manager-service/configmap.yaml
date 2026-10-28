@@ -118,6 +118,8 @@ data:
   AUDIT_BUFFER_SIZE: {{ .Values.agentManagerService.config.audit.bufferSize | default 4096 | quote }}
   AUDIT_BATCH_SIZE: {{ .Values.agentManagerService.config.audit.batchSize | default 200 | quote }}
   AUDIT_FLUSH_INTERVAL_MS: {{ .Values.agentManagerService.config.audit.flushIntervalMs | default 1000 | quote }}
+  DEPLOYMENT_TIMEOUT: {{ dig "deploymentTimeout" "timeout" "5m" .Values.agentManagerService.config | quote }}
+  DEPLOYMENT_TIMEOUT_INTERVAL: {{ dig "deploymentTimeout" "interval" "1m" .Values.agentManagerService.config | quote }}
   # Gateway manifest cache backend. Must be "redis" whenever replicaCount > 1 — see
   # the gatewayManifestCache note in values.yaml.
   GATEWAY_MANIFEST_CACHE_BACKEND: {{ .Values.agentManagerService.config.gatewayManifestCache.backend | default "memory" | quote }}

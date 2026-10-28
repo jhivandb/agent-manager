@@ -138,6 +138,8 @@ func loadEnvs() {
 
 	config.IsLocalDevEnv = r.readOptionalBool("IS_LOCAL_DEV_ENV", false)
 
+	config.DeploymentTimeout = readDeploymentTimeoutConfig(r)
+
 	// Observer service configuration. URL is used server-side (in-cluster) for
 	// monitor-run log fetches. PublicURL is handed to out-of-cluster clients
 	// (console, CLI) via GET /api/v1/config. It has NO internal-URL fallback:
@@ -426,6 +428,16 @@ func validateSecretManagerConfig(cfg *Config, r *configReader) {
 		r.errors = append(r.errors, fmt.Errorf(
 			"AGENT_IDENTITY_REFRESH_INTERVAL must be a positive duration, got %q", cfg.SecretManager.AgentIdentityRefreshInterval,
 		))
+	}
+}
+
+// readDeploymentTimeoutConfig reads how long a deployment may wait for its gateway's ack
+// (DEPLOYMENT_TIMEOUT, default 5m) and how often that is checked (DEPLOYMENT_TIMEOUT_INTERVAL,
+// default 1m). Both must be positive durations.
+func readDeploymentTimeoutConfig(r *configReader) DeploymentTimeoutConfig {
+	return DeploymentTimeoutConfig{
+		Timeout:  r.readPositiveDuration("DEPLOYMENT_TIMEOUT", "5m"),
+		Interval: r.readPositiveDuration("DEPLOYMENT_TIMEOUT_INTERVAL", "1m"),
 	}
 }
 

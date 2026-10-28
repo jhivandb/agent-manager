@@ -257,6 +257,11 @@ func Run(authProvider occlient.AuthProvider, secretProvider secretmanagersvc.Pro
 		os.Exit(1)
 	}
 
+	// Fail deployments the gateway never acknowledged. Every replica runs it; each sweep is one
+	// guarded update.
+	deploymentTimeoutCtx, deploymentTimeoutCancel := context.WithCancel(backgroundCtx)
+	dependencies.DeploymentTimeoutService.Start(deploymentTimeoutCtx)
+
 	// Load built-in LLM provider templates into memory
 	if err := loadBuiltInLLMTemplates(dependencies); err != nil {
 		slog.Error("Failed to load built-in LLM provider templates", "error", err)
@@ -322,6 +327,8 @@ func Run(authProvider occlient.AuthProvider, secretProvider secretmanagersvc.Pro
 		if err := dependencies.A2ACardReconciler.Stop(); err != nil {
 			slog.Error("error stopping A2A card reconciler", "error", err)
 		}
+
+		deploymentTimeoutCancel()
 
 		// Shutdown WebSocket manager in a goroutine since it blocks
 		wsDone := make(chan struct{})
