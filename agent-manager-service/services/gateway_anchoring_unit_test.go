@@ -80,7 +80,7 @@ func TestAnchoring_MCPProxyUpdate(t *testing.T) {
 
 	t.Run("anchors to the gateway the endpoint is already deployed to", func(t *testing.T) {
 		hub := &stubEventHub{}
-		svc := &MCPProxyService{
+		svc := (&MCPProxyService{
 			gatewayRepo:       gatewayFixtureRepo(t, env.String(), []*models.Gateway{both, egress}),
 			mcpProxyScopeRepo: scopeRepo,
 			deploymentRepo: &repomocks.DeploymentRepositoryMock{
@@ -91,7 +91,7 @@ func TestAnchoring_MCPProxyUpdate(t *testing.T) {
 			},
 			gatewayEventsService: &GatewayEventsService{hub: hub},
 			logger:               discardLogger(),
-		}
+		}).withTestCore()
 
 		err := svc.deployMCPProxyEndpoints(context.Background(), newProxy(), "org")
 		require.NoError(t, err)
@@ -104,7 +104,7 @@ func TestAnchoring_MCPProxyUpdate(t *testing.T) {
 	t.Run("ambiguity fires only with no deployment", func(t *testing.T) {
 		// No gatewayEventsService/CreateWithLimitEnforcementFunc stubbed: if resolution
 		// wrongly proceeded to deploy, the unstubbed moq call would panic.
-		svc := &MCPProxyService{
+		svc := (&MCPProxyService{
 			gatewayRepo:       gatewayFixtureRepo(t, env.String(), []*models.Gateway{both, egress}),
 			mcpProxyScopeRepo: scopeRepo,
 			deploymentRepo: &repomocks.DeploymentRepositoryMock{
@@ -113,7 +113,7 @@ func TestAnchoring_MCPProxyUpdate(t *testing.T) {
 				},
 			},
 			logger: discardLogger(),
-		}
+		}).withTestCore()
 
 		err := svc.deployMCPProxyEndpoints(context.Background(), newProxy(), "org")
 		require.ErrorIs(t, err, errAmbiguousEgressGateway)
@@ -124,7 +124,7 @@ func TestAnchoring_MCPProxyUpdate(t *testing.T) {
 		// resolveEgressGatewayForEnvironment, which must honor the caller's explicit
 		// choice among the two egress-capable candidates instead of erroring ambiguous.
 		hub := &stubEventHub{}
-		svc := &MCPProxyService{
+		svc := (&MCPProxyService{
 			gatewayRepo:       gatewayFixtureRepo(t, env.String(), []*models.Gateway{both, egress}),
 			mcpProxyScopeRepo: scopeRepo,
 			deploymentRepo: &repomocks.DeploymentRepositoryMock{
@@ -135,7 +135,7 @@ func TestAnchoring_MCPProxyUpdate(t *testing.T) {
 			},
 			gatewayEventsService: &GatewayEventsService{hub: hub},
 			logger:               discardLogger(),
-		}
+		}).withTestCore()
 
 		requested := egress.UUID.String()
 		p := newProxy()
@@ -150,7 +150,7 @@ func TestAnchoring_MCPProxyUpdate(t *testing.T) {
 	t.Run("caller-specified gatewayId differing from an existing deployment is rejected", func(t *testing.T) {
 		// The artifact is already deployed to "both"; requesting "egress" instead must
 		// fail as placement-fixed rather than silently re-homing the binding.
-		svc := &MCPProxyService{
+		svc := (&MCPProxyService{
 			gatewayRepo:       gatewayFixtureRepo(t, env.String(), []*models.Gateway{both, egress}),
 			mcpProxyScopeRepo: scopeRepo,
 			deploymentRepo: &repomocks.DeploymentRepositoryMock{
@@ -159,7 +159,7 @@ func TestAnchoring_MCPProxyUpdate(t *testing.T) {
 				},
 			},
 			logger: discardLogger(),
-		}
+		}).withTestCore()
 
 		requested := egress.UUID.String()
 		p := newProxy()
@@ -302,13 +302,13 @@ func TestAnchoring_AgentMCPConfigCreateWithExistingMapping(t *testing.T) {
 	t.Run("resolves to the gateway the shared artifact is deployed to", func(t *testing.T) {
 		svc := &agentConfigurationService{
 			gatewayRepo: gatewayFixtureRepo(t, env.String(), []*models.Gateway{both, egress}),
-			mcpProxyService: &MCPProxyService{
+			mcpProxyService: (&MCPProxyService{
 				deploymentRepo: &repomocks.DeploymentRepositoryMock{
 					GetDeployedGatewaysByProviderFunc: func(uuid.UUID, string) ([]string, error) {
 						return []string{both.UUID.String()}, nil
 					},
 				},
-			},
+			}).withTestCore(),
 		}
 		gw, err := svc.resolveGatewayForMCPArtifact(context.Background(), sharedArtifactUUID, "org", env)
 		require.NoError(t, err)
@@ -318,13 +318,13 @@ func TestAnchoring_AgentMCPConfigCreateWithExistingMapping(t *testing.T) {
 	t.Run("ambiguity fires only with no deployment", func(t *testing.T) {
 		svc := &agentConfigurationService{
 			gatewayRepo: gatewayFixtureRepo(t, env.String(), []*models.Gateway{both, egress}),
-			mcpProxyService: &MCPProxyService{
+			mcpProxyService: (&MCPProxyService{
 				deploymentRepo: &repomocks.DeploymentRepositoryMock{
 					GetDeployedGatewaysByProviderFunc: func(uuid.UUID, string) ([]string, error) {
 						return nil, nil
 					},
 				},
-			},
+			}).withTestCore(),
 		}
 		_, err := svc.resolveGatewayForMCPArtifact(context.Background(), sharedArtifactUUID, "org", env)
 		require.ErrorIs(t, err, errAmbiguousEgressGateway)
@@ -344,13 +344,13 @@ func TestAnchoring_AgentMCPConfigUpdateWithExistingMapping(t *testing.T) {
 	t.Run("resolves to the gateway the shared artifact is deployed to", func(t *testing.T) {
 		svc := &agentConfigurationService{
 			gatewayRepo: gatewayFixtureRepo(t, env.String(), []*models.Gateway{both, egress}),
-			mcpProxyService: &MCPProxyService{
+			mcpProxyService: (&MCPProxyService{
 				deploymentRepo: &repomocks.DeploymentRepositoryMock{
 					GetDeployedGatewaysByProviderFunc: func(uuid.UUID, string) ([]string, error) {
 						return []string{egress.UUID.String()}, nil
 					},
 				},
-			},
+			}).withTestCore(),
 		}
 		gw, err := svc.resolveGatewayForMCPArtifact(context.Background(), sharedArtifactUUID, "org", env)
 		require.NoError(t, err)
@@ -360,13 +360,13 @@ func TestAnchoring_AgentMCPConfigUpdateWithExistingMapping(t *testing.T) {
 	t.Run("ambiguity fires only with no deployment", func(t *testing.T) {
 		svc := &agentConfigurationService{
 			gatewayRepo: gatewayFixtureRepo(t, env.String(), []*models.Gateway{both, egress}),
-			mcpProxyService: &MCPProxyService{
+			mcpProxyService: (&MCPProxyService{
 				deploymentRepo: &repomocks.DeploymentRepositoryMock{
 					GetDeployedGatewaysByProviderFunc: func(uuid.UUID, string) ([]string, error) {
 						return nil, nil
 					},
 				},
-			},
+			}).withTestCore(),
 		}
 		_, err := svc.resolveGatewayForMCPArtifact(context.Background(), sharedArtifactUUID, "org", env)
 		require.ErrorIs(t, err, errAmbiguousEgressGateway)

@@ -88,7 +88,7 @@ func TestDefaultMCPProxySecurity_IdentityVariantSkipsAPIKeyDefaults(t *testing.T
 }
 
 func TestMCPProxyCreate_RejectsNonKebabHandle(t *testing.T) {
-	svc := &MCPProxyService{}
+	svc := (&MCPProxyService{}).withTestCore()
 	for _, id := range []string{"Bad_Handle", "UPPER", "has space", "trail-", "-lead", "a--b", strings.Repeat("a", 101)} {
 		_, err := svc.Create(context.Background(), "org-uuid", "system",
 			&models.MCPProxyDTO{ID: id, Name: "x", Version: "v1"})
@@ -125,7 +125,7 @@ func TestValidateMCPEndpointSecurity_IdentityNeedsGatewayPolicies(t *testing.T) 
 			return []*models.Gateway{gatewayWithPolicyManifest("mcp-auth", "v1")}, nil
 		},
 	}
-	svc := &MCPProxyService{gatewayRepo: gwRepo}
+	svc := (&MCPProxyService{gatewayRepo: gwRepo}).withTestCore()
 	endpoints := []models.MCPProxyEndpointDTO{
 		endpointWith("https://93.184.216.34", identityEnabledSecurity()),
 	}
@@ -139,7 +139,7 @@ func TestValidateMCPEndpointSecurity_IdentityAcceptedWithGatewayPolicies(t *test
 			return []*models.Gateway{gatewayWithPolicyManifest("mcp-auth", "v1", "mcp-authz", "v1")}, nil
 		},
 	}
-	svc := &MCPProxyService{gatewayRepo: gwRepo}
+	svc := (&MCPProxyService{gatewayRepo: gwRepo}).withTestCore()
 	endpoints := []models.MCPProxyEndpointDTO{
 		endpointWith("https://93.184.216.34", identityEnabledSecurity()),
 	}
@@ -154,7 +154,7 @@ func TestValidateMCPEndpointSecurity_IdentityAllowedWhenNoGatewayYet(t *testing.
 			return []*models.Gateway{}, nil
 		},
 	}
-	svc := &MCPProxyService{gatewayRepo: gwRepo}
+	svc := (&MCPProxyService{gatewayRepo: gwRepo}).withTestCore()
 	endpoints := []models.MCPProxyEndpointDTO{
 		endpointWith("https://93.184.216.34", identityEnabledSecurity()),
 	}
@@ -228,14 +228,14 @@ func TestMCPProxyDelete_CleansThunderResourceServers(t *testing.T) {
 		},
 	}
 
-	svc := &MCPProxyService{
+	svc := (&MCPProxyService{
 		repo:              proxyRepo,
 		endpointRepo:      endpointRepo,
 		mcpProxyScopeRepo: scopeRepo,
 		infraManager:      infra,
 		resolver:          resolver,
 		logger:            discardLogger(),
-	}
+	}).withTestCore()
 
 	err := svc.Delete(context.Background(), "org-uuid", "org", "gh-proxy")
 
@@ -274,14 +274,14 @@ func TestMCPProxyDelete_CleanupSurvivesResolverError(t *testing.T) {
 		},
 	}
 
-	svc := &MCPProxyService{
+	svc := (&MCPProxyService{
 		repo:              proxyRepo,
 		endpointRepo:      endpointRepo,
 		mcpProxyScopeRepo: scopeRepo,
 		infraManager:      infra,
 		resolver:          resolver,
 		logger:            discardLogger(),
-	}
+	}).withTestCore()
 
 	err := svc.Delete(context.Background(), "org-uuid", "org", "gh-proxy")
 
@@ -314,7 +314,7 @@ func TestValidateMCPEndpointSecurity_TwoEgressGateways_AnchorsOnExistingDeployme
 			return []string{deployed.UUID.String()}, nil
 		},
 	}
-	svc := &MCPProxyService{gatewayRepo: gwRepo, deploymentRepo: depRepo}
+	svc := (&MCPProxyService{gatewayRepo: gwRepo, deploymentRepo: depRepo}).withTestCore()
 	endpoints := []models.MCPProxyEndpointDTO{
 		endpointWith("https://93.184.216.34", identityEnabledSecurity()),
 	}
@@ -330,7 +330,7 @@ func TestValidateMCPEndpointSecurity_TwoEgressGateways_NoDeployment_AllCandidate
 	gwA := gatewayWithPolicyManifestAndRole(models.GatewayRoleBoth, "mcp-auth", "v1", "mcp-authz", "v1")
 	gwB := gatewayWithPolicyManifestAndRole(models.GatewayRoleEgress, "mcp-auth", "v1", "mcp-authz", "v1")
 	gwRepo := gatewayFixtureRepo(t, testMCPEnvUUID, []*models.Gateway{gwA, gwB})
-	svc := &MCPProxyService{gatewayRepo: gwRepo}
+	svc := (&MCPProxyService{gatewayRepo: gwRepo}).withTestCore()
 	endpoints := []models.MCPProxyEndpointDTO{
 		endpointWith("https://93.184.216.34", identityEnabledSecurity()),
 	}
@@ -344,7 +344,7 @@ func TestValidateMCPEndpointSecurity_TwoEgressGateways_NoDeployment_OneNonCompli
 	compliant := gatewayWithPolicyManifestAndRole(models.GatewayRoleBoth, "mcp-auth", "v1", "mcp-authz", "v1")
 	nonCompliant := gatewayWithPolicyManifestAndRole(models.GatewayRoleEgress, "mcp-auth", "v1")
 	gwRepo := gatewayFixtureRepo(t, testMCPEnvUUID, []*models.Gateway{compliant, nonCompliant})
-	svc := &MCPProxyService{gatewayRepo: gwRepo}
+	svc := (&MCPProxyService{gatewayRepo: gwRepo}).withTestCore()
 	endpoints := []models.MCPProxyEndpointDTO{
 		endpointWith("https://93.184.216.34", identityEnabledSecurity()),
 	}
@@ -366,7 +366,7 @@ func endpointBoundToGateway(gatewayID string) models.MCPProxyEndpointDTO {
 
 // placementService wires only what validateMCPEndpointPlacement reads.
 func placementService(gwRepo repositories.GatewayRepository, depRepo repositories.DeploymentRepository) *MCPProxyService {
-	return &MCPProxyService{gatewayRepo: gwRepo, deploymentRepo: depRepo, logger: discardLogger()}
+	return (&MCPProxyService{gatewayRepo: gwRepo, deploymentRepo: depRepo, logger: discardLogger()}).withTestCore()
 }
 
 // deployedTo stubs the artifact's deployed-gateway set.
@@ -522,7 +522,7 @@ func TestMCPDeployErrorIsFatal_UnrelatedError(t *testing.T) {
 // -----------------------------------------------------------------------------
 
 func TestMapMCPProxyWriteError_ProxyEnvSingleViolation(t *testing.T) {
-	svc := &MCPProxyService{}
+	svc := (&MCPProxyService{}).withTestCore()
 	err := &pgconn.PgError{Code: "23505", ConstraintName: "uq_proxy_env_single"}
 
 	mapped := svc.mapMCPProxyWriteError(err, "some-handle", "org-uuid")
@@ -531,7 +531,7 @@ func TestMapMCPProxyWriteError_ProxyEnvSingleViolation(t *testing.T) {
 }
 
 func TestMapMCPProxyWriteError_EndpointEnvViolation(t *testing.T) {
-	svc := &MCPProxyService{}
+	svc := (&MCPProxyService{}).withTestCore()
 	err := &pgconn.PgError{Code: "23505", ConstraintName: "uq_endpoint_env"}
 
 	mapped := svc.mapMCPProxyWriteError(err, "some-handle", "org-uuid")
@@ -540,13 +540,13 @@ func TestMapMCPProxyWriteError_EndpointEnvViolation(t *testing.T) {
 }
 
 func TestMapMCPProxyWriteError_HandleConflictWithMCPProxy(t *testing.T) {
-	svc := &MCPProxyService{
+	svc := (&MCPProxyService{
 		artifactRepo: &repomocks.ArtifactRepositoryMock{
 			GetByHandleFunc: func(_, _ string) (*models.Artifact, error) {
 				return &models.Artifact{Kind: models.KindMCPProxy}, nil
 			},
 		},
-	}
+	}).withTestCore()
 	err := &pgconn.PgError{Code: "23505", ConstraintName: "uq_artifact_handle_ou_id"}
 
 	mapped := svc.mapMCPProxyWriteError(err, "some-handle", "org-uuid")
@@ -555,13 +555,13 @@ func TestMapMCPProxyWriteError_HandleConflictWithMCPProxy(t *testing.T) {
 }
 
 func TestMapMCPProxyWriteError_HandleConflictWithNonMCPArtifact(t *testing.T) {
-	svc := &MCPProxyService{
+	svc := (&MCPProxyService{
 		artifactRepo: &repomocks.ArtifactRepositoryMock{
 			GetByHandleFunc: func(_, _ string) (*models.Artifact, error) {
 				return &models.Artifact{Kind: models.KindLLMProvider}, nil
 			},
 		},
-	}
+	}).withTestCore()
 	err := &pgconn.PgError{Code: "23505", ConstraintName: "uq_artifact_handle_ou_id"}
 
 	mapped := svc.mapMCPProxyWriteError(err, "some-handle", "org-uuid")
@@ -573,13 +573,13 @@ func TestMapMCPProxyWriteError_HandleConflictWithNonMCPArtifact(t *testing.T) {
 }
 
 func TestMapMCPProxyWriteError_HandleConflictLookupFailureFallsBackToMCPProxyExists(t *testing.T) {
-	svc := &MCPProxyService{
+	svc := (&MCPProxyService{
 		artifactRepo: &repomocks.ArtifactRepositoryMock{
 			GetByHandleFunc: func(_, _ string) (*models.Artifact, error) {
 				return nil, gorm.ErrRecordNotFound
 			},
 		},
-	}
+	}).withTestCore()
 	err := &pgconn.PgError{Code: "23505", ConstraintName: "uq_artifact_handle_ou_id"}
 
 	mapped := svc.mapMCPProxyWriteError(err, "some-handle", "org-uuid")
@@ -588,7 +588,7 @@ func TestMapMCPProxyWriteError_HandleConflictLookupFailureFallsBackToMCPProxyExi
 }
 
 func TestMapMCPProxyWriteError_NameVersionConflict(t *testing.T) {
-	svc := &MCPProxyService{}
+	svc := (&MCPProxyService{}).withTestCore()
 	err := &pgconn.PgError{Code: "23505", ConstraintName: "uq_artifact_name_version_ou_id"}
 
 	mapped := svc.mapMCPProxyWriteError(err, "some-handle", "org-uuid")
@@ -597,21 +597,21 @@ func TestMapMCPProxyWriteError_NameVersionConflict(t *testing.T) {
 }
 
 func TestMapMCPProxyWriteError_UnrecognizedConstraintReturnsNil(t *testing.T) {
-	svc := &MCPProxyService{}
+	svc := (&MCPProxyService{}).withTestCore()
 	err := &pgconn.PgError{Code: "23505", ConstraintName: "some_other_constraint"}
 
 	assert.Nil(t, svc.mapMCPProxyWriteError(err, "some-handle", "org-uuid"))
 }
 
 func TestMapMCPProxyWriteError_NonUniqueViolationReturnsNil(t *testing.T) {
-	svc := &MCPProxyService{}
+	svc := (&MCPProxyService{}).withTestCore()
 	err := &pgconn.PgError{Code: "23503", ConstraintName: "uq_proxy_env_single"}
 
 	assert.Nil(t, svc.mapMCPProxyWriteError(err, "some-handle", "org-uuid"))
 }
 
 func TestMapMCPProxyWriteError_NonPgErrorReturnsNil(t *testing.T) {
-	svc := &MCPProxyService{}
+	svc := (&MCPProxyService{}).withTestCore()
 	assert.Nil(t, svc.mapMCPProxyWriteError(errors.New("plain error"), "some-handle", "org-uuid"))
 }
 

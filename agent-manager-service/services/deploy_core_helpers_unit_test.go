@@ -272,3 +272,15 @@ func (s *LLMProxyDeploymentService) withTestCore() *LLMProxyDeploymentService {
 	s.deploys, _ = newTestDeployCore(deployments, s.gatewayEventsService, s.kind)
 	return s
 }
+
+// withTestCore gives an MCP proxy service built field by field its reconcile core, over its own
+// deployments mock or, without one, an empty one.
+func (s *MCPProxyService) withTestCore() *MCPProxyService {
+	deployments, _ := s.deploymentRepo.(*repomocks.DeploymentRepositoryMock)
+	if deployments == nil {
+		deployments = &repomocks.DeploymentRepositoryMock{}
+	}
+	s.kind = NewMCPProxyKind(s.repo, s.endpointRepo, s.mcpProxyScopeRepo, deployments, s.gatewayRepo)
+	s.deploys, _ = newTestDeployCore(deployments, s.gatewayEventsService, s.kind)
+	return s
+}

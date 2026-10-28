@@ -33,11 +33,16 @@ import (
 type Override struct {
 	// Name, when set, names the deployments.
 	Name string
-	// BaseDeploymentID, when set, redeploys that earlier deployment: its Content is deployed as is
-	// instead of rendering the artifact.
-	BaseDeploymentID *uuid.UUID
+	// Content, when set, is deployed as is instead of rendering the artifact: one the caller
+	// rendered from the state it holds, or the content of an earlier deployment, BaseDeploymentID.
 	Content          []byte
+	BaseDeploymentID *uuid.UUID
 	Metadata         map[string]interface{}
+}
+
+// deploysAsIs reports whether the override's content replaces rendering.
+func (o *Override) deploysAsIs() bool {
+	return o != nil && (o.Content != nil || o.BaseDeploymentID != nil)
 }
 
 // Applied is an intent a request carried out in its own transaction. Its events go out with
@@ -136,7 +141,7 @@ func (c *Core) render(ctx context.Context, kind Kind, intent models.DeployIntent
 	}
 	rendered := make([]Rendered, len(targets))
 	for i, gatewayID := range targets {
-		if override != nil && override.BaseDeploymentID != nil {
+		if override.deploysAsIs() {
 			rendered[i] = Rendered{Content: override.Content}
 		} else if rendered[i], err = kind.Render(ctx, intent, gatewayID); err != nil {
 			return nil, nil, err

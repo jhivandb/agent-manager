@@ -60,7 +60,7 @@ func TestSystemManagedMCPURLReturnsProxyURLForMatchingMapping(t *testing.T) {
 				}, nil
 			},
 		},
-		mcpProxyService: &MCPProxyService{
+		mcpProxyService: (&MCPProxyService{
 			deploymentRepo: &repomocks.DeploymentRepositoryMock{
 				GetDeployedGatewaysByProviderFunc: func(gotArtifactUUID uuid.UUID, gotOrg string) ([]string, error) {
 					require.Equal(t, sharedArtifactUUID, gotArtifactUUID)
@@ -68,7 +68,7 @@ func TestSystemManagedMCPURLReturnsProxyURLForMatchingMapping(t *testing.T) {
 					return []string{gatewayUUID.String()}, nil
 				},
 			},
-		},
+		}).withTestCore(),
 		gatewayRepo: &repomocks.GatewayRepositoryMock{
 			EnvironmentMappingExistsFunc: func(gotGatewayID string, gotEnvID string) (bool, error) {
 				require.Equal(t, gatewayUUID.String(), gotGatewayID)

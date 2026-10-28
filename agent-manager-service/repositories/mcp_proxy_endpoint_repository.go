@@ -50,6 +50,9 @@ type MCPProxyEndpointRepository interface {
 	// ListEndpointEnvironmentsByProxy returns every endpoint→environment binding
 	// for the proxy. Used by the delete teardown to collect all artifact UUIDs.
 	ListEndpointEnvironmentsByProxy(ctx context.Context, proxyUUID uuid.UUID) ([]models.MCPProxyEndpointEnvironment, error)
+	// GetEndpointEnvByArtifact returns the (endpoint, environment) binding whose gateway artifact
+	// is artifactUUID, or gorm.ErrRecordNotFound.
+	GetEndpointEnvByArtifact(ctx context.Context, artifactUUID uuid.UUID) (*models.MCPProxyEndpointEnvironment, error)
 }
 
 type mcpProxyEndpointRepository struct {
@@ -173,6 +176,18 @@ func (r *mcpProxyEndpointRepository) GetEndpointEnvByProxyAndEnv(ctx context.Con
 	err := r.db.WithContext(ctx).
 		Where("mcp_proxy_uuid = ? AND environment_uuid = ?", proxyUUID, envUUID).
 		First(&ee).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, err
+		}
+		return nil, fmt.Errorf("failed to resolve MCP proxy endpoint environment: %w", err)
+	}
+	return &ee, nil
+}
+
+func (r *mcpProxyEndpointRepository) GetEndpointEnvByArtifact(ctx context.Context, artifactUUID uuid.UUID) (*models.MCPProxyEndpointEnvironment, error) {
+	var ee models.MCPProxyEndpointEnvironment
+	err := r.db.WithContext(ctx).Where("artifact_uuid = ?", artifactUUID).First(&ee).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, err

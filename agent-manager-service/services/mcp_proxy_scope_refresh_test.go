@@ -43,7 +43,7 @@ func (s *infraResourceManagerStubForScopeRefresh) ListOrgEnvironments(ctx contex
 }
 
 func TestRefreshAgentsBoundToProxy_NoMappings_NoOp(t *testing.T) {
-	svc := &MCPProxyService{
+	svc := (&MCPProxyService{
 		envMCPMappingRepo: &repomocks.EnvAgentMCPMappingRepositoryMock{
 			ListByMCPProxyFunc: func(context.Context, uuid.UUID) ([]models.EnvAgentMCPMapping, error) {
 				return nil, nil
@@ -62,7 +62,7 @@ func TestRefreshAgentsBoundToProxy_NoMappings_NoOp(t *testing.T) {
 			},
 		},
 		logger: discardLogger(),
-	}
+	}).withTestCore()
 
 	svc.refreshAgentsBoundToProxy(context.Background(), &models.MCPProxy{UUID: uuid.New()}, "acme")
 }
@@ -74,7 +74,7 @@ func TestRefreshAgentsBoundToProxy_RefreshesEveryBoundAgent(t *testing.T) {
 	configA := uuid.New()
 	configB := uuid.New()
 
-	svc := &MCPProxyService{
+	svc := (&MCPProxyService{
 		envMCPMappingRepo: &repomocks.EnvAgentMCPMappingRepositoryMock{
 			ListByMCPProxyFunc: func(_ context.Context, gotProxyUUID uuid.UUID) ([]models.EnvAgentMCPMapping, error) {
 				assert.Equal(t, proxyUUID, gotProxyUUID)
@@ -108,7 +108,7 @@ func TestRefreshAgentsBoundToProxy_RefreshesEveryBoundAgent(t *testing.T) {
 			},
 		},
 		logger: discardLogger(),
-	}
+	}).withTestCore()
 
 	type call struct{ project, agent, env string }
 	var calls []call
@@ -133,7 +133,7 @@ func TestRefreshAgentsBoundToProxy_SkipsMappingWhenEnvironmentDeleted(t *testing
 	proxyUUID := uuid.New()
 	staleEnvUUID := uuid.New()
 
-	svc := &MCPProxyService{
+	svc := (&MCPProxyService{
 		envMCPMappingRepo: &repomocks.EnvAgentMCPMappingRepositoryMock{
 			ListByMCPProxyFunc: func(context.Context, uuid.UUID) ([]models.EnvAgentMCPMapping, error) {
 				return []models.EnvAgentMCPMapping{
@@ -159,7 +159,7 @@ func TestRefreshAgentsBoundToProxy_SkipsMappingWhenEnvironmentDeleted(t *testing
 			},
 		},
 		logger: discardLogger(),
-	}
+	}).withTestCore()
 
 	svc.refreshAgentsBoundToProxy(context.Background(), &models.MCPProxy{UUID: proxyUUID}, "acme")
 }
@@ -170,7 +170,7 @@ func TestRefreshAgentsBoundToProxy_ContinuesAfterOneAgentFails(t *testing.T) {
 	configA := uuid.New()
 	configB := uuid.New()
 
-	svc := &MCPProxyService{
+	svc := (&MCPProxyService{
 		envMCPMappingRepo: &repomocks.EnvAgentMCPMappingRepositoryMock{
 			ListByMCPProxyFunc: func(context.Context, uuid.UUID) ([]models.EnvAgentMCPMapping, error) {
 				return []models.EnvAgentMCPMapping{
@@ -193,7 +193,7 @@ func TestRefreshAgentsBoundToProxy_ContinuesAfterOneAgentFails(t *testing.T) {
 			},
 		},
 		logger: discardLogger(),
-	}
+	}).withTestCore()
 
 	var refreshed []string
 	svc.agentIdentityInjection = &agentIdentityInjectorStub{

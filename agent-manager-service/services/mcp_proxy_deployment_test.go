@@ -40,7 +40,7 @@ func findMCPPolicy(policies []models.MCPPolicy, name string) *models.MCPPolicy {
 // TestGenerateMCPProxyDeploymentYAML_Basic verifies a minimal proxy renders the
 // expected apiVersion/kind/metadata and applies the default context and spec version.
 func TestGenerateMCPProxyDeploymentYAML_Basic(t *testing.T) {
-	service := &MCPProxyService{}
+	service := (&MCPProxyService{}).withTestCore()
 
 	proxy := &models.MCPProxy{
 		Handle: "test-mcp-proxy",
@@ -99,7 +99,7 @@ func TestGenerateMCPProxyDeploymentYAML_Basic(t *testing.T) {
 // resilience block passes through directly to the deployment spec, mirroring
 // the LLM provider behavior.
 func TestGenerateMCPProxyDeploymentYAML_WithResilience(t *testing.T) {
-	service := &MCPProxyService{}
+	service := (&MCPProxyService{}).withTestCore()
 	timeout := "15s"
 	idleTimeout := "20s"
 
@@ -142,7 +142,7 @@ func TestGenerateMCPProxyDeploymentYAML_WithResilience(t *testing.T) {
 // TestGenerateMCPProxyDeploymentYAML_WithContextAndVhost verifies an explicit
 // context, vhost and spec version flow through to the spec.
 func TestGenerateMCPProxyDeploymentYAML_WithContextAndVhost(t *testing.T) {
-	service := &MCPProxyService{}
+	service := (&MCPProxyService{}).withTestCore()
 
 	proxy := &models.MCPProxy{
 		Handle: "ctx-proxy",
@@ -183,7 +183,7 @@ func TestGenerateMCPProxyDeploymentYAML_WithContextAndVhost(t *testing.T) {
 // trailing "/mcp" path segment survives to the deployed upstream URL
 // unchanged, since the gateway no longer re-appends it itself.
 func TestGenerateMCPProxyDeploymentYAML_PreservesUpstreamPath(t *testing.T) {
-	service := &MCPProxyService{}
+	service := (&MCPProxyService{}).withTestCore()
 
 	proxy := &models.MCPProxy{
 		Handle: "preserve-proxy",
@@ -217,7 +217,7 @@ func TestGenerateMCPProxyDeploymentYAML_PreservesUpstreamPath(t *testing.T) {
 // TestGenerateMCPProxyDeploymentYAML_WithSecurityAPIKey verifies API key security
 // is converted into an api-key-auth policy (and not surfaced as a security field).
 func TestGenerateMCPProxyDeploymentYAML_WithSecurityAPIKey(t *testing.T) {
-	service := &MCPProxyService{}
+	service := (&MCPProxyService{}).withTestCore()
 
 	proxy := &models.MCPProxy{
 		Handle: "secure-proxy",
@@ -281,7 +281,7 @@ func TestGenerateMCPProxyDeploymentYAML_SecurityValidation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			service := &MCPProxyService{}
+			service := (&MCPProxyService{}).withTestCore()
 			proxy := &models.MCPProxy{
 				Handle: "sec-proxy",
 				Configuration: models.MCPProxyConfig{
@@ -321,7 +321,7 @@ func TestGenerateMCPProxyDeploymentYAML_SecurityValidation(t *testing.T) {
 // TestGenerateMCPProxyDeploymentYAML_WithBackendAuth verifies upstream auth is
 // converted into a backend-authentication (set-headers) policy.
 func TestGenerateMCPProxyDeploymentYAML_WithBackendAuth(t *testing.T) {
-	service := &MCPProxyService{}
+	service := (&MCPProxyService{}).withTestCore()
 
 	proxy := &models.MCPProxy{
 		Handle: "auth-proxy",
@@ -382,7 +382,7 @@ func TestGenerateMCPProxyDeploymentYAML_WithBackendAuth(t *testing.T) {
 // TestGenerateMCPProxyDeploymentYAML_PrefersArtifactIdentity verifies the backing
 // artifact's handle/name/version take precedence over configuration values.
 func TestGenerateMCPProxyDeploymentYAML_PrefersArtifactIdentity(t *testing.T) {
-	service := &MCPProxyService{}
+	service := (&MCPProxyService{}).withTestCore()
 
 	proxy := &models.MCPProxy{
 		UUID:   uuid.New(),
@@ -425,7 +425,7 @@ func TestGenerateMCPProxyDeploymentYAML_PrefersArtifactIdentity(t *testing.T) {
 // TestGenerateMCPProxyDeploymentYAML_PolicyVersionNormalized verifies user-defined
 // policy versions are normalized to their major version.
 func TestGenerateMCPProxyDeploymentYAML_PolicyVersionNormalized(t *testing.T) {
-	service := &MCPProxyService{}
+	service := (&MCPProxyService{}).withTestCore()
 
 	proxy := &models.MCPProxy{
 		Handle: "policy-proxy",
@@ -489,7 +489,7 @@ func TestGenerateMCPProxyDeploymentYAML_MissingUpstreamURL(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			service := &MCPProxyService{}
+			service := (&MCPProxyService{}).withTestCore()
 			_, err := service.generateMCPProxyDeploymentYAML(tt.proxy, "x", nil)
 			if err == nil {
 				t.Fatal("expected an error for missing upstream URL, got nil")
@@ -707,7 +707,7 @@ func TestGenerateMCPProxyDeploymentYAML_UpstreamURLPassthrough(t *testing.T) {
 		{name: "trims whitespace", in: "  https://host.example.com/x  ", want: "https://host.example.com/x"},
 	}
 
-	service := &MCPProxyService{}
+	service := (&MCPProxyService{}).withTestCore()
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			proxy := &models.MCPProxy{

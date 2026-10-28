@@ -114,7 +114,7 @@ func newMCPURLTestFixture() *mcpURLTestFixture {
 func (f *mcpURLTestFixture) newService() *agentConfigurationService {
 	return &agentConfigurationService{
 		gatewayRepo:     f.gatewayRepo,
-		mcpProxyService: &MCPProxyService{deploymentRepo: f.deploymentRepo},
+		mcpProxyService: (&MCPProxyService{deploymentRepo: f.deploymentRepo}).withTestCore(),
 		logger:          discardLogger(),
 	}
 }

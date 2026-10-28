@@ -36,6 +36,7 @@ import (
 
 	"github.com/wso2/agent-manager/agent-manager-service/clients/thundersvc"
 	"github.com/wso2/agent-manager/agent-manager-service/models"
+	"github.com/wso2/agent-manager/agent-manager-service/reconcile"
 	"github.com/wso2/agent-manager/agent-manager-service/repositories"
 	"github.com/wso2/agent-manager/agent-manager-service/utils"
 	"github.com/wso2/agent-manager/agent-manager-service/utils/ssrf"
@@ -88,6 +89,8 @@ type MCPProxyService struct {
 	logger                 *slog.Logger
 	encryptionKey          []byte
 	resolver               thundersvc.EnvThunderResolver
+	deploys                *reconcile.Core
+	kind                   *MCPProxyKind
 }
 
 // NewMCPProxyService creates a new MCP proxy service.
@@ -107,6 +110,8 @@ func NewMCPProxyService(
 	encryptionKey []byte,
 	mcpProxyScopeRepo repositories.MCPProxyScopeRepository,
 	resolver thundersvc.EnvThunderResolver,
+	deploys *reconcile.Core,
+	kind *MCPProxyKind,
 ) *MCPProxyService {
 	return &MCPProxyService{
 		db:                   db,
@@ -130,6 +135,8 @@ func NewMCPProxyService(
 		logger:                 logger,
 		encryptionKey:          encryptionKey,
 		resolver:               resolver,
+		deploys:                deploys,
+		kind:                   kind,
 	}
 }
 
@@ -386,6 +393,7 @@ func (s *MCPProxyService) Get(ctx context.Context, orgUUID, proxyID string) (*mo
 						envBinding.GatewayID = &gatewayIDs[0]
 						status = s.mcpEndpointEnvironmentStatus(artifactUUID, orgUUID, gatewayIDs[0])
 					}
+					status = s.mcpIntentStatus(ctx, orgUUID, artifactUUID, envBinding.EnvironmentUUID, status)
 				}
 				envBinding.DeploymentStatus = status
 			}
@@ -1357,6 +1365,26 @@ func (s *MCPProxyService) validateMCPEndpointPlacement(
 }
 
 // mcpEndpointEnvironmentStatus reads the status of the artifact's deployment on the gateway it is placed on.
+// mcpIntentStatus is the binding's status as its deploy intent reports it: DEPLOYING while a
+// redeploy retries, FAILED once one gave up, else what its gateway acked. A binding deployed
+// before intents keeps placed, the status its row gives.
+func (s *MCPProxyService) mcpIntentStatus(ctx context.Context, orgUUID string, artifactUUID uuid.UUID, envID, placed string) string {
+	envUUID, err := uuid.Parse(envID)
+	if err != nil || s.deploys == nil {
+		return placed
+	}
+	st, err := s.deploys.StatusOf(ctx, orgUUID, artifactUUID, models.EnvironmentScope(envUUID))
+	if errors.Is(err, repositories.ErrDeployIntentNotFound) {
+		return placed
+	}
+	if err != nil {
+		s.logger.Warn("Failed to read MCP proxy endpoint environment deploy intent",
+			"artifactID", artifactUUID, "environment", envID, "ouID", orgUUID, "error", err)
+		return placed
+	}
+	return models.MCPDeploymentStatusOf(st.Status)
+}
+
 func (s *MCPProxyService) mcpEndpointEnvironmentStatus(artifactUUID uuid.UUID, orgUUID, gatewayID string) string {
 	_, status, _, err := s.deploymentRepo.GetStatus(artifactUUID.String(), orgUUID, gatewayID)
 	if err != nil {

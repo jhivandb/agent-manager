@@ -81,7 +81,7 @@ func TestMCPProxyGetReportsEachEnvironmentsLiveStatus(t *testing.T) {
 	}
 	endpoint.Environments = append(endpoint.Environments, models.MCPProxyEndpointEnvironment{EnvironmentUUID: notPlaced, ArtifactUUID: uuid.New()})
 
-	svc := &MCPProxyService{
+	svc := (&MCPProxyService{
 		repo: &repomocks.MCPProxyRepositoryMock{
 			GetByHandleFunc: func(context.Context, string, string) (*models.MCPProxy, error) {
 				return &models.MCPProxy{UUID: uuid.New(), Handle: "weather", Endpoints: []models.MCPProxyEndpoint{endpoint}}, nil
@@ -100,7 +100,7 @@ func TestMCPProxyGetReportsEachEnvironmentsLiveStatus(t *testing.T) {
 			},
 		},
 		logger: testLogger(),
-	}
+	}).withTestCore()
 
 	dto, err := svc.Get(context.Background(), "org", "weather")
 

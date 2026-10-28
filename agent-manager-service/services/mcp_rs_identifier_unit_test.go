@@ -54,7 +54,7 @@ func TestMCPResourceServerIdentifier_DerivesPublicURI(t *testing.T) {
 			}},
 		}},
 	}
-	svc := &MCPProxyService{
+	svc := (&MCPProxyService{
 		infraManager: stubInfraManager{listOrgEnvs: func(_ context.Context, _ string) ([]*models.EnvironmentResponse, error) {
 			return []*models.EnvironmentResponse{{Name: "dev", UUID: envUUID.String()}}, nil
 		}},
@@ -73,7 +73,7 @@ func TestMCPResourceServerIdentifier_DerivesPublicURI(t *testing.T) {
 			},
 		},
 		logger: discardLogger(),
-	}
+	}).withTestCore()
 
 	envID, err := svc.EnvironmentUUIDByName(context.Background(), "ou-1", "dev")
 	require.NoError(t, err)
@@ -87,7 +87,7 @@ func TestMCPResourceServerIdentifier_DerivesPublicURI(t *testing.T) {
 
 func TestMCPResourceServerIdentifier_NotDeployedToEnvironment(t *testing.T) {
 	proxy := &models.MCPProxy{UUID: uuid.New(), Handle: "gh-proxy"}
-	svc := &MCPProxyService{logger: discardLogger()}
+	svc := (&MCPProxyService{logger: discardLogger()}).withTestCore()
 
 	_, err := svc.MCPResourceServerIdentifier(context.Background(), "ou-1", uuid.New(), proxy)
 
@@ -95,12 +95,12 @@ func TestMCPResourceServerIdentifier_NotDeployedToEnvironment(t *testing.T) {
 }
 
 func TestEnvironmentUUIDByName_NotFound(t *testing.T) {
-	svc := &MCPProxyService{
+	svc := (&MCPProxyService{
 		infraManager: stubInfraManager{listOrgEnvs: func(_ context.Context, _ string) ([]*models.EnvironmentResponse, error) {
 			return []*models.EnvironmentResponse{{Name: "dev", UUID: uuid.NewString()}}, nil
 		}},
 		logger: discardLogger(),
-	}
+	}).withTestCore()
 
 	_, err := svc.EnvironmentUUIDByName(context.Background(), "ou-1", "prod")
 
@@ -138,7 +138,7 @@ func TestEnsureResourceServersForProxy_RegistersOnlyIdentitySecuredDeployedEnvir
 
 	var resolvedEnvs []string
 	var ensuredActions [][]string
-	svc := &MCPProxyService{
+	svc := (&MCPProxyService{
 		infraManager: stubInfraManager{listOrgEnvs: func(_ context.Context, _ string) ([]*models.EnvironmentResponse, error) {
 			return []*models.EnvironmentResponse{
 				{Name: "env-a", UUID: envA.String()},
@@ -168,7 +168,7 @@ func TestEnsureResourceServersForProxy_RegistersOnlyIdentitySecuredDeployedEnvir
 			},
 		},
 		logger: discardLogger(),
-	}
+	}).withTestCore()
 
 	svc.EnsureResourceServersForProxy(context.Background(), "ou-1", proxy, []string{"read", "write"})
 
@@ -195,14 +195,14 @@ func TestEnsureResourceServersForProxy_SkipsUndeployedEnvironment(t *testing.T) 
 			},
 		}},
 	}
-	svc := &MCPProxyService{
+	svc := (&MCPProxyService{
 		infraManager: stubInfraManager{listOrgEnvs: func(_ context.Context, _ string) ([]*models.EnvironmentResponse, error) {
 			return []*models.EnvironmentResponse{{Name: "env-a", UUID: envA.String()}}, nil
 		}},
 		logger: discardLogger(),
 		// resolver deliberately left nil: reaching it would panic, proving the
 		// undeployed environment never gets past the ArtifactUUID check.
-	}
+	}).withTestCore()
 
 	require.NotPanics(t, func() {
 		svc.EnsureResourceServersForProxy(context.Background(), "ou-1", proxy, []string{"read"})
@@ -218,7 +218,7 @@ func TestEnsureResourceServersForProxy_SkipsWhenNoIdentityEndpoint(t *testing.T)
 		Artifact:  &models.Artifact{Handle: "deepwiki"},
 		Endpoints: []models.MCPProxyEndpoint{{}},
 	}
-	svc := &MCPProxyService{logger: discardLogger()}
+	svc := (&MCPProxyService{logger: discardLogger()}).withTestCore()
 	// infraManager/resolver deliberately left nil: reaching either would panic.
 
 	require.NotPanics(t, func() {
@@ -242,7 +242,7 @@ func TestEnsureResourceServersForProxy_SurvivesResolverError(t *testing.T) {
 			},
 		}},
 	}
-	svc := &MCPProxyService{
+	svc := (&MCPProxyService{
 		infraManager: stubInfraManager{listOrgEnvs: func(_ context.Context, _ string) ([]*models.EnvironmentResponse, error) {
 			return []*models.EnvironmentResponse{{Name: "env-a", UUID: envA.String()}}, nil
 		}},
@@ -252,7 +252,7 @@ func TestEnsureResourceServersForProxy_SurvivesResolverError(t *testing.T) {
 			},
 		},
 		logger: discardLogger(),
-	}
+	}).withTestCore()
 
 	require.NotPanics(t, func() {
 		svc.EnsureResourceServersForProxy(context.Background(), "ou-1", proxy, []string{"read"})
