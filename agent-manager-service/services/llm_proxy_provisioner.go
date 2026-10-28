@@ -80,10 +80,12 @@ type ProvisionProxyParams struct {
 	ProxyName      string // e.g. "my-monitor-openai-proxy"
 	ProjectUUID    uuid.UUID
 	Gateway        *models.Gateway
-	Policies       models.LLMPolicies // nil/empty for monitors
-	Description    string
-	CreatedBy      string // defaults to models.UserRoleSystem when empty
-	SecretCtx      ProxySecretContext
+	// EnvironmentUUID is the environment the proxy is provisioned for, whose intent deploys it.
+	EnvironmentUUID uuid.UUID
+	Policies        models.LLMPolicies // nil/empty for monitors
+	Description     string
+	CreatedBy       string // defaults to models.UserRoleSystem when empty
+	SecretCtx       ProxySecretContext
 	// SkipKVSecret skips storing the proxy API key in the secret store.
 	// Set by callers (e.g. monitors) that manage their own composite secret.
 	SkipKVSecret bool
@@ -243,7 +245,7 @@ func (p *LLMProxyProvisioner) ProvisionProxy(ctx context.Context, params Provisi
 	rb.ProxyHandle = proxy.Handle
 
 	baseName := strings.TrimSuffix(params.ProxyName, "-proxy")
-	deployment, err := p.llmProxyDeploymentService.DeployLLMProxy(proxy.Handle, &models.DeployAPIRequest{
+	deployment, err := p.llmProxyDeploymentService.DeployLLMProxyInEnvironment(ctx, proxy.Handle, params.EnvironmentUUID, &models.DeployAPIRequest{
 		Name:      k8sNameWithSuffix(baseName, "-deployment"),
 		Base:      "current",
 		GatewayID: params.Gateway.UUID.String(),

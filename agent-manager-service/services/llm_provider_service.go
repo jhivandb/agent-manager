@@ -1497,11 +1497,8 @@ func (s *LLMProviderService) syncProxyAuthHeader(
 		if !deployment.IsPlaced() {
 			continue
 		}
-		if _, err := proxyDeploymentService.DeployLLMProxy(proxy.Handle, &models.DeployAPIRequest{
-			Name:      deployment.Name,
-			Base:      "current",
-			GatewayID: deployment.GatewayUUID.String(),
-		}, ouID); err != nil {
+		if err := proxyDeploymentService.RedeployStale(ctx, proxy, deployment.GatewayUUID, ouID,
+			"the provider's auth header changed"); err != nil {
 			// Nothing took the new config yet, so putting the store back leaves the
 			// proxy exactly as it was.
 			if redeployed == 0 && len(stragglers) == 0 {

@@ -254,7 +254,7 @@ func (s *monitorManagerService) CreateMonitor(ctx context.Context, ouID string, 
 			return nil, fmt.Errorf("invalid project UUID: %w", err)
 		}
 
-		mapping, rollbackState, proxyAPIKey, err := s.provisionLLMProxy(ctx, ouID, monitor, *req.LLMProvider, gateway, projectUUID)
+		mapping, rollbackState, proxyAPIKey, err := s.provisionLLMProxy(ctx, ouID, monitor, *req.LLMProvider, gateway, envUUID, projectUUID)
 		if err != nil {
 			if delErr := s.monitorRepo.DeleteMonitor(monitor); delErr != nil {
 				s.logger.Error("Failed to rollback monitor on error", "error", delErr)
@@ -588,7 +588,7 @@ func (s *monitorManagerService) UpdateMonitor(ctx context.Context, ouID, project
 				return nil, fmt.Errorf("invalid project UUID: %w", err)
 			}
 
-			mapping, rollbackState, proxyAPIKey, err := s.provisionLLMProxy(ctx, ouID, monitor, *req.LLMProvider, gateway, projectUUID)
+			mapping, rollbackState, proxyAPIKey, err := s.provisionLLMProxy(ctx, ouID, monitor, *req.LLMProvider, gateway, envUUID, projectUUID)
 			if err != nil {
 				return nil, fmt.Errorf("failed to provision LLM proxy: %w", err)
 			}
@@ -1552,18 +1552,20 @@ func (s *monitorManagerService) provisionLLMProxy(
 	monitor *models.Monitor,
 	provRef models.MonitorLLMProviderRef,
 	gateway *models.Gateway,
+	envUUID uuid.UUID,
 	projectUUID uuid.UUID,
 ) (*models.MonitorLLMMapping, ProxyRollbackState, string, error) {
 	proxyName := monitorProxyName(monitor.ID, monitor.Name, provRef.ProviderName)
 
 	provisioned, err := s.llmProvisioner.ProvisionProxy(ctx, ProvisionProxyParams{
-		OrgName:        ouID,
-		ProviderHandle: provRef.ProviderName,
-		ProxyName:      proxyName,
-		ProjectUUID:    projectUUID,
-		Gateway:        gateway,
-		Description:    fmt.Sprintf("LLM proxy for monitor %s", monitor.Name),
-		SkipKVSecret:   true, // monitors store the key in their own composite secret
+		OrgName:         ouID,
+		ProviderHandle:  provRef.ProviderName,
+		ProxyName:       proxyName,
+		ProjectUUID:     projectUUID,
+		Gateway:         gateway,
+		EnvironmentUUID: envUUID,
+		Description:     fmt.Sprintf("LLM proxy for monitor %s", monitor.Name),
+		SkipKVSecret:    true, // monitors store the key in their own composite secret
 	})
 	if err != nil {
 		return nil, ProxyRollbackState{}, "", fmt.Errorf("failed to provision LLM proxy: %w", err)

@@ -38,7 +38,7 @@ func TestProxyDelete_RejectsWrongProjectBeforeCleanup(t *testing.T) {
 	proxy := &models.LLMProxy{UUID: uuid.New(), ProjectUUID: uuid.New()}
 	repo := &repomocks.LLMProxyRepositoryMock{GetByIDCtxFunc: func(context.Context, string, string) (*models.LLMProxy, error) { return proxy, nil }}
 	svc := NewLLMProxyService(repo, nil, nil)
-	err := svc.DeleteInProject(context.Background(), "proxy", "org", uuid.NewString(), &LLMProxyDeploymentService{})
+	err := svc.DeleteInProject(context.Background(), "proxy", "org", uuid.NewString(), (&LLMProxyDeploymentService{}).withTestCore())
 	require.ErrorIs(t, err, utils.ErrLLMProxyNotFound)
 	assert.Empty(t, repo.DeleteInProjectCalls())
 }
@@ -76,7 +76,7 @@ func TestDeletionDiscoveryFailurePreventsDelete(t *testing.T) {
 			proxy := &models.LLMProxy{UUID: uuid.New(), ProjectUUID: uuid.New()}
 			proxies := &repomocks.LLMProxyRepositoryMock{GetByIDCtxFunc: func(context.Context, string, string) (*models.LLMProxy, error) { return proxy, nil }}
 			svc := NewLLMProxyService(proxies, nil, nil)
-			err := svc.Delete(context.Background(), "proxy", "org", &LLMProxyDeploymentService{deploymentRepo: deployments, gatewayRepo: gateways})
+			err := svc.Delete(context.Background(), "proxy", "org", (&LLMProxyDeploymentService{deploymentRepo: deployments, gatewayRepo: gateways}).withTestCore())
 			require.ErrorIs(t, err, cause)
 			assert.Empty(t, proxies.DeleteInProjectCalls())
 			provider, deployment := serviceForRollback(createdProvider(), nil)
@@ -138,7 +138,7 @@ func TestProxyDelete_UsesScopedDeleteAndBoundedPostCommitContext(t *testing.T) {
 		return []string{gateway}, nil
 	}}
 	svc := NewLLMProxyService(repo, nil, nil)
-	err := svc.DeleteInProject(ctx, "proxy", "org", proxy.ProjectUUID.String(), &LLMProxyDeploymentService{deploymentRepo: deployments, gatewayEventsService: NewGatewayEventsService(hub)})
+	err := svc.DeleteInProject(ctx, "proxy", "org", proxy.ProjectUUID.String(), (&LLMProxyDeploymentService{deploymentRepo: deployments, gatewayEventsService: NewGatewayEventsService(hub)}).withTestCore())
 	require.NoError(t, err)
 	assert.Equal(t, 1, calls)
 }

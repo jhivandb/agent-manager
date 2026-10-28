@@ -28,6 +28,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/wso2/agent-manager/agent-manager-service/models"
+	"github.com/wso2/agent-manager/agent-manager-service/reconcile"
 	"github.com/wso2/agent-manager/agent-manager-service/repositories"
 	"github.com/wso2/agent-manager/agent-manager-service/utils"
 )
@@ -44,6 +45,8 @@ type LLMProxyDeploymentService struct {
 	providerRepo         repositories.LLMProviderRepository
 	gatewayRepo          repositories.GatewayRepository
 	gatewayEventsService *GatewayEventsService
+	deploys              *reconcile.Core
+	kind                 *LLMProxyKind
 }
 
 // NewLLMProxyDeploymentService creates a new LLM proxy deployment service
@@ -53,6 +56,8 @@ func NewLLMProxyDeploymentService(
 	providerRepo repositories.LLMProviderRepository,
 	gatewayRepo repositories.GatewayRepository,
 	gatewayEventsService *GatewayEventsService,
+	deploys *reconcile.Core,
+	kind *LLMProxyKind,
 ) *LLMProxyDeploymentService {
 	return &LLMProxyDeploymentService{
 		deploymentRepo:       deploymentRepo,
@@ -60,6 +65,8 @@ func NewLLMProxyDeploymentService(
 		providerRepo:         providerRepo,
 		gatewayRepo:          gatewayRepo,
 		gatewayEventsService: gatewayEventsService,
+		deploys:              deploys,
+		kind:                 kind,
 	}
 }
 
@@ -89,8 +96,23 @@ type LLMProxyDeploymentProvider struct {
 	Auth *models.UpstreamAuth `yaml:"auth,omitempty" json:"auth,omitempty"`
 }
 
-// DeployLLMProxy deploys an LLM proxy to a gateway
+// DeployLLMProxy deploys an LLM proxy to the gateway the request names.
 func (s *LLMProxyDeploymentService) DeployLLMProxy(proxyID string, req *models.DeployAPIRequest, ouID string) (*models.Deployment, error) {
+	return s.deployLLMProxy(context.Background(), proxyID, nil, req, ouID)
+}
+
+// DeployLLMProxyInEnvironment deploys the proxy an agent configuration or a monitor provisioned for
+// one environment, to the request's gateway in it. The intent is the environment's, so a later
+// redeploy finds it there.
+func (s *LLMProxyDeploymentService) DeployLLMProxyInEnvironment(
+	ctx context.Context, proxyID string, envUUID uuid.UUID, req *models.DeployAPIRequest, ouID string,
+) (*models.Deployment, error) {
+	return s.deployLLMProxy(ctx, proxyID, &envUUID, req, ouID)
+}
+
+func (s *LLMProxyDeploymentService) deployLLMProxy(
+	ctx context.Context, proxyID string, envUUID *uuid.UUID, req *models.DeployAPIRequest, ouID string,
+) (*models.Deployment, error) {
 	slog.Info("LLMProxyDeploymentService.DeployLLMProxy: starting", "proxyID", proxyID, "ouID", ouID,
 		"deploymentName", req.Name, "base", req.Base, "gatewayID", req.GatewayID)
 
@@ -152,92 +174,67 @@ func (s *LLMProxyDeploymentService) DeployLLMProxy(proxyID string, req *models.D
 		return nil, fmt.Errorf("%w: %w", utils.ErrInvalidInput, err)
 	}
 
-	var baseDeploymentID *uuid.UUID
-	var contentBytes []byte
-
-	// Determine source: "current" or existing deployment
-	if req.Base == "current" {
-		slog.Info("LLMProxyDeploymentService.DeployLLMProxy: using current proxy configuration", "proxyID", proxyID)
-
-		// Generate deployment YAML
-		slog.Info("LLMProxyDeploymentService.DeployLLMProxy: generating deployment YAML", "proxyID", proxyID)
-		deploymentYAML, err := s.generateLLMProxyDeploymentYAML(proxy, ouID)
-		if err != nil {
-			slog.Error("LLMProxyDeploymentService.DeployLLMProxy: failed to generate deployment YAML", "proxyID", proxyID, "error", err)
-			return nil, fmt.Errorf("failed to generate deployment YAML: %w", err)
-		}
-		contentBytes = []byte(deploymentYAML)
-	} else {
+	override := &reconcile.Override{Name: req.Name, Metadata: req.Metadata}
+	if req.Base != "current" {
 		slog.Info("LLMProxyDeploymentService.DeployLLMProxy: using existing deployment as base", "proxyID", proxyID, "baseDeploymentID", req.Base)
-
-		// Use existing deployment as base
 		baseUUID, err := uuid.Parse(req.Base)
 		if err != nil {
 			slog.Error("LLMProxyDeploymentService.DeployLLMProxy: invalid base deployment ID", "proxyID", proxyID, "baseDeploymentID", req.Base, "error", err)
 			return nil, fmt.Errorf("invalid base deployment ID: %w", err)
 		}
-
 		baseDeployment, err := s.deploymentRepo.GetWithContent(req.Base, proxy.UUID.String(), ouID)
 		if err != nil {
 			slog.Warn("LLMProxyDeploymentService.DeployLLMProxy: base deployment not found", "proxyID", proxyID, "baseDeploymentID", req.Base, "error", err)
 			return nil, utils.ErrBaseDeploymentNotFound
 		}
-		contentBytes = baseDeployment.Content
-		baseDeploymentID = &baseUUID
-		slog.Info("LLMProxyDeploymentService.DeployLLMProxy: base deployment retrieved", "proxyID", proxyID, "baseDeploymentID", req.Base)
+		override.Content, override.BaseDeploymentID = baseDeployment.Content, &baseUUID
 	}
 
-	// Create deployment
-	deploymentID := uuid.New()
-
-	slog.Info("LLMProxyDeploymentService.DeployLLMProxy: creating deployment", "proxyID", proxyID,
-		"deploymentID", deploymentID, "deploymentName", req.Name, "gatewayID", req.GatewayID)
-
-	deployment := &models.Deployment{
-		DeploymentID:     deploymentID,
-		Name:             req.Name,
-		ArtifactUUID:     proxy.UUID,
-		OUID:             ouID,
-		GatewayUUID:      gatewayUUID,
-		BaseDeploymentID: baseDeploymentID,
-		Content:          contentBytes,
-		Metadata:         req.Metadata,
+	scope, found, err := s.deploys.ScopeFor(ctx, models.KindLLMProxy, ouID, proxy.UUID, gatewayUUID)
+	if err != nil {
+		return nil, err
 	}
-
-	hardLimit := maxDeploymentsPerAPI + deploymentLimitBuffer
-	if err := s.deploymentRepo.CreateWithLimitEnforcement(deployment, hardLimit); err != nil {
-		slog.Error("LLMProxyDeploymentService.DeployLLMProxy: failed to create deployment", "proxyID", proxyID, "deploymentID", deploymentID, "error", err)
-		return nil, fmt.Errorf("failed to create deployment: %w", err)
+	if !found && envUUID != nil {
+		scope = models.EnvironmentScope(*envUUID)
 	}
-
-	slog.Info("LLMProxyDeploymentService.DeployLLMProxy: deployment created successfully", "proxyID", proxyID, "deploymentID", deploymentID)
-
-	// Broadcast deployment event to gateway
-	vhost := ""
-	if proxy.Configuration.Vhost != nil {
-		vhost = *proxy.Configuration.Vhost
+	data := proxyIntentDataFor(proxy, proxyID, req.Name)
+	if scope.EnvironmentUUID != nil {
+		data.GatewayID = gatewayUUID.String()
 	}
-
-	deploymentEvent := &models.LLMProxyDeploymentEvent{
-		ProxyID:        proxyID,
-		DeploymentID:   deploymentID.String(),
-		PerformedAt:    *deployment.PerformedAt,
-		Vhost:          vhost,
-		Environment:    "production",
-		GatewayID:      req.GatewayID,
-		OrganizationID: ouID,
-		Status:         string(models.DeploymentStatusDeployed),
+	intent, err := llmIntent(models.KindLLMProxy, ouID, proxy.UUID, scope, models.DeploymentStatusDeployed, data)
+	if err != nil {
+		return nil, err
 	}
-	if err := s.gatewayEventsService.BroadcastLLMProxyDeploymentEvent(req.GatewayID, deploymentEvent); err != nil {
-		slog.Error("LLMProxyDeploymentService.DeployLLMProxy: failed to broadcast deployment event",
-			"proxyID", proxyID, "deploymentID", deploymentID, "gatewayID", req.GatewayID, "error", err)
-		// Don't fail the deployment if broadcast fails - deployment is already persisted
-	} else {
-		slog.Info("LLMProxyDeploymentService.DeployLLMProxy: deployment event broadcast successfully",
-			"proxyID", proxyID, "deploymentID", deploymentID, "gatewayID", req.GatewayID)
+	applied, err := s.deploys.Apply(ctx, nil, &intent, override)
+	if err != nil {
+		slog.Error("LLMProxyDeploymentService.DeployLLMProxy: failed to deploy", "proxyID", proxyID, "gatewayID", req.GatewayID, "error", err)
+		return nil, fmt.Errorf("failed to deploy proxy: %w", err)
 	}
-
+	applied.Publish(ctx)
+	deployment := applied.Deployments[0]
+	slog.Info("LLMProxyDeploymentService.DeployLLMProxy: deployment created", "proxyID", proxyID,
+		"deploymentID", deployment.DeploymentID, "gatewayID", req.GatewayID)
 	return deployment, nil
+}
+
+// proxyIntentDataFor is the kind data of proxy's intents: proxyID is the handle callers address
+// it by, which gateways store it under.
+func proxyIntentDataFor(proxy *models.LLMProxy, proxyID, name string) llmIntentData {
+	handle := proxy.Handle
+	if handle == "" {
+		handle = proxyID
+	}
+	return llmIntentData{Name: name, Handle: handle, Vhost: proxyVhost(proxy)}
+}
+
+// RedeployStale renders the proxy again on a gateway it is placed on, because an input outside
+// its configuration changed, such as its provider's auth header. It returns the attempt's error.
+func (s *LLMProxyDeploymentService) RedeployStale(ctx context.Context, proxy *models.LLMProxy, gatewayID uuid.UUID, ouID, reason string) error {
+	scope, _, err := s.deploys.ScopeFor(ctx, models.KindLLMProxy, ouID, proxy.UUID, gatewayID)
+	if err != nil {
+		return err
+	}
+	return s.deploys.MarkStale(ctx, models.KindLLMProxy, ouID, proxy.UUID, scope, reason)
 }
 
 // UndeployLLMProxyDeployment undeploys a deployment
@@ -285,41 +282,42 @@ func (s *LLMProxyDeploymentService) UndeployLLMProxyDeployment(ctx context.Conte
 		return nil, utils.ErrDeploymentNotActive
 	}
 
-	slog.Info("LLMProxyDeploymentService.UndeployLLMProxyDeployment: setting status to undeploying", "proxyID", proxyID, "deploymentID", deploymentID)
-	eventDeploymentID, performedAt, err := s.deploymentRepo.BeginUndeploy(ctx, proxy.UUID.String(), ouID, gatewayID)
+	applied, err := s.applyAtGateway(ctx, ouID, proxy, proxyID, deployment, models.DeploymentStatusUndeployed, func(intent *models.DeployIntent) (*reconcile.Applied, error) {
+		return s.deploys.Apply(ctx, nil, intent, nil)
+	})
 	if err != nil {
 		slog.Error("LLMProxyDeploymentService.UndeployLLMProxyDeployment: failed to undeploy", "proxyID", proxyID, "deploymentID", deploymentID, "error", err)
 		return nil, fmt.Errorf("failed to undeploy: %w", err)
 	}
+	performedAt, ok := applied.PerformedAt(deployment.GatewayUUID)
+	if !ok {
+		return nil, utils.ErrDeploymentNotActive
+	}
 	markUndeploying(deployment, performedAt)
-
+	applied.Publish(ctx)
 	slog.Info("LLMProxyDeploymentService.UndeployLLMProxyDeployment: undeploy started", "proxyID", proxyID, "deploymentID", deploymentID)
-
-	// Broadcast undeployment event to gateway
-	vhost := ""
-	if proxy.Configuration.Vhost != nil {
-		vhost = *proxy.Configuration.Vhost
-	}
-
-	undeploymentEvent := &models.LLMProxyUndeploymentEvent{
-		ProxyID:        proxyID,
-		DeploymentID:   eventDeploymentID,
-		PerformedAt:    performedAt,
-		Vhost:          vhost,
-		Environment:    "production",
-		GatewayID:      gatewayID,
-		OrganizationID: ouID,
-	}
-	if err := s.gatewayEventsService.BroadcastLLMProxyUndeploymentEvent(gatewayID, undeploymentEvent); err != nil {
-		slog.Error("LLMProxyDeploymentService.UndeployLLMProxyDeployment: failed to broadcast undeployment event",
-			"proxyID", proxyID, "deploymentID", deploymentID, "gatewayID", gatewayID, "error", err)
-		// Don't fail the undeployment if broadcast fails - status is already updated
-	} else {
-		slog.Info("LLMProxyDeploymentService.UndeployLLMProxyDeployment: undeployment event broadcast successfully",
-			"proxyID", proxyID, "deploymentID", deploymentID, "gatewayID", gatewayID)
-	}
-
 	return deployment, nil
+}
+
+// applyAtGateway records the intent placing proxy on deployment's gateway, desired, and carries it
+// out with apply.
+func (s *LLMProxyDeploymentService) applyAtGateway(
+	ctx context.Context, ouID string, proxy *models.LLMProxy, proxyID string, deployment *models.Deployment, desired models.DeploymentStatus,
+	apply func(intent *models.DeployIntent) (*reconcile.Applied, error),
+) (*reconcile.Applied, error) {
+	scope, _, err := s.deploys.ScopeFor(ctx, models.KindLLMProxy, ouID, proxy.UUID, deployment.GatewayUUID)
+	if err != nil {
+		return nil, err
+	}
+	data := proxyIntentDataFor(proxy, proxyID, deployment.Name)
+	if scope.EnvironmentUUID != nil {
+		data.GatewayID = deployment.GatewayUUID.String()
+	}
+	intent, err := llmIntent(models.KindLLMProxy, ouID, proxy.UUID, scope, desired, data)
+	if err != nil {
+		return nil, err
+	}
+	return apply(&intent)
 }
 
 // RestoreLLMProxyDeployment restores a previous deployment
@@ -357,37 +355,16 @@ func (s *LLMProxyDeploymentService) RestoreLLMProxyDeployment(proxyID, deploymen
 		return nil, utils.ErrDeploymentAlreadyDeployed
 	}
 
-	performedAt, err := s.deploymentRepo.SetCurrent(proxy.UUID.String(), ouID, gatewayID, deploymentID, models.DeploymentStatusDeploying)
+	ctx := context.Background()
+	applied, err := s.applyAtGateway(ctx, ouID, proxy, proxyID, deployment, models.DeploymentStatusDeployed, func(intent *models.DeployIntent) (*reconcile.Applied, error) {
+		return s.deploys.Restore(ctx, nil, intent, deployment.GatewayUUID, deployment.DeploymentID)
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to restore deployment: %w", err)
 	}
+	performedAt, _ := applied.PerformedAt(deployment.GatewayUUID)
 	markDeploying(deployment, performedAt)
-
-	// Broadcast deployment event to gateway (restore is treated as a deployment)
-	vhost := ""
-	if proxy.Configuration.Vhost != nil {
-		vhost = *proxy.Configuration.Vhost
-	}
-
-	deploymentEvent := &models.LLMProxyDeploymentEvent{
-		ProxyID:        proxyID,
-		DeploymentID:   deploymentID,
-		PerformedAt:    performedAt,
-		Vhost:          vhost,
-		Environment:    "production",
-		GatewayID:      gatewayID,
-		OrganizationID: ouID,
-		Status:         string(models.DeploymentStatusDeployed),
-	}
-	if err := s.gatewayEventsService.BroadcastLLMProxyDeploymentEvent(gatewayID, deploymentEvent); err != nil {
-		slog.Error("LLMProxyDeploymentService.RestoreLLMProxyDeployment: failed to broadcast deployment event",
-			"proxyID", proxyID, "deploymentID", deploymentID, "gatewayID", gatewayID, "error", err)
-		// Don't fail the restore if broadcast fails - status is already updated
-	} else {
-		slog.Info("LLMProxyDeploymentService.RestoreLLMProxyDeployment: deployment event broadcast successfully",
-			"proxyID", proxyID, "deploymentID", deploymentID, "gatewayID", gatewayID)
-	}
-
+	applied.Publish(ctx)
 	return deployment, nil
 }
 
@@ -419,6 +396,9 @@ func (s *LLMProxyDeploymentService) GetLLMProxyDeployments(proxyID, ouID string,
 	if err != nil {
 		return nil, fmt.Errorf("failed to get deployments: %w", err)
 	}
+	if err := overlayOpenStatuses(context.Background(), s.deploys, models.KindLLMProxy, ouID, proxy.UUID, deployments...); err != nil {
+		return nil, err
+	}
 
 	return deployments, nil
 }
@@ -444,6 +424,9 @@ func (s *LLMProxyDeploymentService) GetLLMProxyDeployment(proxyID, deploymentID,
 	}
 	if deployment == nil {
 		return nil, utils.ErrDeploymentNotFound
+	}
+	if err := overlayOpenStatuses(context.Background(), s.deploys, models.KindLLMProxy, ouID, proxy.UUID, deployment); err != nil {
+		return nil, err
 	}
 
 	return deployment, nil
@@ -521,12 +504,12 @@ func (s *LLMProxyDeploymentService) generateLLMProxyDeploymentYAML(proxy *models
 		if security.APIKey != nil && isBoolTrue(security.APIKey.Enabled) {
 			key := strings.TrimSpace(security.APIKey.Key)
 			if key == "" {
-				return "", fmt.Errorf("invalid api key security configuration: key is required")
+				return "", fmt.Errorf("invalid api key security configuration: key is required: %w", utils.ErrInvalidInput)
 			}
 
 			in := strings.ToLower(strings.TrimSpace(security.APIKey.In))
 			if in != "header" && in != "query" {
-				return "", fmt.Errorf("invalid api key security configuration: in must be 'header' or 'query', got %q", security.APIKey.In)
+				return "", fmt.Errorf("invalid api key security configuration: in must be 'header' or 'query', got %q: %w", security.APIKey.In, utils.ErrInvalidInput)
 			}
 
 			// Add API key auth as a policy
@@ -647,31 +630,13 @@ func (s *LLMProxyDeploymentService) GatewayIDsForProxyDeletion(ctx context.Conte
 // Best-effort by design: a deletion already committed in the database must not be
 // rolled back because one gateway is unreachable.
 func (s *LLMProxyDeploymentService) BroadcastLLMProxyDeletion(ctx context.Context, proxyID, ouID string, gatewayIDs []string) {
-	if s.gatewayEventsService == nil || len(gatewayIDs) == 0 {
+	// proxyID is the proxy handle: an LlmProxy config is stored under its handle, unlike the
+	// LlmProvider, Mcp and RestApi configs, which are stored under a UUID.
+	intent, err := llmIntent(models.KindLLMProxy, ouID, uuid.Nil, models.GatewayScope(uuid.Nil), models.DeploymentStatusUndeployed,
+		llmIntentData{Handle: proxyID})
+	if err != nil {
+		slog.Error("LLMProxyDeploymentService.BroadcastLLMProxyDeletion: failed to build the deletion event", "proxyID", proxyID, "error", err)
 		return
 	}
-
-	// proxyID is the proxy handle, which is what every caller of
-	// LLMProxyService.Delete already passes. The gateway resolves it with
-	// findAPIConfig, and an LlmProxy config is stored under its handle — its config
-	// id and handle are the same string, unlike every other kind.
-	//
-	// Note the asymmetry with BroadcastLLMProviderDeletion: LlmProvider, Mcp and
-	// RestApi configs are all stored under a UUID, so those paths must pass a UUID.
-	// Do not "unify" these two without re-checking what the gateway actually keys
-	// each kind by.
-	event := &models.LLMProxyDeletionEvent{ProxyID: proxyID}
-
-	for _, gatewayID := range gatewayIDs {
-		if strings.TrimSpace(gatewayID) == "" {
-			continue
-		}
-		if err := s.gatewayEventsService.BroadcastLLMProxyDeletionEvent(ctx, gatewayID, event); err != nil {
-			slog.Warn("LLMProxyDeploymentService.BroadcastLLMProxyDeletion: failed to broadcast deletion event",
-				"proxyID", proxyID, "ouID", ouID, "gatewayID", gatewayID, "error", err)
-		} else {
-			slog.Info("LLMProxyDeploymentService.BroadcastLLMProxyDeletion: deletion event sent",
-				"proxyID", proxyID, "ouID", ouID, "gatewayID", gatewayID)
-		}
-	}
+	publishDeletion(ctx, s.gatewayEventsService, s.kind, intent, gatewayIDs)
 }

@@ -82,7 +82,11 @@ func (r *lifecycleRig) proxyService() *LLMProxyDeploymentService {
 		GetByIDFunc:    func(string, string) (*models.LLMProxy, error) { return proxy, nil },
 		GetByIDCtxFunc: func(context.Context, string, string) (*models.LLMProxy, error) { return proxy, nil },
 	}
-	return NewLLMProxyDeploymentService(r.deployments, proxies, nil, nil, NewGatewayEventsService(r.hub))
+	events := NewGatewayEventsService(r.hub)
+	kind := NewLLMProxyKind(proxies, nil, nil, r.deployments, nil)
+	core, intents := newTestDeployCore(r.deployments, events, kind)
+	r.intents = intents
+	return NewLLMProxyDeploymentService(r.deployments, proxies, nil, nil, events, core, kind)
 }
 
 // withDeployment makes the deployment's status row read as status with the given desired state.
@@ -281,13 +285,13 @@ func TestLLMProxyUndeployCarriesTheDeploymentID(t *testing.T) {
 func TestLLMProxyRestoreStartsDeploying(t *testing.T) {
 	r := newLifecycleRig()
 	r.withDeployment(models.DeploymentStatusFailed, models.DeploymentStatusDeployed)
-	r.deployments.SetCurrentFunc = func(string, string, string, string, models.DeploymentStatus) (time.Time, error) {
+	r.deployments.SetCurrentCtxFunc = func(context.Context, string, string, string, string, models.DeploymentStatus) (time.Time, error) {
 		return time.Now(), nil
 	}
 
 	got, err := r.proxyService().RestoreLLMProxyDeployment(r.handle, r.deploymentID.String(), r.gatewayID.String(), r.ouID)
 	require.NoError(t, err)
-	assert.Equal(t, models.DeploymentStatusDeploying, r.deployments.SetCurrentCalls()[0].Status)
+	assert.Equal(t, models.DeploymentStatusDeploying, r.deployments.SetCurrentCtxCalls()[0].Status)
 	assert.Equal(t, models.DeploymentStatusDeploying, *got.Status)
 }
 
@@ -297,9 +301,6 @@ func TestLLMEventsCarryTheRowPerformedAt(t *testing.T) {
 	restores := func(r *lifecycleRig) {
 		r.withDeployment(models.DeploymentStatusFailed, models.DeploymentStatusDeployed)
 		r.deployments.SetCurrentCtxFunc = func(context.Context, string, string, string, string, models.DeploymentStatus) (time.Time, error) {
-			return r.performedAt, nil
-		}
-		r.deployments.SetCurrentFunc = func(string, string, string, string, models.DeploymentStatus) (time.Time, error) {
 			return r.performedAt, nil
 		}
 	}

@@ -40,7 +40,7 @@ func TestResolveGatewayForProxyAnchorsOnThePlacedDeployment(t *testing.T) {
 	undeployedFrom := newGateway(t, models.GatewayRoleEgress, true)
 	placedOn := newGateway(t, models.GatewayRoleEgress, true)
 	svc := &agentConfigurationService{
-		llmProxyDeploymentService: &LLMProxyDeploymentService{
+		llmProxyDeploymentService: (&LLMProxyDeploymentService{
 			proxyRepo: &repomocks.LLMProxyRepositoryMock{
 				GetByIDFunc: func(string, string) (*models.LLMProxy, error) { return &models.LLMProxy{UUID: uuid.New()}, nil },
 			},
@@ -53,7 +53,7 @@ func TestResolveGatewayForProxyAnchorsOnThePlacedDeployment(t *testing.T) {
 					}, nil
 				},
 			},
-		},
+		}).withTestCore(),
 		gatewayRepo: gatewayFixtureRepo(t, envUUID.String(), []*models.Gateway{undeployedFrom, placedOn}),
 	}
 

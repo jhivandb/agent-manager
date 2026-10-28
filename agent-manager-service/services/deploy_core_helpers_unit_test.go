@@ -260,3 +260,15 @@ func (s *LLMProviderDeploymentService) withTestCore() *LLMProviderDeploymentServ
 	s.deploys, _ = newTestDeployCore(s.deploymentRepo.(*repomocks.DeploymentRepositoryMock), s.gatewayEventsService, s.kind)
 	return s
 }
+
+// withTestCore gives a proxy deployment service built field by field its reconcile core, over its
+// own deployments mock or, without one, an empty one.
+func (s *LLMProxyDeploymentService) withTestCore() *LLMProxyDeploymentService {
+	deployments, _ := s.deploymentRepo.(*repomocks.DeploymentRepositoryMock)
+	if deployments == nil {
+		deployments = &repomocks.DeploymentRepositoryMock{}
+	}
+	s.kind = NewLLMProxyKind(s.proxyRepo, s.providerRepo, nil, deployments, s.gatewayRepo)
+	s.deploys, _ = newTestDeployCore(deployments, s.gatewayEventsService, s.kind)
+	return s
+}

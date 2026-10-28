@@ -258,13 +258,13 @@ func TestAnchoring_MonitorCreateAgainstDeployedProvider(t *testing.T) {
 		mgr := &monitorManagerService{
 			llmProvisioner: &LLMProxyProvisioner{
 				gatewayRepo: gatewayFixtureRepo(t, env.String(), []*models.Gateway{both, egress}),
-				llmProxyDeploymentService: &LLMProxyDeploymentService{
+				llmProxyDeploymentService: (&LLMProxyDeploymentService{
 					deploymentRepo: &repomocks.DeploymentRepositoryMock{
 						GetDeployedGatewaysByProviderFunc: func(uuid.UUID, string) ([]string, error) {
 							return []string{egress.UUID.String()}, nil
 						},
 					},
-				},
+				}).withTestCore(),
 			},
 		}
 		gw, err := mgr.resolveMonitorGateway(context.Background(), "org", env, providerUUID.String())
@@ -276,13 +276,13 @@ func TestAnchoring_MonitorCreateAgainstDeployedProvider(t *testing.T) {
 		mgr := &monitorManagerService{
 			llmProvisioner: &LLMProxyProvisioner{
 				gatewayRepo: gatewayFixtureRepo(t, env.String(), []*models.Gateway{both, egress}),
-				llmProxyDeploymentService: &LLMProxyDeploymentService{
+				llmProxyDeploymentService: (&LLMProxyDeploymentService{
 					deploymentRepo: &repomocks.DeploymentRepositoryMock{
 						GetDeployedGatewaysByProviderFunc: func(uuid.UUID, string) ([]string, error) {
 							return nil, nil
 						},
 					},
-				},
+				}).withTestCore(),
 			},
 		}
 		_, err := mgr.resolveMonitorGateway(context.Background(), "org", env, providerUUID.String())

@@ -226,7 +226,7 @@ func callSystemManagedLLMURL(t *testing.T, gateway *models.Gateway, contextPath 
 				}, nil
 			},
 		},
-		llmProxyDeploymentService: &LLMProxyDeploymentService{
+		llmProxyDeploymentService: (&LLMProxyDeploymentService{
 			proxyRepo: &repomocks.LLMProxyRepositoryMock{
 				GetByIDFunc: func(gotProxyID, gotOuID string) (*models.LLMProxy, error) {
 					require.Equal(t, "acme-openai-proxy", gotProxyID)
@@ -241,7 +241,7 @@ func callSystemManagedLLMURL(t *testing.T, gateway *models.Gateway, contextPath 
 					return []*models.Deployment{{GatewayUUID: gateway.UUID}}, nil
 				},
 			},
-		},
+		}).withTestCore(),
 		gatewayRepo: gatewayFixtureRepo(t, envUUID.String(), []*models.Gateway{gateway}),
 	}
 

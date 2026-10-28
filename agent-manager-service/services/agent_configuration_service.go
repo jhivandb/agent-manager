@@ -1275,7 +1275,7 @@ func (s *agentConfigurationService) createLLMConfig(ctx context.Context, ouID, p
 		// Update the rollback entry with the proxy handle now that it was created.
 		rollbackResources[rbIdx].proxyHandle = proxy.Handle
 
-		deployment, err := s.llmProxyDeploymentService.DeployLLMProxy(proxy.Handle, &models.DeployAPIRequest{
+		deployment, err := s.llmProxyDeploymentService.DeployLLMProxyInEnvironment(ctx, proxy.Handle, envUUID, &models.DeployAPIRequest{
 			Name:      fmt.Sprintf("%s-deployment", scopedID),
 			Base:      "current",
 			GatewayID: gateway.UUID.String(),
@@ -1953,7 +1953,7 @@ func (s *agentConfigurationService) processEnvProviderChange(
 	}
 	rbRes.proxyHandle = proxy.Handle
 
-	deployment, err := s.llmProxyDeploymentService.DeployLLMProxy(proxy.Handle, &models.DeployAPIRequest{
+	deployment, err := s.llmProxyDeploymentService.DeployLLMProxyInEnvironment(ctx, proxy.Handle, envUUID, &models.DeployAPIRequest{
 		Name:      fmt.Sprintf("%s-deployment", scopedID),
 		Base:      "current",
 		GatewayID: gateway.UUID.String(),
@@ -2150,7 +2150,7 @@ func (s *agentConfigurationService) processEnvProxyUpdate(
 
 	deployBase := "current"
 	scopedID := scopedProxyIdentifier(config.ProjectName, config.AgentID, config.Name, env.Name)
-	newDeployment, err := s.llmProxyDeploymentService.DeployLLMProxy(updatedProxy.Handle, &models.DeployAPIRequest{
+	newDeployment, err := s.llmProxyDeploymentService.DeployLLMProxyInEnvironment(ctx, updatedProxy.Handle, envUUID, &models.DeployAPIRequest{
 		Name:      fmt.Sprintf("%s-deployment", scopedID),
 		Base:      deployBase,
 		GatewayID: gateway.UUID.String(),
@@ -2248,7 +2248,7 @@ func (s *agentConfigurationService) processNewEnv(
 	}
 	rbRes.proxyHandle = proxy.Handle
 
-	deployment, err := s.llmProxyDeploymentService.DeployLLMProxy(proxy.Handle, &models.DeployAPIRequest{
+	deployment, err := s.llmProxyDeploymentService.DeployLLMProxyInEnvironment(ctx, proxy.Handle, envUUID, &models.DeployAPIRequest{
 		Name:      fmt.Sprintf("%s-deployment", scopedID),
 		Base:      "current",
 		GatewayID: gateway.UUID.String(),
