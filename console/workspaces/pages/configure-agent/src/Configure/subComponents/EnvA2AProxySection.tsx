@@ -37,9 +37,11 @@ const ProxySecurityDrawer = lazy(() =>
 );
 
 const PROXY_CHIP: Record<A2AProxyStatus, { label: string; color: "warning" | "success" | "error" }> = {
-  pending: { label: "Publishing to gateway", color: "warning" },
-  published: { label: "Routed through gateway", color: "success" },
-  failed: { label: "Gateway publish failed", color: "error" },
+  DEPLOYING: { label: "Publishing to gateway", color: "warning" },
+  DEPLOYED: { label: "Routed through gateway", color: "success" },
+  UNDEPLOYING: { label: "Removing from gateway", color: "warning" },
+  UNDEPLOYED: { label: "Not on gateway", color: "warning" },
+  FAILED: { label: "Gateway publish failed", color: "error" },
 };
 
 interface EnvA2AProxySectionProps {
@@ -161,8 +163,11 @@ export function EnvA2AProxySection({
           </Button>
         )}
       </Box>
-      {proxy?.status === "published" && <GatewayUrl url={proxy.gatewayUrl} />}
-      {proxy?.status === "failed" && (
+      {proxy?.status === "DEPLOYED" && <GatewayUrl url={proxy.gatewayUrl} />}
+      {proxy?.status === "DEPLOYING" && proxy.statusReason && (
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>{proxy.statusReason}</Typography>
+      )}
+      {proxy?.status === "FAILED" && (
         <Alert
           severity="error"
           sx={{ mb: 1 }}
@@ -170,7 +175,7 @@ export function EnvA2AProxySection({
             <Button size="small" color="inherit" disabled={isRepublishing} onClick={() => republish(params)}>Retry</Button>
           }
         >
-          {proxy.lastError || "The gateway publish failed."}
+          {proxy.statusReason || "The gateway publish failed."}
         </Alert>
       )}
       <A2AProxyFields

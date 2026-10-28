@@ -20,14 +20,18 @@ import { describe, expect, it } from "vitest";
 import { isNotFoundError, nullIfNotFound, pendingRefetchInterval, POLL_INTERVAL } from "./utils";
 
 describe("pendingRefetchInterval", () => {
-  it("polls while pending", () => {
+  it("polls while a card fetch is pending or a gateway deployment awaits its ack", () => {
     expect(pendingRefetchInterval({ status: "pending" })).toBe(POLL_INTERVAL);
+    expect(pendingRefetchInterval({ status: "DEPLOYING" })).toBe(POLL_INTERVAL);
+    expect(pendingRefetchInterval({ status: "UNDEPLOYING" })).toBe(POLL_INTERVAL);
   });
 
   it("stops on any other status, or with no data", () => {
     expect(pendingRefetchInterval({ status: "fetched" })).toBe(false);
-    expect(pendingRefetchInterval({ status: "published" })).toBe(false);
     expect(pendingRefetchInterval({ status: "failed" })).toBe(false);
+    expect(pendingRefetchInterval({ status: "DEPLOYED" })).toBe(false);
+    expect(pendingRefetchInterval({ status: "UNDEPLOYED" })).toBe(false);
+    expect(pendingRefetchInterval({ status: "FAILED" })).toBe(false);
     expect(pendingRefetchInterval(undefined)).toBe(false);
     expect(pendingRefetchInterval(null)).toBe(false);
   });

@@ -66,7 +66,7 @@ export function A2AAgentCardPanel({
   const proxySaving = useIsSavingA2AProxy(params);
   // A failed background refetch keeps the last known routing on screen.
   const proxyKnown = proxyData !== undefined;
-  const proxyFailed = proxy?.status === "failed";
+  const proxyFailed = proxy?.status === "FAILED";
   const { data, isLoading, isError } = useGetAgentCard(params, { poll: !proxyFailed });
   const { mutate: refresh, isPending: isRefreshing } = useRefreshAgentCard();
   const { mutate: removeSource, isPending: isRemoving } = useDeleteAgentCardSource();

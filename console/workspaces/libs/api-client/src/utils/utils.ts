@@ -38,11 +38,14 @@ export const OBS_SERVICE_BASE = '/api';
 export const POLL_INTERVAL = 5000;
 export const SLOW_POLL_INTERVAL = 15000;
 
-/** Re-poll while pending; stop on any other status or no data. */
+/** Statuses that settle on their own: a card fetch in flight, or a deployment awaiting its ack. */
+const IN_PROGRESS_STATUSES = new Set(['pending', 'DEPLOYING', 'UNDEPLOYING']);
+
+/** Re-poll while in progress; stop on any other status or no data. */
 export function pendingRefetchInterval(
     data: { status?: string } | null | undefined,
 ): number | false {
-    return data?.status === 'pending' ? POLL_INTERVAL : false;
+    return data?.status && IN_PROGRESS_STATUSES.has(data.status) ? POLL_INTERVAL : false;
 }
 
 export const isNotFoundError = (error: unknown): boolean =>

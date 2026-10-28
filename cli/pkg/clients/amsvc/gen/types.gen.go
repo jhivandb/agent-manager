@@ -14,19 +14,25 @@ import (
 
 // Defines values for A2AProxyResponseStatus.
 const (
-	A2AProxyResponseStatusFailed    A2AProxyResponseStatus = "failed"
-	A2AProxyResponseStatusPending   A2AProxyResponseStatus = "pending"
-	A2AProxyResponseStatusPublished A2AProxyResponseStatus = "published"
+	A2AProxyResponseStatusDEPLOYED    A2AProxyResponseStatus = "DEPLOYED"
+	A2AProxyResponseStatusDEPLOYING   A2AProxyResponseStatus = "DEPLOYING"
+	A2AProxyResponseStatusFAILED      A2AProxyResponseStatus = "FAILED"
+	A2AProxyResponseStatusUNDEPLOYED  A2AProxyResponseStatus = "UNDEPLOYED"
+	A2AProxyResponseStatusUNDEPLOYING A2AProxyResponseStatus = "UNDEPLOYING"
 )
 
 // Valid indicates whether the value is a known member of the A2AProxyResponseStatus enum.
 func (e A2AProxyResponseStatus) Valid() bool {
 	switch e {
-	case A2AProxyResponseStatusFailed:
+	case A2AProxyResponseStatusDEPLOYED:
 		return true
-	case A2AProxyResponseStatusPending:
+	case A2AProxyResponseStatusDEPLOYING:
 		return true
-	case A2AProxyResponseStatusPublished:
+	case A2AProxyResponseStatusFAILED:
+		return true
+	case A2AProxyResponseStatusUNDEPLOYED:
+		return true
+	case A2AProxyResponseStatusUNDEPLOYING:
 		return true
 	default:
 		return false
@@ -983,22 +989,22 @@ func (e MonitorResponseType) Valid() bool {
 
 // Defines values for MonitorRunResponseStatus.
 const (
-	MonitorRunResponseStatusFailed  MonitorRunResponseStatus = "failed"
-	MonitorRunResponseStatusPending MonitorRunResponseStatus = "pending"
-	MonitorRunResponseStatusRunning MonitorRunResponseStatus = "running"
-	MonitorRunResponseStatusSuccess MonitorRunResponseStatus = "success"
+	Failed  MonitorRunResponseStatus = "failed"
+	Pending MonitorRunResponseStatus = "pending"
+	Running MonitorRunResponseStatus = "running"
+	Success MonitorRunResponseStatus = "success"
 )
 
 // Valid indicates whether the value is a known member of the MonitorRunResponseStatus enum.
 func (e MonitorRunResponseStatus) Valid() bool {
 	switch e {
-	case MonitorRunResponseStatusFailed:
+	case Failed:
 		return true
-	case MonitorRunResponseStatusPending:
+	case Pending:
 		return true
-	case MonitorRunResponseStatusRunning:
+	case Running:
 		return true
-	case MonitorRunResponseStatusSuccess:
+	case Success:
 		return true
 	default:
 		return false
@@ -1172,28 +1178,28 @@ func (e ListGatewaysParamsStatus) Valid() bool {
 
 // Defines values for GetLLMProviderDeploymentsParamsStatus.
 const (
-	GetLLMProviderDeploymentsParamsStatusARCHIVED    GetLLMProviderDeploymentsParamsStatus = "ARCHIVED"
-	GetLLMProviderDeploymentsParamsStatusDEPLOYED    GetLLMProviderDeploymentsParamsStatus = "DEPLOYED"
-	GetLLMProviderDeploymentsParamsStatusDEPLOYING   GetLLMProviderDeploymentsParamsStatus = "DEPLOYING"
-	GetLLMProviderDeploymentsParamsStatusFAILED      GetLLMProviderDeploymentsParamsStatus = "FAILED"
-	GetLLMProviderDeploymentsParamsStatusUNDEPLOYED  GetLLMProviderDeploymentsParamsStatus = "UNDEPLOYED"
-	GetLLMProviderDeploymentsParamsStatusUNDEPLOYING GetLLMProviderDeploymentsParamsStatus = "UNDEPLOYING"
+	ARCHIVED    GetLLMProviderDeploymentsParamsStatus = "ARCHIVED"
+	DEPLOYED    GetLLMProviderDeploymentsParamsStatus = "DEPLOYED"
+	DEPLOYING   GetLLMProviderDeploymentsParamsStatus = "DEPLOYING"
+	FAILED      GetLLMProviderDeploymentsParamsStatus = "FAILED"
+	UNDEPLOYED  GetLLMProviderDeploymentsParamsStatus = "UNDEPLOYED"
+	UNDEPLOYING GetLLMProviderDeploymentsParamsStatus = "UNDEPLOYING"
 )
 
 // Valid indicates whether the value is a known member of the GetLLMProviderDeploymentsParamsStatus enum.
 func (e GetLLMProviderDeploymentsParamsStatus) Valid() bool {
 	switch e {
-	case GetLLMProviderDeploymentsParamsStatusARCHIVED:
+	case ARCHIVED:
 		return true
-	case GetLLMProviderDeploymentsParamsStatusDEPLOYED:
+	case DEPLOYED:
 		return true
-	case GetLLMProviderDeploymentsParamsStatusDEPLOYING:
+	case DEPLOYING:
 		return true
-	case GetLLMProviderDeploymentsParamsStatusFAILED:
+	case FAILED:
 		return true
-	case GetLLMProviderDeploymentsParamsStatusUNDEPLOYED:
+	case UNDEPLOYED:
 		return true
-	case GetLLMProviderDeploymentsParamsStatusUNDEPLOYING:
+	case UNDEPLOYING:
 		return true
 	default:
 		return false
@@ -1262,17 +1268,17 @@ type A2AProxyResponse struct {
 	// GatewayUrl The agent's base URL on the environment's ingress gateway, where its card is served at /.well-known/agent-card.json once published. Empty while no ingress gateway is mapped to the environment.
 	GatewayUrl string `json:"gatewayUrl"`
 
-	// LastError Why the last publish attempt failed; empty after a success.
-	LastError string `json:"lastError"`
-
-	// Status The gateway publication's state.
+	// Status The gateway deployment's status. DEPLOYING while the agent waits for its gateway or the gateway has not acknowledged it yet, DEPLOYED once the gateway serves it, FAILED when it could not be deployed.
 	Status A2AProxyResponseStatus `json:"status"`
+
+	// StatusReason What a DEPLOYING deployment waits for, or why a FAILED one failed; empty otherwise.
+	StatusReason string `json:"statusReason"`
 
 	// UpstreamAuthHeader The header the gateway adds upstream; empty when none. A non-empty header means a secret is stored. The secret itself is never returned.
 	UpstreamAuthHeader string `json:"upstreamAuthHeader"`
 }
 
-// A2AProxyResponseStatus The gateway publication's state.
+// A2AProxyResponseStatus The gateway deployment's status. DEPLOYING while the agent waits for its gateway or the gateway has not acknowledged it yet, DEPLOYED once the gateway serves it, FAILED when it could not be deployed.
 type A2AProxyResponseStatus string
 
 // A2AProxyUpstreamAuth A static header the gateway adds to every call to the agent, card fetch included.

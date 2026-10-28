@@ -36,7 +36,6 @@ import (
 const (
 	a2aSubType         = "a2a-agent"
 	envNotFoundCode    = "ENVIRONMENT_NOT_FOUND"
-	proxyStatusFailed  = "failed"
 	notFetchedYetLabel = "(not fetched yet)"
 )
 
@@ -232,8 +231,12 @@ func printRouting(w io.Writer, proxy *amsvc.A2AProxyResponse, unknown bool) {
 	} else {
 		fmt.Fprintf(w, "Gateway URL: %s\n", proxy.GatewayUrl)
 	}
-	if string(proxy.Status) == proxyStatusFailed {
-		fmt.Fprintf(w, "Publish error: %s\n", proxy.LastError)
+	switch {
+	case proxy.StatusReason == "":
+	case proxy.Status == amsvc.A2AProxyResponseStatusFAILED:
+		fmt.Fprintf(w, "Publish error: %s\n", proxy.StatusReason)
+	default:
+		fmt.Fprintf(w, "Publish status: %s\n", proxy.StatusReason)
 	}
 }
 

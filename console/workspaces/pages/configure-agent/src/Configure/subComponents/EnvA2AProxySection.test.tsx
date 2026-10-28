@@ -44,7 +44,7 @@ import { EnvA2AProxySection } from "./EnvA2AProxySection";
 const params = { orgName: "org", projName: "proj", agentName: "agent", envId: "dev" };
 const cardUrl = "https://agent.example.com/.well-known/agent-card.json";
 const gatewayUrl = "https://gw.example/org/proj/agent";
-const stored = { status: "published" as const, lastError: "", gatewayUrl, upstreamAuthHeader: "X-Key" };
+const stored = { status: "DEPLOYED" as const, statusReason: "", gatewayUrl, upstreamAuthHeader: "X-Key" };
 const save = () => fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
 beforeEach(() => vi.clearAllMocks());
@@ -126,7 +126,7 @@ describe("EnvA2AProxySection", () => {
   });
 
   it("shows a failed publish with its reason and offers a retry", () => {
-    render(<EnvA2AProxySection params={params} cardUrl={cardUrl} proxy={{ ...stored, status: "failed", lastError: "no JSONRPC interface" }} />);
+    render(<EnvA2AProxySection params={params} cardUrl={cardUrl} proxy={{ ...stored, status: "FAILED", statusReason: "no JSONRPC interface" }} />);
     expect(screen.getByText("Gateway publish failed")).toBeInTheDocument();
     expect(screen.getByText(/no JSONRPC interface/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
@@ -156,8 +156,11 @@ describe("EnvA2AProxySection", () => {
     expect(screen.queryByRole("button", { name: "Copy gateway URL" })).not.toBeInTheDocument();
   });
 
-  it("hides the gateway URL until the proxy is published", () => {
-    render(<EnvA2AProxySection params={params} cardUrl={cardUrl} proxy={{ ...stored, status: "pending" }} />);
+  it("hides the gateway URL until the gateway acks the proxy, showing what it waits for", () => {
+    render(<EnvA2AProxySection params={params} cardUrl={cardUrl}
+      proxy={{ ...stored, status: "DEPLOYING", statusReason: "could not reach the agent card URL" }} />);
+    expect(screen.getByText("Publishing to gateway")).toBeInTheDocument();
+    expect(screen.getByText("could not reach the agent card URL")).toBeInTheDocument();
     expect(screen.queryByText(gatewayUrl)).not.toBeInTheDocument();
     expect(screen.queryByText(/No ingress gateway is mapped/)).not.toBeInTheDocument();
   });
