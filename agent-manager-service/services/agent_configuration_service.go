@@ -2142,7 +2142,7 @@ func (s *agentConfigurationService) processEnvProxyUpdate(
 
 	var existingDeployment *models.Deployment
 	for _, dep := range deployments {
-		if dep.Status != nil && *dep.Status == models.DeploymentStatusDeployed {
+		if dep.IsPlaced() {
 			existingDeployment = dep
 			break
 		}
@@ -3592,10 +3592,10 @@ func (s *agentConfigurationService) Update(ctx context.Context, configUUID uuid.
 			cleanupErrors++
 		} else {
 			for _, dep := range deployments {
-				// The replaced proxy's deployment is still DEPLOYED — DeleteLLMProxyDeployment
+				// The replaced proxy's deployment is still placed — DeleteLLMProxyDeployment
 				// rejects that (ErrDeploymentIsDeployed). It must be undeployed first, same as
 				// the whole-config deletion path (deleteLLMConfig) already does.
-				if dep.Status == nil || *dep.Status != models.DeploymentStatusDeployed {
+				if !dep.IsPlaced() {
 					continue
 				}
 				if _, err := s.llmProxyDeploymentService.UndeployLLMProxyDeployment(ctx, proxyHandle, dep.DeploymentID.String(), dep.GatewayUUID.String(), ouID); err != nil {
@@ -4310,19 +4310,21 @@ func (s *agentConfigurationService) resolveGatewayForProvider(
 	return resolveEgressGatewayForArtifact(s.gatewayRepo, ouID, envUUID, deployed, nil)
 }
 
-// resolveGatewayForProxy returns the gateway the LLM proxy is actually deployed to.
+// resolveGatewayForProxy returns the gateway the LLM proxy is placed on: its URL is handed out
+// as soon as it is deployed, before the gateway acks it.
 func (s *agentConfigurationService) resolveGatewayForProxy(
 	ctx context.Context, proxyHandle, ouID string, envUUID uuid.UUID,
 ) (*models.Gateway, error) {
 	_ = ctx
-	deployedStatus := string(models.DeploymentStatusDeployed)
 	var deployed []string
-	deployments, err := s.llmProxyDeploymentService.GetLLMProxyDeployments(proxyHandle, ouID, nil, &deployedStatus)
+	deployments, err := s.llmProxyDeploymentService.GetLLMProxyDeployments(proxyHandle, ouID, nil, nil)
 	if err != nil && !errors.Is(err, utils.ErrLLMProxyNotFound) {
 		return nil, fmt.Errorf("failed to list deployments for proxy %s: %w", proxyHandle, err)
 	}
 	for _, dep := range deployments {
-		deployed = append(deployed, dep.GatewayUUID.String())
+		if dep.IsPlaced() {
+			deployed = append(deployed, dep.GatewayUUID.String())
+		}
 	}
 	return resolveEgressGatewayForArtifact(s.gatewayRepo, ouID, envUUID, deployed, nil)
 }

@@ -802,10 +802,10 @@ func (s *LLMProviderService) Delete(ctx context.Context, providerID, ouID string
 				continue
 			}
 
-			// Find the deployed deployment and undeploy it
+			// Find the placed deployment and undeploy it
 			found := false
 			for _, deployment := range deployments {
-				if deployment.Status != nil && *deployment.Status == models.DeploymentStatusDeployed {
+				if deployment.IsPlaced() {
 					found = true
 					if _, err := deploymentService.UndeployLLMProviderDeployment(providerID, deployment.DeploymentID.String(), gatewayID, ouID); err != nil {
 						slog.Error("LLMProviderService.Delete: failed to undeploy from gateway", "ouID", ouID, "providerID", providerID, "gatewayID", gatewayID, "deploymentID", deployment.DeploymentID, "error", err)
@@ -1090,10 +1090,10 @@ func (s *LLMProviderService) UpdateAndSync(ctx context.Context, providerID, ouID
 				continue
 			}
 
-			// Find the deployed deployment and undeploy it
+			// Find the placed deployment and undeploy it
 			found := false
 			for _, deployment := range deployments {
-				if deployment.Status != nil && *deployment.Status == models.DeploymentStatusDeployed {
+				if deployment.IsPlaced() {
 					found = true
 					if _, err := deploymentService.UndeployLLMProviderDeployment(providerID, deployment.DeploymentID.String(), gatewayID, ouID); err != nil {
 						slog.Error("LLMProviderService.UpdateAndSync: failed to undeploy from removed gateway", "providerID", providerID, "gatewayID", gatewayID, "deploymentID", deployment.DeploymentID, "error", err)
@@ -1492,7 +1492,9 @@ func (s *LLMProviderService) syncProxyAuthHeader(
 	var stragglers []error
 	var straggleGateways []string
 	for _, deployment := range deployments {
-		if deployment.Status == nil || *deployment.Status != models.DeploymentStatusDeployed {
+		// Every gateway the proxy is placed on takes the new headers, including one still
+		// deploying or one that failed, so a redeploy there doesn't revert them.
+		if !deployment.IsPlaced() {
 			continue
 		}
 		if _, err := proxyDeploymentService.DeployLLMProxy(proxy.Handle, &models.DeployAPIRequest{

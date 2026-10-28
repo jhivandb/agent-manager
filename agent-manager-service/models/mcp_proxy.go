@@ -147,9 +147,27 @@ type MCPEndpointConfig struct {
 
 // MCP proxy per-environment deployment status values reported on read.
 const (
-	MCPDeploymentStatusDeployed   = "Deployed"
-	MCPDeploymentStatusUndeployed = "Undeployed"
+	MCPDeploymentStatusDeploying   = "Deploying"
+	MCPDeploymentStatusDeployed    = "Deployed"
+	MCPDeploymentStatusUndeploying = "Undeploying"
+	MCPDeploymentStatusUndeployed  = "Undeployed"
+	MCPDeploymentStatusFailed      = "Failed"
 )
+
+// MCPDeploymentStatusOf reports a placed deployment's status in the MCP endpoint's terms.
+func MCPDeploymentStatusOf(status DeploymentStatus) string {
+	switch status {
+	case DeploymentStatusDeploying:
+		return MCPDeploymentStatusDeploying
+	case DeploymentStatusDeployed:
+		return MCPDeploymentStatusDeployed
+	case DeploymentStatusUndeploying:
+		return MCPDeploymentStatusUndeploying
+	case DeploymentStatusFailed:
+		return MCPDeploymentStatusFailed
+	}
+	return MCPDeploymentStatusUndeployed
+}
 
 // MCPPolicy represents a policy attached to an MCP proxy.
 type MCPPolicy struct {
@@ -199,7 +217,7 @@ type MCPProxyEndpointDTO struct {
 }
 
 // MCPEndpointEnvironmentDTO is one endpoint→environment binding. EnvironmentUUID is
-// the target environment; DeploymentStatus is response-only (Deployed/Undeployed).
+// the target environment; DeploymentStatus is response-only (Deploying, Deployed, Failed, ...).
 // GatewayID is the caller's explicit egress gateway choice on write (optional: inferred
 // when the environment has exactly one egress gateway, required when it has more than
 // one; placement is fixed once deployed) and is echoed back on read as the gateway the

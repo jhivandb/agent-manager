@@ -341,7 +341,8 @@ func (r *CatalogRepo) populateDeploymentsInBatch(entries []models.CatalogLLMProv
 
 	var deploymentRows []DeploymentRow
 
-	// Fetch all deployments for these providers in ONE query
+	// Fetch all deployments for these providers in ONE query. The catalog lists only what a
+	// gateway acked serving (DEPLOYED), not what is still on its way there.
 	query := r.db.
 		Table("deployment_status ds").
 		Select(`
@@ -395,26 +396,10 @@ func (r *CatalogRepo) populateDeploymentsInBatch(entries []models.CatalogLLMProv
 				continue
 			}
 
-			var status models.DeploymentStatus
-			switch row.DeploymentStatus {
-			case string(models.DeploymentStatusDeployed):
-				status = models.DeploymentStatusDeployed
-			case string(models.DeploymentStatusUndeployed):
-				status = models.DeploymentStatusUndeployed
-			case string(models.DeploymentStatusArchived):
-				status = models.DeploymentStatusArchived
-			default:
-				// Log unknown deployment status
-				r.db.Logger.Warn(context.Background(),
-					"Unknown deployment status encountered, defaulting to deployed (status=%s, artifactUUID=%s, gatewayUUID=%s)",
-					row.DeploymentStatus, row.ArtifactUUID, row.GatewayUUID)
-				status = models.DeploymentStatusDeployed
-			}
-
 			deployment := models.DeploymentSummary{
 				GatewayID:   gatewayUUID,
 				GatewayName: row.GatewayName,
-				Status:      status,
+				Status:      models.DeploymentStatus(row.DeploymentStatus),
 				DeployedAt:  row.DeploymentUpdatedAt,
 				VHost:       row.GatewayVHost,
 			}

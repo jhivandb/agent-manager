@@ -412,3 +412,54 @@ func TestDeploymentFailStaleTransitional(t *testing.T) {
 	assert.Equal(t, models.DeploymentStatusDeploying, fresh.row(t).Status)
 	assert.Equal(t, models.DeploymentStatusDeployed, settled.row(t).Status)
 }
+
+// The catalog lists only deployments a gateway acked: a provider still deploying, or one that
+// failed, is not yet served there.
+func TestCatalogListsOnlyLiveDeployments(t *testing.T) {
+	gdb := db.GetDB()
+	ouID := "ou-" + uuid.New().String()[:8]
+	envUUID, gatewayID := uuid.New(), uuid.New()
+	provider := &models.LLMProvider{
+		TemplateHandle: "openai",
+		Configuration: models.LLMProviderConfig{
+			Name: "Catalog Live", Handle: "catalog-live-" + gatewayID.String()[:8], Version: "v1.0", Template: "openai",
+		},
+		Status: "CREATED",
+	}
+	require.NoError(t, NewLLMProviderRepo(gdb).Create(gdb, provider, provider.Configuration.Handle,
+		provider.Configuration.Name, provider.Configuration.Version, ouID))
+	name := "cat-gw-" + gatewayID.String()[:8]
+	require.NoError(t, gdb.Exec(
+		`INSERT INTO gateways (uuid, name, display_name, vhost, gateway_functionality_type, ou_id, is_active)
+		 VALUES (?, ?, ?, 'gw.example', ?, ?, TRUE)`, gatewayID, name, name, models.GatewayRoleEgress, ouID).Error)
+	require.NoError(t, gdb.Exec(`INSERT INTO gateway_environment_mappings (gateway_uuid, environment_uuid) VALUES (?, ?)`,
+		gatewayID, envUUID).Error)
+	require.NoError(t, gdb.Exec(`UPDATE artifacts SET in_catalog = TRUE WHERE uuid = ?`, provider.UUID).Error)
+	t.Cleanup(func() {
+		gdb.Exec(`DELETE FROM llm_providers WHERE uuid = ?`, provider.UUID)
+		gdb.Exec(`DELETE FROM artifacts WHERE uuid = ?`, provider.UUID)
+		gdb.Exec(`DELETE FROM gateways WHERE uuid = ?`, gatewayID)
+	})
+	deployments := NewDeploymentRepo(gdb)
+	d := &models.Deployment{Name: "dep", ArtifactUUID: provider.UUID, OUID: ouID, GatewayUUID: gatewayID, Content: []byte("kind: LlmProvider\n")}
+	require.NoError(t, deployments.CreateWithLimitEnforcement(d, 10))
+
+	list := func() []models.CatalogLLMProviderEntry {
+		entries, _, err := NewCatalogRepo(gdb).ListLLMProviders(&models.CatalogListFilters{
+			OrganizationName: ouID, Kind: models.KindLLMProvider, EnvironmentUUID: envUUID.String(), Limit: 10,
+		})
+		require.NoError(t, err)
+		return entries
+	}
+	assert.Empty(t, list(), "still DEPLOYING")
+
+	applied, err := deployments.ApplyAck(context.Background(), gatewayID.String(), models.DeploymentAck{
+		DeploymentID: d.DeploymentID.String(), Action: models.DeploymentAckActionDeploy, Success: true,
+	})
+	require.NoError(t, err)
+	require.True(t, applied)
+	entries := list()
+	require.Len(t, entries, 1)
+	require.Len(t, entries[0].Deployments, 1)
+	assert.Equal(t, models.DeploymentStatusDeployed, entries[0].Deployments[0].Status)
+}

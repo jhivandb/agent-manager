@@ -352,8 +352,9 @@ func (s *MCPProxyService) Get(ctx context.Context, orgUUID, proxyID string) (*mo
 	dto := convertModelMCPProxyToSpec(proxy)
 	if dto != nil && s.deploymentRepo != nil {
 		// Deployments are keyed by each (endpoint, environment) artifact UUID (the proxy's
-		// and endpoint's own UUIDs are never deployed), so aggregate deployed gateways across
-		// those artifacts and report a per-(endpoint,environment) Deployed/Undeployed status.
+		// and endpoint's own UUIDs are never deployed), so aggregate the gateways those artifacts
+		// are placed on and report each (endpoint, environment)'s status there: Deploying until
+		// the gateway acks, then Deployed or Failed. Not placed anywhere reads as Undeployed.
 		gatewaySet := map[string]struct{}{}
 		// Map (endpoint index, env UUID) -> artifact UUID for status lookup.
 		artifactByEndpointEnv := map[uuid.UUID]map[string]uuid.UUID{}
@@ -377,13 +378,13 @@ func (s *MCPProxyService) Get(ctx context.Context, orgUUID, proxyID string) (*mo
 						s.logger.Warn("Failed to list deployed gateways for MCP proxy endpoint environment",
 							"proxyID", proxy.UUID, "endpoint", endpointDTO.ID, "environment", envBinding.EnvironmentUUID, "ouID", orgUUID, "error", err)
 					} else if len(gatewayIDs) > 0 {
-						status = models.MCPDeploymentStatusDeployed
 						for _, gatewayID := range gatewayIDs {
 							gatewaySet[gatewayID] = struct{}{}
 						}
 						// Exactly one gateway per (artifact, environment) is the invariant, so
 						// ids[0] is deterministic.
 						envBinding.GatewayID = &gatewayIDs[0]
+						status = s.mcpEndpointEnvironmentStatus(artifactUUID, orgUUID, gatewayIDs[0])
 					}
 				}
 				envBinding.DeploymentStatus = status
@@ -1353,6 +1354,18 @@ func (s *MCPProxyService) validateMCPEndpointPlacement(
 		}
 	}
 	return nil
+}
+
+// mcpEndpointEnvironmentStatus reads the status of the artifact's deployment on the gateway it is placed on.
+func (s *MCPProxyService) mcpEndpointEnvironmentStatus(artifactUUID uuid.UUID, orgUUID, gatewayID string) string {
+	_, status, _, err := s.deploymentRepo.GetStatus(artifactUUID.String(), orgUUID, gatewayID)
+	if err != nil {
+		// The binding is placed, so the gateway has at least been sent it.
+		s.logger.Warn("Failed to read MCP proxy endpoint environment deployment status",
+			"artifactID", artifactUUID, "gatewayID", gatewayID, "ouID", orgUUID, "error", err)
+		return models.MCPDeploymentStatusDeploying
+	}
+	return models.MCPDeploymentStatusOf(status)
 }
 
 // anchorGatewaysForEnvironment returns the gateways artifactUUID is deployed to, and whether
