@@ -485,9 +485,12 @@ func (e DeploymentEndpointVisibility) Valid() bool {
 
 // Defines values for DeploymentSummaryStatus.
 const (
-	DeploymentSummaryStatusARCHIVED   DeploymentSummaryStatus = "ARCHIVED"
-	DeploymentSummaryStatusDEPLOYED   DeploymentSummaryStatus = "DEPLOYED"
-	DeploymentSummaryStatusUNDEPLOYED DeploymentSummaryStatus = "UNDEPLOYED"
+	DeploymentSummaryStatusARCHIVED    DeploymentSummaryStatus = "ARCHIVED"
+	DeploymentSummaryStatusDEPLOYED    DeploymentSummaryStatus = "DEPLOYED"
+	DeploymentSummaryStatusDEPLOYING   DeploymentSummaryStatus = "DEPLOYING"
+	DeploymentSummaryStatusFAILED      DeploymentSummaryStatus = "FAILED"
+	DeploymentSummaryStatusUNDEPLOYED  DeploymentSummaryStatus = "UNDEPLOYED"
+	DeploymentSummaryStatusUNDEPLOYING DeploymentSummaryStatus = "UNDEPLOYING"
 )
 
 // Valid indicates whether the value is a known member of the DeploymentSummaryStatus enum.
@@ -497,7 +500,13 @@ func (e DeploymentSummaryStatus) Valid() bool {
 		return true
 	case DeploymentSummaryStatusDEPLOYED:
 		return true
+	case DeploymentSummaryStatusDEPLOYING:
+		return true
+	case DeploymentSummaryStatusFAILED:
+		return true
 	case DeploymentSummaryStatusUNDEPLOYED:
+		return true
+	case DeploymentSummaryStatusUNDEPLOYING:
 		return true
 	default:
 		return false
@@ -905,16 +914,25 @@ func (e LogEntryLogLevel) Valid() bool {
 
 // Defines values for MCPEndpointEnvironmentDeploymentStatus.
 const (
-	Deployed   MCPEndpointEnvironmentDeploymentStatus = "Deployed"
-	Undeployed MCPEndpointEnvironmentDeploymentStatus = "Undeployed"
+	MCPEndpointEnvironmentDeploymentStatusDeployed    MCPEndpointEnvironmentDeploymentStatus = "Deployed"
+	MCPEndpointEnvironmentDeploymentStatusDeploying   MCPEndpointEnvironmentDeploymentStatus = "Deploying"
+	MCPEndpointEnvironmentDeploymentStatusFailed      MCPEndpointEnvironmentDeploymentStatus = "Failed"
+	MCPEndpointEnvironmentDeploymentStatusUndeployed  MCPEndpointEnvironmentDeploymentStatus = "Undeployed"
+	MCPEndpointEnvironmentDeploymentStatusUndeploying MCPEndpointEnvironmentDeploymentStatus = "Undeploying"
 )
 
 // Valid indicates whether the value is a known member of the MCPEndpointEnvironmentDeploymentStatus enum.
 func (e MCPEndpointEnvironmentDeploymentStatus) Valid() bool {
 	switch e {
-	case Deployed:
+	case MCPEndpointEnvironmentDeploymentStatusDeployed:
 		return true
-	case Undeployed:
+	case MCPEndpointEnvironmentDeploymentStatusDeploying:
+		return true
+	case MCPEndpointEnvironmentDeploymentStatusFailed:
+		return true
+	case MCPEndpointEnvironmentDeploymentStatusUndeployed:
+		return true
+	case MCPEndpointEnvironmentDeploymentStatusUndeploying:
 		return true
 	default:
 		return false
@@ -965,22 +983,22 @@ func (e MonitorResponseType) Valid() bool {
 
 // Defines values for MonitorRunResponseStatus.
 const (
-	Failed  MonitorRunResponseStatus = "failed"
-	Pending MonitorRunResponseStatus = "pending"
-	Running MonitorRunResponseStatus = "running"
-	Success MonitorRunResponseStatus = "success"
+	MonitorRunResponseStatusFailed  MonitorRunResponseStatus = "failed"
+	MonitorRunResponseStatusPending MonitorRunResponseStatus = "pending"
+	MonitorRunResponseStatusRunning MonitorRunResponseStatus = "running"
+	MonitorRunResponseStatusSuccess MonitorRunResponseStatus = "success"
 )
 
 // Valid indicates whether the value is a known member of the MonitorRunResponseStatus enum.
 func (e MonitorRunResponseStatus) Valid() bool {
 	switch e {
-	case Failed:
+	case MonitorRunResponseStatusFailed:
 		return true
-	case Pending:
+	case MonitorRunResponseStatusPending:
 		return true
-	case Running:
+	case MonitorRunResponseStatusRunning:
 		return true
-	case Success:
+	case MonitorRunResponseStatusSuccess:
 		return true
 	default:
 		return false
@@ -1154,19 +1172,28 @@ func (e ListGatewaysParamsStatus) Valid() bool {
 
 // Defines values for GetLLMProviderDeploymentsParamsStatus.
 const (
-	GetLLMProviderDeploymentsParamsStatusDEPLOYED   GetLLMProviderDeploymentsParamsStatus = "DEPLOYED"
-	GetLLMProviderDeploymentsParamsStatusFAILED     GetLLMProviderDeploymentsParamsStatus = "FAILED"
-	GetLLMProviderDeploymentsParamsStatusUNDEPLOYED GetLLMProviderDeploymentsParamsStatus = "UNDEPLOYED"
+	GetLLMProviderDeploymentsParamsStatusARCHIVED    GetLLMProviderDeploymentsParamsStatus = "ARCHIVED"
+	GetLLMProviderDeploymentsParamsStatusDEPLOYED    GetLLMProviderDeploymentsParamsStatus = "DEPLOYED"
+	GetLLMProviderDeploymentsParamsStatusDEPLOYING   GetLLMProviderDeploymentsParamsStatus = "DEPLOYING"
+	GetLLMProviderDeploymentsParamsStatusFAILED      GetLLMProviderDeploymentsParamsStatus = "FAILED"
+	GetLLMProviderDeploymentsParamsStatusUNDEPLOYED  GetLLMProviderDeploymentsParamsStatus = "UNDEPLOYED"
+	GetLLMProviderDeploymentsParamsStatusUNDEPLOYING GetLLMProviderDeploymentsParamsStatus = "UNDEPLOYING"
 )
 
 // Valid indicates whether the value is a known member of the GetLLMProviderDeploymentsParamsStatus enum.
 func (e GetLLMProviderDeploymentsParamsStatus) Valid() bool {
 	switch e {
+	case GetLLMProviderDeploymentsParamsStatusARCHIVED:
+		return true
 	case GetLLMProviderDeploymentsParamsStatusDEPLOYED:
+		return true
+	case GetLLMProviderDeploymentsParamsStatusDEPLOYING:
 		return true
 	case GetLLMProviderDeploymentsParamsStatusFAILED:
 		return true
 	case GetLLMProviderDeploymentsParamsStatusUNDEPLOYED:
+		return true
+	case GetLLMProviderDeploymentsParamsStatusUNDEPLOYING:
 		return true
 	default:
 		return false
@@ -4049,7 +4076,9 @@ type MCPConfigRequest struct {
 
 // MCPEndpointEnvironment One endpoint→environment binding.
 type MCPEndpointEnvironment struct {
-	// DeploymentStatus Per-environment deployment status.
+	// DeploymentStatus Per-environment deployment status: Deploying until the gateway acknowledges the
+	// deployment, then Deployed, or Failed when the gateway rejected it or never
+	// acknowledged it.
 	DeploymentStatus *MCPEndpointEnvironmentDeploymentStatus `json:"deploymentStatus,omitempty"`
 
 	// EnvironmentUuid Target environment UUID.
@@ -4063,7 +4092,9 @@ type MCPEndpointEnvironment struct {
 	GatewayId *openapi_types.UUID `json:"gatewayId,omitempty"`
 }
 
-// MCPEndpointEnvironmentDeploymentStatus Per-environment deployment status.
+// MCPEndpointEnvironmentDeploymentStatus Per-environment deployment status: Deploying until the gateway acknowledges the
+// deployment, then Deployed, or Failed when the gateway rejected it or never
+// acknowledged it.
 type MCPEndpointEnvironmentDeploymentStatus string
 
 // MCPPolicy defines model for MCPPolicy.
@@ -5875,7 +5906,8 @@ type GetLLMProviderDeploymentsParams struct {
 	// GatewayId Filter by gateway ID
 	GatewayId *string `form:"gatewayId,omitempty" json:"gatewayId,omitempty"`
 
-	// Status Filter by deployment status
+	// Status Filter by deployment status. DEPLOYING and UNDEPLOYING wait for the gateway to acknowledge them;
+	// FAILED means the gateway rejected the change or never acknowledged it.
 	Status *GetLLMProviderDeploymentsParamsStatus `form:"status,omitempty" json:"status,omitempty"`
 }
 

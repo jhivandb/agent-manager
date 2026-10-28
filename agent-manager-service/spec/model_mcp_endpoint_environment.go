@@ -21,7 +21,7 @@ var _ MappedNullable = &MCPEndpointEnvironment{}
 type MCPEndpointEnvironment struct {
 	// Target environment UUID.
 	EnvironmentUuid string `json:"environmentUuid"`
-	// Per-environment deployment status.
+	// Per-environment deployment status: Deploying until the gateway acknowledges the deployment, then Deployed, or Failed when the gateway rejected it or never acknowledged it.
 	DeploymentStatus *string `json:"deploymentStatus,omitempty"`
 	// Egress gateway to deploy this endpoint→environment binding to. Optional: inferred when the environment has exactly one egress gateway, and required when it has more than one. Placement is fixed once deployed — supplying a different gateway on update is rejected. Emitted on read as the gateway the binding is actually deployed to.
 	GatewayId *string `json:"gatewayId,omitempty"`

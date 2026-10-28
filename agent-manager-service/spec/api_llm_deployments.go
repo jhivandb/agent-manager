@@ -508,7 +508,7 @@ func (r ApiGetLLMProviderDeploymentsRequest) GatewayId(gatewayId string) ApiGetL
 	return r
 }
 
-// Filter by deployment status
+// Filter by deployment status. DEPLOYING and UNDEPLOYING wait for the gateway to acknowledge them; FAILED means the gateway rejected the change or never acknowledged it.
 func (r ApiGetLLMProviderDeploymentsRequest) Status(status string) ApiGetLLMProviderDeploymentsRequest {
 	r.status = &status
 	return r

@@ -6917,13 +6917,18 @@ paths:
             type: string
         - name: status
           in: query
-          description: Filter by deployment status
+          description: |
+            Filter by deployment status. DEPLOYING and UNDEPLOYING wait for the gateway to acknowledge them;
+            FAILED means the gateway rejected the change or never acknowledged it.
           schema:
             type: string
             enum:
+              - DEPLOYING
               - DEPLOYED
+              - UNDEPLOYING
               - UNDEPLOYED
               - FAILED
+              - ARCHIVED
       responses:
         "200":
           description: Successfully retrieved deployments
@@ -16677,11 +16682,17 @@ components:
           description: Target environment UUID.
         deploymentStatus:
           type: string
-          description: Per-environment deployment status.
+          description: |
+            Per-environment deployment status: Deploying until the gateway acknowledges the
+            deployment, then Deployed, or Failed when the gateway rejected it or never
+            acknowledged it.
           readOnly: true
           enum:
+            - Deploying
             - Deployed
+            - Undeploying
             - Undeployed
+            - Failed
         gatewayId:
           type: string
           format: uuid
@@ -18463,8 +18474,11 @@ components:
           type: string
           description: Deployment status
           enum:
+            - DEPLOYING
             - DEPLOYED
+            - UNDEPLOYING
             - UNDEPLOYED
+            - FAILED
             - ARCHIVED
           example: "DEPLOYED"
         deployedAt:
