@@ -65,8 +65,10 @@ func TestDeploymentAckHandlerPassesOutcomeAndErrorCode(t *testing.T) {
 		{
 			name:    "failed deploy keeps its error code",
 			payload: `{"deploymentId":"d-1","artifactId":"p-1","resourceType":"llmprovider","action":"deploy","status":"failed","errorCode":"GATEWAY_PROCESSING_ERROR"}`,
-			want: models.DeploymentAck{DeploymentID: "d-1", ArtifactID: "p-1", Action: models.DeploymentAckActionDeploy,
-				Success: false, ErrorCode: "GATEWAY_PROCESSING_ERROR"},
+			want: models.DeploymentAck{
+				DeploymentID: "d-1", ArtifactID: "p-1", Action: models.DeploymentAckActionDeploy,
+				Success: false, ErrorCode: "GATEWAY_PROCESSING_ERROR",
+			},
 		},
 		{
 			name:    "undeploy success",
@@ -81,8 +83,10 @@ func TestDeploymentAckHandlerPassesOutcomeAndErrorCode(t *testing.T) {
 		{
 			name:    "failed undeploy",
 			payload: `{"deploymentId":"d-3","artifactId":"a-1","resourceType":"Agent","action":"undeploy","status":"failed","errorCode":"DEPLOYMENT_ID_MISMATCH"}`,
-			want: models.DeploymentAck{DeploymentID: "d-3", ArtifactID: "a-1", Action: models.DeploymentAckActionUndeploy,
-				ErrorCode: "DEPLOYMENT_ID_MISMATCH"},
+			want: models.DeploymentAck{
+				DeploymentID: "d-3", ArtifactID: "a-1", Action: models.DeploymentAckActionUndeploy,
+				ErrorCode: "DEPLOYMENT_ID_MISMATCH",
+			},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

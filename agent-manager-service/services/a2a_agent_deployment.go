@@ -309,10 +309,10 @@ func beginA2AAgentUndeploy(
 	ouID string,
 	gatewayIDs []string,
 ) (map[string]string, error) {
-	if artifactUUID == uuid.Nil {
-		return nil, nil
-	}
 	undeployIDs := make(map[string]string, len(gatewayIDs))
+	if artifactUUID == uuid.Nil {
+		return undeployIDs, nil
+	}
 	for _, gatewayID := range gatewayIDs {
 		id, err := deploymentRepo.BeginUndeploy(ctx, artifactUUID.String(), ouID, gatewayID)
 		if errors.Is(err, utils.ErrDeploymentNotActive) {
