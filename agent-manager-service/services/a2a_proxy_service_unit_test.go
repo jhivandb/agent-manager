@@ -142,6 +142,7 @@ func (h *proxyHarness) assertNothingWritten(t *testing.T) {
 	assert.Empty(t, h.txPubs.EnqueueCalls())
 	assert.Empty(t, h.txPubs.DeleteForAgentEnvCalls())
 	assert.Empty(t, h.txDeployments.DeleteForArtifactCalls())
+	assert.Empty(t, h.txDeployments.BeginUndeployCalls())
 }
 
 // acceptsWrites lets every write a transition may make succeed, inside the transaction only.
@@ -156,6 +157,7 @@ func (h *proxyHarness) acceptsWrites() {
 	h.txPubs.EnqueueFunc = func(context.Context, *models.A2APublication) error { return nil }
 	h.txPubs.DeleteForAgentEnvFunc = func(context.Context, string, string, string, uuid.UUID) error { return nil }
 	h.txDeployments.DeleteForArtifactFunc = func(context.Context, uuid.UUID, string) error { return nil }
+	h.txDeployments.BeginUndeployFunc = func(context.Context, string, string, string) (string, error) { return "", nil }
 	h.artifacts.CreateFunc = func(*gorm.DB, *models.Artifact) error { return nil }
 }
 
@@ -543,9 +545,10 @@ func TestDeleteA2AProxySwitchesOnlyThatEnvironmentToDirect(t *testing.T) {
 
 	require.NoError(t, h.svc.DeleteA2AProxy(tierGrantedCtx(t), "org-1", "checkout", "weather", "dev"))
 
-	deployments := h.txDeployments.DeleteForArtifactCalls()
-	require.Len(t, deployments, 1)
-	assert.Equal(t, h.artifactUUID, deployments[0].ArtifactUUID)
+	assert.Empty(t, h.txDeployments.DeleteForArtifactCalls(), "the deployment is undeployed, not deleted")
+	undeploys := h.txDeployments.BeginUndeployCalls()
+	require.NotEmpty(t, undeploys)
+	assert.Equal(t, h.artifactUUID.String(), undeploys[0].ArtifactUUID)
 	publications := h.txPubs.DeleteForAgentEnvCalls()
 	require.Len(t, publications, 1)
 	assert.Equal(t, uuid.MustParse(proxyTestEnvUUID), publications[0].EnvironmentUUID)

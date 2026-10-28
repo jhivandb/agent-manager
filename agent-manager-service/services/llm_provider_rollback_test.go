@@ -21,7 +21,6 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -278,9 +277,9 @@ func TestDelete_CompletesAfterCancellationFollowingSuccessfulUndeploy(t *testing
 		GetWithStateFunc: func(string, string, string) (*models.Deployment, error) {
 			return deployment, nil
 		},
-		SetCurrentFunc: func(string, string, string, string, models.DeploymentStatus) (time.Time, error) {
+		BeginUndeployFunc: func(context.Context, string, string, string) (string, error) {
 			cancel()
-			return time.Now(), nil
+			return deploymentID.String(), nil
 		},
 	}
 	deploymentSvc := &LLMProviderDeploymentService{

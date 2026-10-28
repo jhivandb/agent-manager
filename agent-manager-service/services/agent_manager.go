@@ -3208,7 +3208,7 @@ func (s *agentManagerService) cleanUpAgentAPIArtifacts(ctx context.Context, ouID
 	}
 
 	for _, d := range deleted {
-		sendA2AAgentWithdrawal(ctx, s.gatewayEventsService, d.uuid, d.gatewayIDs, false, s.logger)
+		sendA2AAgentWithdrawal(ctx, s.gatewayEventsService, d.uuid, d.gatewayIDs, false, nil, s.logger)
 	}
 	return errors.Join(errs...)
 }

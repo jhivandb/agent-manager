@@ -306,12 +306,13 @@ func (s *a2aPublicationReconcilerService) withdrawIfTornDown(ctx context.Context
 	}
 	s.logger.Info("A2A publication was torn down during the attempt; withdrawing the Agent it published",
 		"agentName", pub.AgentName, "environment", pub.EnvironmentName)
-	if err := s.deploymentRepo.DeleteForArtifact(ctx, pub.ArtifactUUID, pub.OUID); err != nil {
-		s.logger.Error("Failed to delete the deployment of a torn-down A2A publication",
+	undeployIDs, err := beginA2AAgentUndeploy(ctx, s.deploymentRepo, pub.ArtifactUUID, pub.OUID, []string{gatewayID})
+	if err != nil {
+		s.logger.Error("Failed to undeploy the deployment of a torn-down A2A publication",
 			"agentName", pub.AgentName, "environment", pub.EnvironmentName, "error", err)
 	}
 	// Undeploy: a switch to direct keeps the artifact, and with it the keys a switch back reuses.
-	sendA2AAgentWithdrawal(ctx, s.events, pub.ArtifactUUID, []string{gatewayID}, true, s.logger)
+	sendA2AAgentWithdrawal(ctx, s.events, pub.ArtifactUUID, []string{gatewayID}, true, undeployIDs, s.logger)
 }
 
 // enqueueCardFetch queues a fetch of the card the gateway now serves; best effort.
@@ -593,7 +594,6 @@ func (s *a2aPublicationReconcilerService) attemptPublish(ctx context.Context, pu
 	}
 
 	deploymentID := uuid.New()
-	deployed := models.DeploymentStatusDeployed
 	deployment := &models.Deployment{
 		DeploymentID: deploymentID,
 		Name:         fmt.Sprintf("%s-deployment", pub.AgentName),
@@ -601,7 +601,6 @@ func (s *a2aPublicationReconcilerService) attemptPublish(ctx context.Context, pu
 		OUID:         pub.OUID,
 		GatewayUUID:  gateway.UUID,
 		Content:      []byte(yamlStr),
-		Status:       &deployed,
 	}
 	// The gateway fetches the Agent YAML from this row after the event, so the row must exist first.
 	if err := s.deploymentRepo.CreateWithLimitEnforcement(deployment, maxDeploymentsPerAPI+deploymentLimitBuffer); err != nil {

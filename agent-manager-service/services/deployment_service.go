@@ -17,6 +17,9 @@
 package services
 
 import (
+	"time"
+
+	"github.com/wso2/agent-manager/agent-manager-service/models"
 	"github.com/wso2/agent-manager/agent-manager-service/repositories"
 )
 
@@ -35,4 +38,21 @@ func NewDeploymentService(
 		deploymentRepo: deploymentRepo,
 		gatewayRepo:    gatewayRepo,
 	}
+}
+
+// isDeployedOrDeploying reports whether a status row already holds, or is on its way to holding, its deployment.
+func isDeployedOrDeploying(status models.DeploymentStatus) bool {
+	return status == models.DeploymentStatusDeployed || status == models.DeploymentStatusDeploying
+}
+
+// markDeploying updates a loaded deployment to the status row a deploy or restore just wrote.
+func markDeploying(d *models.Deployment, updatedAt time.Time) {
+	status, desired := models.DeploymentStatusDeploying, models.DeploymentStatusDeployed
+	d.Status, d.StatusDesired, d.StatusReason, d.UpdatedAt = &status, &desired, nil, &updatedAt
+}
+
+// markUndeploying updates a loaded deployment to the status row BeginUndeploy just wrote.
+func markUndeploying(d *models.Deployment) {
+	status, desired, updatedAt := models.DeploymentStatusUndeploying, models.DeploymentStatusUndeployed, time.Now()
+	d.Status, d.StatusDesired, d.StatusReason, d.UpdatedAt = &status, &desired, nil, &updatedAt
 }

@@ -47,6 +47,8 @@ type a2aTeardown struct {
 	gatewayIDs   []string
 	// dropsArtifact deletes the gateway's Agent with its API keys; otherwise it is undeployed and keeps them.
 	dropsArtifact bool
+	// undeployIDs is the deployment id each gateway's undeploy event carries; a gateway not in it gets none.
+	undeployIDs map[string]string
 }
 
 // TxRunner opens one database transaction and runs fn inside it, so a unit test can hand fn a sentinel.
@@ -179,8 +181,26 @@ func (p *A2APublisher) Publication(ctx context.Context, ouID, projectName, agent
 	return p.pubRepo.Get(ctx, ouID, projectName, agentName, envUUID)
 }
 
-// TeardownEnv drops one environment's publication and gateway deployments in tx but keeps the artifact and its API keys; send the result after commit.
+// TeardownEnv drops one environment's publication in tx and starts undeploying the Agent from its gateways, but keeps the
+// artifact and its API keys; send the result after commit.
 func (p *A2APublisher) TeardownEnv(
+	ctx context.Context, tx *gorm.DB, key a2aPublicationKey, artifactUUID uuid.UUID,
+) (a2aTeardown, error) {
+	// Read first: the deployment rows name the gateways holding the Agent.
+	gatewayIDs := collectA2AAgentDeletionTargets(p.deploymentRepo, p.gatewayRepo, artifactUUID, key.OUID, true, p.logger)
+	undeployIDs, err := beginA2AAgentUndeploy(ctx, p.deploymentRepo.WithTx(tx), artifactUUID, key.OUID, gatewayIDs)
+	if err != nil {
+		return a2aTeardown{}, err
+	}
+	if err := p.deletePublication(ctx, tx, key); err != nil {
+		return a2aTeardown{}, err
+	}
+	return a2aTeardown{artifactUUID: artifactUUID, gatewayIDs: gatewayIDs, undeployIDs: undeployIDs}, nil
+}
+
+// TeardownEnvAndDropArtifact is TeardownEnv that deletes the artifact (uuid.Nil: none) and its deployments instead, so
+// its API keys go too.
+func (p *A2APublisher) TeardownEnvAndDropArtifact(
 	ctx context.Context, tx *gorm.DB, key a2aPublicationKey, artifactUUID uuid.UUID,
 ) (a2aTeardown, error) {
 	// Read first: the deployment rows name the gateways holding the Agent.
@@ -190,35 +210,31 @@ func (p *A2APublisher) TeardownEnv(
 			return a2aTeardown{}, fmt.Errorf("failed to delete the A2A agent's gateway deployments: %w", err)
 		}
 	}
-	err := p.publications(tx).DeleteForAgentEnv(ctx, key.OUID, key.ProjectName, key.AgentName, key.EnvironmentUUID)
-	if err != nil {
-		return a2aTeardown{}, fmt.Errorf("failed to delete the A2A publication: %w", err)
-	}
-	return a2aTeardown{artifactUUID: artifactUUID, gatewayIDs: gatewayIDs}, nil
-}
-
-// TeardownEnvAndDropArtifact is TeardownEnv that also deletes the artifact (uuid.Nil: none), so its API keys go too.
-func (p *A2APublisher) TeardownEnvAndDropArtifact(
-	ctx context.Context, tx *gorm.DB, key a2aPublicationKey, artifactUUID uuid.UUID,
-) (a2aTeardown, error) {
-	teardown, err := p.TeardownEnv(ctx, tx, key, artifactUUID)
-	if err != nil {
+	if err := p.deletePublication(ctx, tx, key); err != nil {
 		return a2aTeardown{}, err
 	}
-	teardown.dropsArtifact = true
+	teardown := a2aTeardown{artifactUUID: artifactUUID, gatewayIDs: gatewayIDs, dropsArtifact: true}
 	if artifactUUID == uuid.Nil {
 		return teardown, nil
 	}
-	err = p.artifactRepo.Delete(tx, artifactUUID.String())
+	err := p.artifactRepo.Delete(tx, artifactUUID.String())
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return a2aTeardown{}, fmt.Errorf("failed to delete the agent's API artifact: %w", err)
 	}
 	return teardown, nil
 }
 
+func (p *A2APublisher) deletePublication(ctx context.Context, tx *gorm.DB, key a2aPublicationKey) error {
+	err := p.publications(tx).DeleteForAgentEnv(ctx, key.OUID, key.ProjectName, key.AgentName, key.EnvironmentUUID)
+	if err != nil {
+		return fmt.Errorf("failed to delete the A2A publication: %w", err)
+	}
+	return nil
+}
+
 // SendTeardown tells each gateway to stop serving the torn-down Agent; best effort.
 func (p *A2APublisher) SendTeardown(ctx context.Context, t a2aTeardown) {
-	sendA2AAgentWithdrawal(ctx, p.events, t.artifactUUID, t.gatewayIDs, !t.dropsArtifact, p.logger)
+	sendA2AAgentWithdrawal(ctx, p.events, t.artifactUUID, t.gatewayIDs, !t.dropsArtifact, t.undeployIDs, p.logger)
 }
 
 // DeleteForAgent drops the agent's publication and proxy rows; deleteAgentAPIArtifact tells the gateways.

@@ -42,6 +42,19 @@ func undeployedAgentID(t *testing.T, evt eventhub.Event) string {
 	return deletedAgentID(t, evt)
 }
 
+// undeployedAgentDeploymentID decodes the deployment id an agent.undeployed event carries.
+func undeployedAgentDeploymentID(t *testing.T, evt eventhub.Event) string {
+	t.Helper()
+	require.Equal(t, eventhub.EventType("agent.undeployed"), evt.EventType)
+	var envelope struct {
+		Payload struct {
+			DeploymentID string `json:"deploymentId"`
+		} `json:"payload"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(evt.EventData), &envelope))
+	return envelope.Payload.DeploymentID
+}
+
 // deletedAgentID decodes the artifact UUID an agent.deleted event names.
 func deletedAgentID(t *testing.T, evt eventhub.Event) string {
 	t.Helper()
@@ -119,7 +132,7 @@ func TestCollectA2AAgentDeletionTargetsTrustsDeploymentRowsWhenSubtypeUnknown(t 
 // A nil-UUID event would ask every gateway to delete an agent identified by all zeroes.
 func TestSendA2AAgentDeletionIgnoresAMissingArtifact(t *testing.T) {
 	hub := &recordingEventHub{}
-	sendA2AAgentWithdrawal(context.Background(), NewGatewayEventsService(hub), uuid.Nil, []string{"gw-1"}, false, testLogger())
+	sendA2AAgentWithdrawal(context.Background(), NewGatewayEventsService(hub), uuid.Nil, []string{"gw-1"}, false, nil, testLogger())
 	assert.Empty(t, hub.published)
 }
 
@@ -131,7 +144,7 @@ func TestSendA2AAgentDeletionOutlivesRequestCancellation(t *testing.T) {
 	hub := &recordingEventHub{}
 	artifactUUID := uuid.New()
 
-	sendA2AAgentWithdrawal(reqCtx, NewGatewayEventsService(hub), artifactUUID, []string{"gw-1", "gw-2"}, false, testLogger())
+	sendA2AAgentWithdrawal(reqCtx, NewGatewayEventsService(hub), artifactUUID, []string{"gw-1", "gw-2"}, false, nil, testLogger())
 
 	require.Len(t, hub.published, 2)
 	for i, evt := range hub.published {

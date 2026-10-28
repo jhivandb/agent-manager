@@ -100,7 +100,6 @@ func (s *MCPProxyService) deployMCPProxyToGateway(ctx context.Context, proxy *mo
 	}
 
 	deploymentID := uuid.New()
-	deployed := models.DeploymentStatusDeployed
 	deployment := &models.Deployment{
 		DeploymentID: deploymentID,
 		Name:         deploymentName(proxy),
@@ -108,7 +107,6 @@ func (s *MCPProxyService) deployMCPProxyToGateway(ctx context.Context, proxy *mo
 		OUID:         ouID,
 		GatewayUUID:  gateway.UUID,
 		Content:      []byte(deploymentYAML),
-		Status:       &deployed,
 	}
 
 	hardLimit := maxDeploymentsPerAPI + deploymentLimitBuffer

@@ -113,9 +113,11 @@ type LLMProxyDeletionEvent struct {
 	ProxyID string `json:"proxyId"`
 }
 
-// LLMProxyUndeploymentEvent represents an LLM proxy undeployment event
+// LLMProxyUndeploymentEvent represents an LLM proxy undeployment event. DeploymentID is the
+// acked deployment being undeployed, or empty to undeploy whichever version the gateway holds.
 type LLMProxyUndeploymentEvent struct {
 	ProxyID        string `json:"proxyId"`
+	DeploymentID   string `json:"deploymentId"`
 	Vhost          string `json:"vhost"`
 	Environment    string `json:"environment"`
 	GatewayID      string `json:"gatewayId"`

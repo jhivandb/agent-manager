@@ -217,10 +217,11 @@ func TestA2APublisherEnqueueJoinsTheCallersTransaction(t *testing.T) {
 	assert.Equal(t, "dev", queued[0].Pub.EnvironmentName)
 }
 
-// The artifact stays so the environment's API keys survive a switch back to proxied.
+// The artifact stays so the environment's API keys survive a switch back to proxied, and its
+// deployment is undeployed rather than deleted, so the gateway's ack has a row to settle.
 func TestA2APublisherTeardownEnvKeepsTheArtifactAndWaitsToTellTheGateway(t *testing.T) {
 	m := newPublisherMocks(t)
-	m.txDeployments.DeleteForArtifactFunc = func(context.Context, uuid.UUID, string) error { return nil }
+	m.txDeployments.BeginUndeployFunc = func(context.Context, string, string, string) (string, error) { return "dep-1", nil }
 	m.txPubs.DeleteForAgentEnvFunc = func(context.Context, string, string, string, uuid.UUID) error { return nil }
 	artifactUUID := uuid.New()
 	publisher := m.publisher()
@@ -228,8 +229,11 @@ func TestA2APublisherTeardownEnvKeepsTheArtifactAndWaitsToTellTheGateway(t *test
 	teardown, err := publisher.TeardownEnv(context.Background(), txSentinel, testA2AKey(), artifactUUID)
 	require.NoError(t, err)
 	assert.Empty(t, m.artifacts.DeleteCalls())
-	require.Len(t, m.txDeployments.DeleteForArtifactCalls(), 1)
-	assert.Equal(t, artifactUUID, m.txDeployments.DeleteForArtifactCalls()[0].ArtifactUUID)
+	assert.Empty(t, m.txDeployments.DeleteForArtifactCalls())
+	undeploys := m.txDeployments.BeginUndeployCalls()
+	require.Len(t, undeploys, 1)
+	assert.Equal(t, artifactUUID.String(), undeploys[0].ArtifactUUID)
+	assert.Equal(t, "gw-1", undeploys[0].GatewayID)
 	require.Len(t, m.txPubs.DeleteForAgentEnvCalls(), 1)
 	assert.Empty(t, m.hub.published, "nothing is sent before the transaction commits")
 
@@ -237,6 +241,44 @@ func TestA2APublisherTeardownEnvKeepsTheArtifactAndWaitsToTellTheGateway(t *test
 	require.Len(t, m.hub.published, 1)
 	assert.Equal(t, "gw-1", m.hub.published[0].GatewayID)
 	assert.Equal(t, artifactUUID.String(), undeployedAgentID(t, m.hub.published[0]))
+	assert.Equal(t, "dep-1", undeployedAgentDeploymentID(t, m.hub.published[0]))
+}
+
+// Every active gateway is told, but only one with a placed deployment has a row to undeploy; the
+// rest get an undeploy without an id, which removes whatever version they may hold.
+func TestA2APublisherTeardownEnvTellsGatewaysWithoutARowWithoutAnID(t *testing.T) {
+	m := newPublisherMocks(t)
+	m.gateways.ListWithFiltersFunc = func(repositories.GatewayFilterOptions) ([]*models.Gateway, error) {
+		return []*models.Gateway{{UUID: uuid.MustParse("22222222-2222-2222-2222-222222222222")}}, nil
+	}
+	m.txDeployments.BeginUndeployFunc = func(_ context.Context, _, _, gatewayID string) (string, error) {
+		if gatewayID == "gw-1" {
+			return "", nil // placed but never acked
+		}
+		return "", utils.ErrDeploymentNotActive
+	}
+	m.txPubs.DeleteForAgentEnvFunc = func(context.Context, string, string, string, uuid.UUID) error { return nil }
+	publisher := m.publisher()
+
+	teardown, err := publisher.TeardownEnv(context.Background(), txSentinel, testA2AKey(), uuid.New())
+	require.NoError(t, err)
+	assert.Len(t, m.txDeployments.BeginUndeployCalls(), 2)
+
+	publisher.SendTeardown(context.Background(), teardown)
+	require.Len(t, m.hub.published, 2)
+	for _, evt := range m.hub.published {
+		assert.Empty(t, undeployedAgentDeploymentID(t, evt), evt.GatewayID)
+	}
+}
+
+func TestA2APublisherTeardownEnvFailsOnAnUndeployError(t *testing.T) {
+	m := newPublisherMocks(t)
+	m.txDeployments.BeginUndeployFunc = func(context.Context, string, string, string) (string, error) { return "", assert.AnError }
+
+	_, err := m.publisher().TeardownEnv(context.Background(), txSentinel, testA2AKey(), uuid.New())
+
+	assert.ErrorIs(t, err, assert.AnError)
+	assert.Empty(t, m.txPubs.DeleteForAgentEnvCalls())
 }
 
 func TestA2APublisherDeleteForAgentDropsPublicationsAndProxies(t *testing.T) {

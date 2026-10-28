@@ -917,15 +917,16 @@ func TestReconcilerWithdrawsAnAgentTornDownMidPublish(t *testing.T) {
 	h.pubRepo.GetFunc = func(context.Context, string, string, string, uuid.UUID) (*models.A2APublication, error) {
 		return nil, repositories.ErrA2APublicationNotFound
 	}
-	h.deploymentRepo.DeleteForArtifactFunc = func(context.Context, uuid.UUID, string) error { return nil }
+	h.deploymentRepo.BeginUndeployFunc = func(context.Context, string, string, string) (string, error) { return "", nil }
 
 	h.svc.publishOne(context.Background(), pub)
 
-	deleted := h.deploymentRepo.DeleteForArtifactCalls()
-	require.Len(t, deleted, 1)
-	assert.Equal(t, pub.ArtifactUUID, deleted[0].ArtifactUUID)
+	undeploys := h.deploymentRepo.BeginUndeployCalls()
+	require.Len(t, undeploys, 1, "the deployment just written is undeployed, so its ack has a row to settle")
+	assert.Equal(t, pub.ArtifactUUID.String(), undeploys[0].ArtifactUUID)
 	require.Len(t, h.hub.published, 2, "the deploy event, then its withdrawal")
 	assert.Equal(t, pub.ArtifactUUID.String(), undeployedAgentID(t, h.hub.published[1]), "the artifact and its keys may still be wanted")
+	assert.Empty(t, undeployedAgentDeploymentID(t, h.hub.published[1]), "it was never acked")
 	assert.Empty(t, h.cardRepo.RequeueCalls())
 }
 
@@ -940,7 +941,7 @@ func TestReconcilerLeavesAReEnqueuedRowForTheNextTick(t *testing.T) {
 	h.pubRepo.GetFunc = func(context.Context, string, string, string, uuid.UUID) (*models.A2APublication, error) {
 		return &pub, nil
 	}
-	// DeleteForArtifactFunc is nil: withdrawing would panic.
+	// BeginUndeployFunc is nil: withdrawing would panic.
 
 	h.svc.publishOne(context.Background(), pub)
 
@@ -959,7 +960,7 @@ func TestReconcilerLogsWhenItCannotTellIfASupersededRowWasTornDown(t *testing.T)
 	h.pubRepo.GetFunc = func(context.Context, string, string, string, uuid.UUID) (*models.A2APublication, error) {
 		return nil, errors.New("connection reset")
 	}
-	// DeleteForArtifactFunc is nil: withdrawing would panic.
+	// BeginUndeployFunc is nil: withdrawing would panic.
 
 	h.svc.publishOne(context.Background(), pub)
 
