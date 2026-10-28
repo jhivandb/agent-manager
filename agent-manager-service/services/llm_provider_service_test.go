@@ -294,11 +294,11 @@ func TestLLMProviderService_UpdateAndSync_RejectsPlacementInvalidGatewayWithoutU
 			return nil, errors.New("deploy/undeploy path should not be reached")
 		},
 	}
-	deploymentSvc := &LLMProviderDeploymentService{
+	deploymentSvc := (&LLMProviderDeploymentService{
 		deploymentRepo: deploymentRepo,
 		providerRepo:   deploymentProviderRepo,
 		gatewayRepo:    gatewayRepo,
-	}
+	}).withTestCore()
 	svc := &LLMProviderService{providerRepo: outerProviderRepo, gatewayRepo: gatewayRepo}
 
 	_, err := svc.UpdateAndSync(context.Background(), providerUUID.String(), "org",

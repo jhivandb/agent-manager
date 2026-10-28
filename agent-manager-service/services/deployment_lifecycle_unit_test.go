@@ -44,6 +44,8 @@ type lifecycleRig struct {
 	performedAt time.Time
 	deployments *repomocks.DeploymentRepositoryMock
 	hub         *recordingEventHub
+	// intents is what the deployment services recorded, once one is built.
+	intents *memIntents
 }
 
 func newLifecycleRig() *lifecycleRig {
@@ -67,7 +69,11 @@ func (r *lifecycleRig) providerService() *LLMProviderDeploymentService {
 			return &models.Gateway{UUID: r.gatewayID, OUID: r.ouID, GatewayFunctionalityType: models.GatewayRoleEgress}, nil
 		},
 	}
-	return NewLLMProviderDeploymentService(r.deployments, providers, nil, gateways, NewGatewayEventsService(r.hub))
+	events := NewGatewayEventsService(r.hub)
+	kind := NewLLMProviderKind(providers)
+	core, intents := newTestDeployCore(r.deployments, events, kind)
+	r.intents = intents
+	return NewLLMProviderDeploymentService(r.deployments, providers, nil, gateways, events, core, kind)
 }
 
 func (r *lifecycleRig) proxyService() *LLMProxyDeploymentService {
@@ -190,15 +196,15 @@ func TestLLMProviderRestore(t *testing.T) {
 	t.Run("over a failed deployment, as DEPLOYING", func(t *testing.T) {
 		r := newLifecycleRig()
 		r.withDeployment(models.DeploymentStatusFailed, models.DeploymentStatusDeployed)
-		r.deployments.SetCurrentFunc = func(string, string, string, string, models.DeploymentStatus) (time.Time, error) {
+		r.deployments.SetCurrentCtxFunc = func(context.Context, string, string, string, string, models.DeploymentStatus) (time.Time, error) {
 			return time.Now(), nil
 		}
 
 		got, err := r.providerService().RestoreLLMProviderDeployment(r.handle, r.deploymentID.String(), r.gatewayID.String(), r.ouID)
 		require.NoError(t, err)
 
-		require.Len(t, r.deployments.SetCurrentCalls(), 1)
-		assert.Equal(t, models.DeploymentStatusDeploying, r.deployments.SetCurrentCalls()[0].Status)
+		require.Len(t, r.deployments.SetCurrentCtxCalls(), 1)
+		assert.Equal(t, models.DeploymentStatusDeploying, r.deployments.SetCurrentCtxCalls()[0].Status)
 		assert.Equal(t, models.DeploymentStatusDeploying, *got.Status)
 		var event models.LLMProviderDeploymentEvent
 		r.payload(t, &event)
@@ -290,6 +296,9 @@ func TestLLMProxyRestoreStartsDeploying(t *testing.T) {
 func TestLLMEventsCarryTheRowPerformedAt(t *testing.T) {
 	restores := func(r *lifecycleRig) {
 		r.withDeployment(models.DeploymentStatusFailed, models.DeploymentStatusDeployed)
+		r.deployments.SetCurrentCtxFunc = func(context.Context, string, string, string, string, models.DeploymentStatus) (time.Time, error) {
+			return r.performedAt, nil
+		}
 		r.deployments.SetCurrentFunc = func(string, string, string, string, models.DeploymentStatus) (time.Time, error) {
 			return r.performedAt, nil
 		}

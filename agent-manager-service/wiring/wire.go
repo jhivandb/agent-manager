@@ -84,6 +84,7 @@ var serviceProviderSet = wire.NewSet(
 	ProvideAgentIdentityInjectionServiceWithEndpointResolver,
 	services.NewAgentThunderReconcilerService,
 	services.NewA2AAgentKind,
+	services.NewLLMProviderKind,
 	ProvideReconcileCore,
 	reconcile.NewWorker,
 	services.NewA2ACardFetcher,
@@ -540,9 +541,11 @@ func ProvideReconcileCore(
 	deployments repositories.DeploymentRepository,
 	events *services.GatewayEventsService,
 	a2aAgents *services.A2AAgentKind,
+	llmProviders *services.LLMProviderKind,
 	logger *slog.Logger,
 ) *reconcile.Core {
-	return reconcile.NewCore(reconcile.TxRunner(tx), intents, deployments, events, reconcile.DefaultConfig(), logger, a2aAgents)
+	return reconcile.NewCore(reconcile.TxRunner(tx), intents, deployments, events, reconcile.DefaultConfig(), logger,
+		a2aAgents, llmProviders)
 }
 
 func ProvideArtifactRepository(db *gorm.DB) repositories.ArtifactRepository {

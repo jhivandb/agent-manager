@@ -54,7 +54,7 @@ func serviceForRollback(
 		},
 	}
 	return &LLMProviderService{providerRepo: providerRepo},
-		&LLMProviderDeploymentService{deploymentRepo: deploymentRepo}
+		(&LLMProviderDeploymentService{deploymentRepo: deploymentRepo}).withTestCore()
 }
 
 // A provider can be addressed by handle at the API while its gateway artifact is
@@ -89,10 +89,10 @@ func TestDelete_AlreadyUndeployedProviderBroadcastsCanonicalUUID(t *testing.T) {
 			return []string{trackedGatewayID}, nil
 		},
 	}
-	deploymentSvc := &LLMProviderDeploymentService{
+	deploymentSvc := (&LLMProviderDeploymentService{
 		deploymentRepo:       deploymentRepo,
 		gatewayEventsService: NewGatewayEventsService(hub),
-	}
+	}).withTestCore()
 	svc := &LLMProviderService{providerRepo: providerRepo}
 
 	err := svc.Delete(context.Background(), created.Configuration.Handle, "ou-acme", deploymentSvc)
@@ -168,7 +168,7 @@ func TestDelete_RejectsWithoutUndeployingWhenProviderHasAssociatedProxies(t *tes
 		},
 	}
 	svc := &LLMProviderService{providerRepo: providerRepo}
-	deploymentSvc := &LLMProviderDeploymentService{deploymentRepo: deploymentRepo}
+	deploymentSvc := (&LLMProviderDeploymentService{deploymentRepo: deploymentRepo}).withTestCore()
 
 	err := svc.Delete(context.Background(), created.UUID.String(), "ou-acme", deploymentSvc)
 
@@ -195,7 +195,7 @@ func TestDelete_RejectsWhenAlreadyMarkedDeleting(t *testing.T) {
 		},
 	}
 	svc := &LLMProviderService{providerRepo: providerRepo}
-	deploymentSvc := &LLMProviderDeploymentService{deploymentRepo: deploymentRepo}
+	deploymentSvc := (&LLMProviderDeploymentService{deploymentRepo: deploymentRepo}).withTestCore()
 
 	err := svc.Delete(context.Background(), created.UUID.String(), "ou-acme", deploymentSvc)
 
@@ -229,7 +229,7 @@ func TestDelete_ClearsDeletingFlagWhenUndeployFails(t *testing.T) {
 		},
 	}
 	svc := &LLMProviderService{providerRepo: providerRepo}
-	deploymentSvc := &LLMProviderDeploymentService{providerRepo: providerRepo, deploymentRepo: deploymentRepo}
+	deploymentSvc := (&LLMProviderDeploymentService{providerRepo: providerRepo, deploymentRepo: deploymentRepo}).withTestCore()
 
 	err := svc.Delete(context.Background(), created.UUID.String(), "ou-acme", deploymentSvc)
 
@@ -283,11 +283,11 @@ func TestDelete_CompletesAfterCancellationFollowingSuccessfulUndeploy(t *testing
 			return deploymentID.String(), time.Time{}, nil
 		},
 	}
-	deploymentSvc := &LLMProviderDeploymentService{
+	deploymentSvc := (&LLMProviderDeploymentService{
 		providerRepo:         providerRepo,
 		deploymentRepo:       deploymentRepo,
 		gatewayEventsService: NewGatewayEventsService(&stubEventHub{}),
-	}
+	}).withTestCore()
 	svc := &LLMProviderService{providerRepo: providerRepo}
 
 	err := svc.Delete(ctx, created.UUID.String(), "ou-acme", deploymentSvc)

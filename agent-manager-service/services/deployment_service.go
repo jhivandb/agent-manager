@@ -17,9 +17,14 @@
 package services
 
 import (
+	"context"
+	"fmt"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/wso2/agent-manager/agent-manager-service/models"
+	"github.com/wso2/agent-manager/agent-manager-service/reconcile"
 	"github.com/wso2/agent-manager/agent-manager-service/repositories"
 )
 
@@ -55,4 +60,25 @@ func markDeploying(d *models.Deployment, performedAt time.Time) {
 func markUndeploying(d *models.Deployment, performedAt time.Time) {
 	status, desired := models.DeploymentStatusUndeploying, models.DeploymentStatusUndeployed
 	d.Status, d.StatusDesired, d.StatusReason, d.UpdatedAt, d.PerformedAt = &status, &desired, nil, &performedAt, &performedAt
+}
+
+// overlayOpenStatuses shows, on each placed deployment, the status of an intent that has not
+// handed it to its row yet: a redeploy still retrying is DEPLOYING, one that gave up FAILED, each
+// with its reason.
+func overlayOpenStatuses(
+	ctx context.Context, deploys *reconcile.Core, kind, ouID string, artifactUUID uuid.UUID, deployments ...*models.Deployment,
+) error {
+	open, err := deploys.OpenStatuses(ctx, kind, ouID, artifactUUID)
+	if err != nil {
+		return fmt.Errorf("failed to read the deployment status: %w", err)
+	}
+	for _, d := range deployments {
+		st, ok := open[d.GatewayUUID]
+		if !ok || !d.IsPlaced() {
+			continue
+		}
+		status, reason := st.Status, st.Reason
+		d.Status, d.StatusReason = &status, &reason
+	}
+	return nil
 }
