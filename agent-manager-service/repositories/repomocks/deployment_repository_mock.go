@@ -44,6 +44,9 @@ import (
 //			GetByArtifactAndGatewayFunc: func(artifactUUID string, gatewayUUID string, orgUUID string) (*models.Deployment, error) {
 //				panic("mock out the GetByArtifactAndGateway method")
 //			},
+//			GetContentsForGatewaySyncFunc: func(ctx context.Context, gatewayID string, orgUUID string, deploymentIDs []uuid.UUID) ([]models.GatewaySyncContent, error) {
+//				panic("mock out the GetContentsForGatewaySync method")
+//			},
 //			GetCurrentByGatewayFunc: func(artifactUUID string, gatewayID string, orgUUID string) (*models.Deployment, error) {
 //				panic("mock out the GetCurrentByGateway method")
 //			},
@@ -79,6 +82,9 @@ import (
 //			},
 //			IsProviderDeployedToGatewayFunc: func(artifactUUID uuid.UUID, gatewayUUID uuid.UUID, orgUUID string) (bool, error) {
 //				panic("mock out the IsProviderDeployedToGateway method")
+//			},
+//			ListForGatewaySyncFunc: func(ctx context.Context, gatewayID string, orgUUID string) ([]models.GatewaySyncDeployment, error) {
+//				panic("mock out the ListForGatewaySync method")
 //			},
 //			SetCurrentFunc: func(artifactUUID string, orgUUID string, gatewayID string, deploymentID string, status models.DeploymentStatus) (time.Time, error) {
 //				panic("mock out the SetCurrent method")
@@ -120,6 +126,9 @@ type DeploymentRepositoryMock struct {
 	// GetByArtifactAndGatewayFunc mocks the GetByArtifactAndGateway method.
 	GetByArtifactAndGatewayFunc func(artifactUUID string, gatewayUUID string, orgUUID string) (*models.Deployment, error)
 
+	// GetContentsForGatewaySyncFunc mocks the GetContentsForGatewaySync method.
+	GetContentsForGatewaySyncFunc func(ctx context.Context, gatewayID string, orgUUID string, deploymentIDs []uuid.UUID) ([]models.GatewaySyncContent, error)
+
 	// GetCurrentByGatewayFunc mocks the GetCurrentByGateway method.
 	GetCurrentByGatewayFunc func(artifactUUID string, gatewayID string, orgUUID string) (*models.Deployment, error)
 
@@ -155,6 +164,9 @@ type DeploymentRepositoryMock struct {
 
 	// IsProviderDeployedToGatewayFunc mocks the IsProviderDeployedToGateway method.
 	IsProviderDeployedToGatewayFunc func(artifactUUID uuid.UUID, gatewayUUID uuid.UUID, orgUUID string) (bool, error)
+
+	// ListForGatewaySyncFunc mocks the ListForGatewaySync method.
+	ListForGatewaySyncFunc func(ctx context.Context, gatewayID string, orgUUID string) ([]models.GatewaySyncDeployment, error)
 
 	// SetCurrentFunc mocks the SetCurrent method.
 	SetCurrentFunc func(artifactUUID string, orgUUID string, gatewayID string, deploymentID string, status models.DeploymentStatus) (time.Time, error)
@@ -236,6 +248,17 @@ type DeploymentRepositoryMock struct {
 			GatewayUUID string
 			// OrgUUID is the orgUUID argument value.
 			OrgUUID string
+		}
+		// GetContentsForGatewaySync holds details about calls to the GetContentsForGatewaySync method.
+		GetContentsForGatewaySync []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// GatewayID is the gatewayID argument value.
+			GatewayID string
+			// OrgUUID is the orgUUID argument value.
+			OrgUUID string
+			// DeploymentIDs is the deploymentIDs argument value.
+			DeploymentIDs []uuid.UUID
 		}
 		// GetCurrentByGateway holds details about calls to the GetCurrentByGateway method.
 		GetCurrentByGateway []struct {
@@ -343,6 +366,15 @@ type DeploymentRepositoryMock struct {
 			// OrgUUID is the orgUUID argument value.
 			OrgUUID string
 		}
+		// ListForGatewaySync holds details about calls to the ListForGatewaySync method.
+		ListForGatewaySync []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// GatewayID is the gatewayID argument value.
+			GatewayID string
+			// OrgUUID is the orgUUID argument value.
+			OrgUUID string
+		}
 		// SetCurrent holds details about calls to the SetCurrent method.
 		SetCurrent []struct {
 			// ArtifactUUID is the artifactUUID argument value.
@@ -385,6 +417,7 @@ type DeploymentRepositoryMock struct {
 	lockDeleteStatus                    sync.RWMutex
 	lockFailStaleTransitional           sync.RWMutex
 	lockGetByArtifactAndGateway         sync.RWMutex
+	lockGetContentsForGatewaySync       sync.RWMutex
 	lockGetCurrentByGateway             sync.RWMutex
 	lockGetDeployedGatewaysByProvider   sync.RWMutex
 	lockGetDeployedProvidersByGateway   sync.RWMutex
@@ -397,6 +430,7 @@ type DeploymentRepositoryMock struct {
 	lockGetWithState                    sync.RWMutex
 	lockGetWithStateCtx                 sync.RWMutex
 	lockIsProviderDeployedToGateway     sync.RWMutex
+	lockListForGatewaySync              sync.RWMutex
 	lockSetCurrent                      sync.RWMutex
 	lockSetCurrentCtx                   sync.RWMutex
 	lockWithTx                          sync.RWMutex
@@ -715,6 +749,50 @@ func (mock *DeploymentRepositoryMock) GetByArtifactAndGatewayCalls() []struct {
 	mock.lockGetByArtifactAndGateway.RLock()
 	calls = mock.calls.GetByArtifactAndGateway
 	mock.lockGetByArtifactAndGateway.RUnlock()
+	return calls
+}
+
+// GetContentsForGatewaySync calls GetContentsForGatewaySyncFunc.
+func (mock *DeploymentRepositoryMock) GetContentsForGatewaySync(ctx context.Context, gatewayID string, orgUUID string, deploymentIDs []uuid.UUID) ([]models.GatewaySyncContent, error) {
+	if mock.GetContentsForGatewaySyncFunc == nil {
+		panic("DeploymentRepositoryMock.GetContentsForGatewaySyncFunc: method is nil but DeploymentRepository.GetContentsForGatewaySync was just called")
+	}
+	callInfo := struct {
+		Ctx           context.Context
+		GatewayID     string
+		OrgUUID       string
+		DeploymentIDs []uuid.UUID
+	}{
+		Ctx:           ctx,
+		GatewayID:     gatewayID,
+		OrgUUID:       orgUUID,
+		DeploymentIDs: deploymentIDs,
+	}
+	mock.lockGetContentsForGatewaySync.Lock()
+	mock.calls.GetContentsForGatewaySync = append(mock.calls.GetContentsForGatewaySync, callInfo)
+	mock.lockGetContentsForGatewaySync.Unlock()
+	return mock.GetContentsForGatewaySyncFunc(ctx, gatewayID, orgUUID, deploymentIDs)
+}
+
+// GetContentsForGatewaySyncCalls gets all the calls that were made to GetContentsForGatewaySync.
+// Check the length with:
+//
+//	len(mockedDeploymentRepository.GetContentsForGatewaySyncCalls())
+func (mock *DeploymentRepositoryMock) GetContentsForGatewaySyncCalls() []struct {
+	Ctx           context.Context
+	GatewayID     string
+	OrgUUID       string
+	DeploymentIDs []uuid.UUID
+} {
+	var calls []struct {
+		Ctx           context.Context
+		GatewayID     string
+		OrgUUID       string
+		DeploymentIDs []uuid.UUID
+	}
+	mock.lockGetContentsForGatewaySync.RLock()
+	calls = mock.calls.GetContentsForGatewaySync
+	mock.lockGetContentsForGatewaySync.RUnlock()
 	return calls
 }
 
@@ -1191,6 +1269,46 @@ func (mock *DeploymentRepositoryMock) IsProviderDeployedToGatewayCalls() []struc
 	mock.lockIsProviderDeployedToGateway.RLock()
 	calls = mock.calls.IsProviderDeployedToGateway
 	mock.lockIsProviderDeployedToGateway.RUnlock()
+	return calls
+}
+
+// ListForGatewaySync calls ListForGatewaySyncFunc.
+func (mock *DeploymentRepositoryMock) ListForGatewaySync(ctx context.Context, gatewayID string, orgUUID string) ([]models.GatewaySyncDeployment, error) {
+	if mock.ListForGatewaySyncFunc == nil {
+		panic("DeploymentRepositoryMock.ListForGatewaySyncFunc: method is nil but DeploymentRepository.ListForGatewaySync was just called")
+	}
+	callInfo := struct {
+		Ctx       context.Context
+		GatewayID string
+		OrgUUID   string
+	}{
+		Ctx:       ctx,
+		GatewayID: gatewayID,
+		OrgUUID:   orgUUID,
+	}
+	mock.lockListForGatewaySync.Lock()
+	mock.calls.ListForGatewaySync = append(mock.calls.ListForGatewaySync, callInfo)
+	mock.lockListForGatewaySync.Unlock()
+	return mock.ListForGatewaySyncFunc(ctx, gatewayID, orgUUID)
+}
+
+// ListForGatewaySyncCalls gets all the calls that were made to ListForGatewaySync.
+// Check the length with:
+//
+//	len(mockedDeploymentRepository.ListForGatewaySyncCalls())
+func (mock *DeploymentRepositoryMock) ListForGatewaySyncCalls() []struct {
+	Ctx       context.Context
+	GatewayID string
+	OrgUUID   string
+} {
+	var calls []struct {
+		Ctx       context.Context
+		GatewayID string
+		OrgUUID   string
+	}
+	mock.lockListForGatewaySync.RLock()
+	calls = mock.calls.ListForGatewaySync
+	mock.lockListForGatewaySync.RUnlock()
 	return calls
 }
 

@@ -88,6 +88,14 @@ type DeploymentRepository interface {
 
 	// DeleteForArtifact removes every deployment of the artifact; their deployment_status rows cascade.
 	DeleteForArtifact(ctx context.Context, artifactUUID uuid.UUID, orgUUID string) error
+
+	// Gateway startup sync
+	// ListForGatewaySync returns every deployment_status row of the gateway in the org.
+	ListForGatewaySync(ctx context.Context, gatewayID, orgUUID string) ([]models.GatewaySyncDeployment, error)
+	// GetContentsForGatewaySync returns the content of those deployments the gateway is meant to
+	// hold: its current deployment of an artifact, desired DEPLOYED. Other ids are left out.
+	GetContentsForGatewaySync(ctx context.Context, gatewayID, orgUUID string, deploymentIDs []uuid.UUID) ([]models.GatewaySyncContent, error)
+
 	// WithTx returns the repository bound to tx.
 	WithTx(tx *gorm.DB) DeploymentRepository
 }

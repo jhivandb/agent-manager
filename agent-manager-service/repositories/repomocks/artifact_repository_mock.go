@@ -26,6 +26,9 @@ import (
 //			DeleteFunc: func(tx *gorm.DB, uuid string) error {
 //				panic("mock out the Delete method")
 //			},
+//			ExistingGatewayArtifactIDsFunc: func(ctx context.Context, orgUUID string, ids []string) ([]string, error) {
+//				panic("mock out the ExistingGatewayArtifactIDs method")
+//			},
 //			ExistsFunc: func(kind string, handle string, orgUUID string) (bool, error) {
 //				panic("mock out the Exists method")
 //			},
@@ -59,6 +62,9 @@ type ArtifactRepositoryMock struct {
 
 	// DeleteFunc mocks the Delete method.
 	DeleteFunc func(tx *gorm.DB, uuid string) error
+
+	// ExistingGatewayArtifactIDsFunc mocks the ExistingGatewayArtifactIDs method.
+	ExistingGatewayArtifactIDsFunc func(ctx context.Context, orgUUID string, ids []string) ([]string, error)
 
 	// ExistsFunc mocks the Exists method.
 	ExistsFunc func(kind string, handle string, orgUUID string) (bool, error)
@@ -100,6 +106,15 @@ type ArtifactRepositoryMock struct {
 			Tx *gorm.DB
 			// UUID is the uuid argument value.
 			UUID string
+		}
+		// ExistingGatewayArtifactIDs holds details about calls to the ExistingGatewayArtifactIDs method.
+		ExistingGatewayArtifactIDs []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// OrgUUID is the orgUUID argument value.
+			OrgUUID string
+			// Ids is the ids argument value.
+			Ids []string
 		}
 		// Exists holds details about calls to the Exists method.
 		Exists []struct {
@@ -154,15 +169,16 @@ type ArtifactRepositoryMock struct {
 			InCatalog bool
 		}
 	}
-	lockCountByKindAndOrg   sync.RWMutex
-	lockCreate              sync.RWMutex
-	lockDelete              sync.RWMutex
-	lockExists              sync.RWMutex
-	lockGetByHandle         sync.RWMutex
-	lockGetByUUID           sync.RWMutex
-	lockListByHandlePrefix  sync.RWMutex
-	lockUpdate              sync.RWMutex
-	lockUpdateCatalogStatus sync.RWMutex
+	lockCountByKindAndOrg          sync.RWMutex
+	lockCreate                     sync.RWMutex
+	lockDelete                     sync.RWMutex
+	lockExistingGatewayArtifactIDs sync.RWMutex
+	lockExists                     sync.RWMutex
+	lockGetByHandle                sync.RWMutex
+	lockGetByUUID                  sync.RWMutex
+	lockListByHandlePrefix         sync.RWMutex
+	lockUpdate                     sync.RWMutex
+	lockUpdateCatalogStatus        sync.RWMutex
 }
 
 // CountByKindAndOrg calls CountByKindAndOrgFunc.
@@ -270,6 +286,46 @@ func (mock *ArtifactRepositoryMock) DeleteCalls() []struct {
 	mock.lockDelete.RLock()
 	calls = mock.calls.Delete
 	mock.lockDelete.RUnlock()
+	return calls
+}
+
+// ExistingGatewayArtifactIDs calls ExistingGatewayArtifactIDsFunc.
+func (mock *ArtifactRepositoryMock) ExistingGatewayArtifactIDs(ctx context.Context, orgUUID string, ids []string) ([]string, error) {
+	if mock.ExistingGatewayArtifactIDsFunc == nil {
+		panic("ArtifactRepositoryMock.ExistingGatewayArtifactIDsFunc: method is nil but ArtifactRepository.ExistingGatewayArtifactIDs was just called")
+	}
+	callInfo := struct {
+		Ctx     context.Context
+		OrgUUID string
+		Ids     []string
+	}{
+		Ctx:     ctx,
+		OrgUUID: orgUUID,
+		Ids:     ids,
+	}
+	mock.lockExistingGatewayArtifactIDs.Lock()
+	mock.calls.ExistingGatewayArtifactIDs = append(mock.calls.ExistingGatewayArtifactIDs, callInfo)
+	mock.lockExistingGatewayArtifactIDs.Unlock()
+	return mock.ExistingGatewayArtifactIDsFunc(ctx, orgUUID, ids)
+}
+
+// ExistingGatewayArtifactIDsCalls gets all the calls that were made to ExistingGatewayArtifactIDs.
+// Check the length with:
+//
+//	len(mockedArtifactRepository.ExistingGatewayArtifactIDsCalls())
+func (mock *ArtifactRepositoryMock) ExistingGatewayArtifactIDsCalls() []struct {
+	Ctx     context.Context
+	OrgUUID string
+	Ids     []string
+} {
+	var calls []struct {
+		Ctx     context.Context
+		OrgUUID string
+		Ids     []string
+	}
+	mock.lockExistingGatewayArtifactIDs.RLock()
+	calls = mock.calls.ExistingGatewayArtifactIDs
+	mock.lockExistingGatewayArtifactIDs.RUnlock()
 	return calls
 }
 

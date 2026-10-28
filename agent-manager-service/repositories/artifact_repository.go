@@ -40,6 +40,9 @@ type ArtifactRepository interface {
 	GetByUUID(artifactUUID, orgUUID string) (*models.Artifact, error)
 	ListByHandlePrefix(ctx context.Context, kind, handlePrefix, orgUUID string) ([]*models.Artifact, error)
 	CountByKindAndOrg(kind, orgUUID string) (int, error)
+	// ExistingGatewayArtifactIDs returns those of ids that name an artifact of the org the way a
+	// gateway does: by its UUID, or an LLM proxy by its handle.
+	ExistingGatewayArtifactIDs(ctx context.Context, orgUUID string, ids []string) ([]string, error)
 }
 
 // ArtifactRepo implements ArtifactRepository using GORM
