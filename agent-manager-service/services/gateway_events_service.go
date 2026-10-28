@@ -56,20 +56,6 @@ func NewGatewayEventsService(hub eventhub.EventHub) *GatewayEventsService {
 	return &GatewayEventsService{hub: hub}
 }
 
-// DeploymentEvent represents an API deployment event (TODO: move to models package)
-type DeploymentEvent struct {
-	APIID        string `json:"apiId"`
-	DeploymentID string `json:"deploymentId"`
-	GatewayID    string `json:"gatewayId"`
-}
-
-// APIUndeploymentEvent represents an API undeployment event (TODO: move to models package)
-type APIUndeploymentEvent struct {
-	APIID        string `json:"apiId"`
-	DeploymentID string `json:"deploymentId"`
-	GatewayID    string `json:"gatewayId"`
-}
-
 func (s *GatewayEventsService) broadcastEvent(gatewayID string, eventType string, action string, entityID string, payload interface{}) error {
 	return s.broadcastEventContext(context.Background(), gatewayID, eventType, action, entityID, payload)
 }
@@ -122,54 +108,6 @@ func (s *GatewayEventsService) broadcastEventContext(ctx context.Context, gatewa
 // PublishGatewayEvent sends a kind's gateway event; it is how the reconcile core publishes.
 func (s *GatewayEventsService) PublishGatewayEvent(ctx context.Context, gatewayID string, event reconcile.Event) error {
 	return s.broadcastEventContext(ctx, gatewayID, event.Type, event.Action, event.EntityID, event.Payload)
-}
-
-// Public methods become thin one-liners:
-func (s *GatewayEventsService) BroadcastDeploymentEvent(gatewayID string, event *DeploymentEvent) error {
-	return s.broadcastEvent(gatewayID, "api.deployed", "CREATE", event.APIID, event)
-}
-
-func (s *GatewayEventsService) BroadcastUndeploymentEvent(gatewayID string, event *APIUndeploymentEvent) error {
-	return s.broadcastEvent(gatewayID, "api.undeployed", "DELETE", event.APIID, event)
-}
-
-func (s *GatewayEventsService) BroadcastLLMProviderDeploymentEvent(gatewayID string, event *models.LLMProviderDeploymentEvent) error {
-	return s.broadcastEvent(gatewayID, "llmprovider.deployed", "CREATE", event.ProviderID, event)
-}
-
-func (s *GatewayEventsService) BroadcastLLMProviderUndeploymentEvent(gatewayID string, event *models.LLMProviderUndeploymentEvent) error {
-	return s.broadcastEvent(gatewayID, "llmprovider.undeployed", "DELETE", event.ProviderID, event)
-}
-
-func (s *GatewayEventsService) BroadcastLLMProxyDeploymentEvent(gatewayID string, event *models.LLMProxyDeploymentEvent) error {
-	return s.broadcastEvent(gatewayID, "llmproxy.deployed", "CREATE", event.ProxyID, event)
-}
-
-func (s *GatewayEventsService) BroadcastMCPProxyDeploymentEvent(gatewayID string, event *models.MCPProxyDeploymentEvent) error {
-	return s.broadcastEvent(gatewayID, "mcpproxy.deployed", "CREATE", event.ProxyID, event)
-}
-
-func (s *GatewayEventsService) BroadcastMCPProxyDeletionEvent(gatewayID string, event *models.MCPProxyDeletionEvent) error {
-	return s.broadcastEvent(gatewayID, "mcpproxy.deleted", "DELETE", event.ProxyID, event)
-}
-
-// BroadcastLLMProviderDeletionEvent tells a gateway to drop a deleted provider's
-// config outright. The paired "llmprovider.undeployed" event is only a soft state
-// flip on the gateway and leaves the config in place, so this must be sent as well
-// whenever the provider itself is deleted.
-func (s *GatewayEventsService) BroadcastLLMProviderDeletionEvent(ctx context.Context, gatewayID string, event *models.LLMProviderDeletionEvent) error {
-	return s.broadcastEventContext(ctx, gatewayID, "llmprovider.deleted", "DELETE", event.ProviderID, event)
-}
-
-// BroadcastLLMProxyDeletionEvent tells a gateway to drop a deleted proxy's config
-// outright. See BroadcastLLMProviderDeletionEvent for why the undeploy event alone
-// is not enough.
-func (s *GatewayEventsService) BroadcastLLMProxyDeletionEvent(ctx context.Context, gatewayID string, event *models.LLMProxyDeletionEvent) error {
-	return s.broadcastEventContext(ctx, gatewayID, "llmproxy.deleted", "DELETE", event.ProxyID, event)
-}
-
-func (s *GatewayEventsService) BroadcastLLMProxyUndeploymentEvent(gatewayID string, event *models.LLMProxyUndeploymentEvent) error {
-	return s.broadcastEvent(gatewayID, "llmproxy.undeployed", "DELETE", event.ProxyID, event)
 }
 
 // API key events use a unique ID per event — they are not deduplicated on replay
