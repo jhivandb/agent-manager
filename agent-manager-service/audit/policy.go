@@ -162,6 +162,9 @@ var coalesceWindows = map[string]time.Duration{
 	"/llm-providers/api-keys": 5 * time.Minute,
 	"/llm-proxies/api-keys":   5 * time.Minute,
 	"/apis/api-keys":          5 * time.Minute,
+	// One startup sync fetches its deployments in batches of 50.
+	"/deployments/fetch-batch": 5 * time.Minute,
+	"/artifacts/exists":        5 * time.Minute,
 
 	// The gateway failure summary answers 503 when the fleet is over its
 	// failure threshold, so it is built to be a monitor's target and will be
@@ -339,6 +342,11 @@ var actionOverrides = map[string]Action{
 	"GET /llm-providers/api-keys":         "api-key:sync",
 	"GET /llm-proxies/api-keys":           "api-key:sync",
 	"GET /apis/api-keys":                  "api-key:sync",
+	// The gateway's startup sync: reads expressed as POST. The fetch hands the
+	// gateway its deployments with upstream secrets resolved, so it is recorded
+	// like the key bulk-sync.
+	"POST /deployments/fetch-batch": "deployment:sync",
+	"POST /artifacts/exists":        "deployment:sync",
 
 	// Reads expressed as POST because they carry a request body.
 	// The score-publish route carries no rbac.Permission at all — it is gated

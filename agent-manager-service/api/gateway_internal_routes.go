@@ -37,9 +37,10 @@ func RegisterGatewayInternalRoutes(rr *middleware.RouteRegistrar, ctrl controlle
 	// Subscription plans endpoint
 	rr.HandleFuncWithValidation("GET /subscription-plans", ctrl.GetSubscriptionPlans)
 
-	// Deployment sync endpoint (gateway-controller reconciles its local cache
-	// against this on connect and periodically).
+	// Startup sync: gateway-controller reconciles what it holds against these when it connects.
 	rr.HandleFuncWithValidation("GET /deployments", ctrl.GetDeployments)
+	rr.HandleFuncWithValidation("POST /deployments/fetch-batch", ctrl.FetchDeploymentsBatch)
+	rr.HandleFuncWithValidation("POST /artifacts/exists", ctrl.CheckArtifactsExist)
 
 	// AI applications endpoint (bulk-sync for per-consumer rate limiting)
 	rr.HandleFuncWithValidation("GET /applications", ctrl.GetApplications)

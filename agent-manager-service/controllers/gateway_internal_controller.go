@@ -44,6 +44,8 @@ type GatewayInternalController interface {
 	GetAPIKeys(w http.ResponseWriter, r *http.Request)
 	GetSubscriptionPlans(w http.ResponseWriter, r *http.Request)
 	GetDeployments(w http.ResponseWriter, r *http.Request)
+	FetchDeploymentsBatch(w http.ResponseWriter, r *http.Request)
+	CheckArtifactsExist(w http.ResponseWriter, r *http.Request)
 	GetApplications(w http.ResponseWriter, r *http.Request)
 	PushGatewayManifest(w http.ResponseWriter, r *http.Request)
 }
@@ -388,23 +390,109 @@ func (c *gatewayInternalController) GetSubscriptionPlans(w http.ResponseWriter, 
 	utils.WriteSuccessResponse(w, http.StatusOK, []struct{}{})
 }
 
-type controlPlaneDeploymentsResponse struct {
-	Deployments []struct{} `json:"deployments"`
-}
-
 // GetDeployments handles GET /api/internal/v1/deployments
-// gateway-controller calls this on connect (and periodically) to reconcile its
-// local deployment cache with what the control plane believes is deployed, via
-// pkg/controlplane.FetchControlPlaneDeployments. Deployment state currently
-// lives entirely in the RestApi/LlmProvider CRs the gateway-operator manages,
-// not in agent-manager's own DB, so there is nothing yet to report here —
-// returns an empty list, matching GetSubscriptionPlans/GetApplications above.
+//
+// gateway-controller calls this when it connects, to reconcile what it holds with the calling
+// gateway's deployments here: it fetches what is missing or has a different deploymentId through
+// FetchDeploymentsBatch, flips a state that differs, and deletes what is listed neither here nor
+// by CheckArtifactsExist.
 func (c *gatewayInternalController) GetDeployments(w http.ResponseWriter, r *http.Request) {
-	if _, ok := c.authenticateGateway(w, r, "internal-read"); !ok {
+	log := logger.GetLogger(r.Context())
+	identity, ok := c.authenticateGateway(w, r, "internal-read")
+	if !ok {
 		return
 	}
 
-	utils.WriteSuccessResponse(w, http.StatusOK, controlPlaneDeploymentsResponse{Deployments: []struct{}{}})
+	deployments, err := c.gatewayInternalService.ListGatewayDeployments(r.Context(), identity.OUID, identity.ID)
+	if err != nil {
+		log.Error("Failed to list gateway deployments", "gatewayID", identity.ID, "error", err)
+		http.Error(w, "Failed to list deployments", http.StatusInternalServerError)
+		return
+	}
+	utils.WriteSuccessResponse(w, http.StatusOK, models.ControlPlaneDeploymentsResponse{Deployments: deployments})
+}
+
+// maxDeploymentsBatch bounds one fetch-batch request. The gateway asks for 50 at a time by default.
+const maxDeploymentsBatch = 1000
+
+// deploymentsBatchMediaType is the only representation POST /deployments/fetch-batch serves.
+const deploymentsBatchMediaType = "application/x-tar+gzip"
+
+// FetchDeploymentsBatch handles POST /api/internal/v1/deployments/fetch-batch
+//
+// It answers with a tar.gz holding <deploymentId>/<artifact>.yaml for each requested deployment
+// the calling gateway is meant to hold. The gateway logs and skips an id the archive leaves out.
+func (c *gatewayInternalController) FetchDeploymentsBatch(w http.ResponseWriter, r *http.Request) {
+	log := logger.GetLogger(r.Context())
+	identity, ok := c.authenticateGateway(w, r, "internal-read")
+	if !ok {
+		return
+	}
+	if r.Header.Get("Accept") != deploymentsBatchMediaType {
+		http.Error(w, "This endpoint only supports Accept: "+deploymentsBatchMediaType, http.StatusNotAcceptable)
+		return
+	}
+
+	var req models.DeploymentsBatchFetchRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	if len(req.DeploymentIDs) == 0 {
+		http.Error(w, "At least one deployment ID is required", http.StatusBadRequest)
+		return
+	}
+	if len(req.DeploymentIDs) > maxDeploymentsBatch {
+		http.Error(w, fmt.Sprintf("At most %d deployment IDs may be fetched at once", maxDeploymentsBatch), http.StatusBadRequest)
+		return
+	}
+
+	files, err := c.gatewayInternalService.GetGatewayDeploymentFiles(r.Context(), identity.OUID, identity.ID, req.DeploymentIDs)
+	if err != nil {
+		log.Error("Failed to get gateway deployment contents", "gatewayID", identity.ID, "error", err)
+		http.Error(w, "Failed to get deployment content", http.StatusInternalServerError)
+		return
+	}
+	archive, err := utils.CreateDeploymentBatchTarGz(files)
+	if err != nil {
+		log.Error("Failed to create deployment batch archive", "gatewayID", identity.ID, "error", err)
+		http.Error(w, "Failed to create deployment package", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", deploymentsBatchMediaType)
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"deployments-batch-%s.tar.gz\"", identity.ID))
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(archive)))
+	w.WriteHeader(http.StatusOK)
+	if _, err := w.Write(archive); err != nil {
+		log.Error("Failed to write deployment batch archive", "gatewayID", identity.ID, "error", err)
+	}
+}
+
+// CheckArtifactsExist handles POST /api/internal/v1/artifacts/exists
+//
+// The gateway asks this before deleting local artifacts its deployment list no longer names, and
+// keeps those that still exist here. If the call fails it deletes none.
+func (c *gatewayInternalController) CheckArtifactsExist(w http.ResponseWriter, r *http.Request) {
+	log := logger.GetLogger(r.Context())
+	identity, ok := c.authenticateGateway(w, r, "internal-read")
+	if !ok {
+		return
+	}
+
+	var req models.ArtifactsExistRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	artifacts, err := c.gatewayInternalService.CheckArtifactsExist(r.Context(), identity.OUID, req.ArtifactIDs)
+	if err != nil {
+		log.Error("Failed to check artifact existence", "gatewayID", identity.ID, "error", err)
+		http.Error(w, "Failed to check artifact existence", http.StatusInternalServerError)
+		return
+	}
+	utils.WriteSuccessResponse(w, http.StatusOK, models.ArtifactsExistResponse{Artifacts: artifacts})
 }
 
 // gatewayApplicationResponse is the bulk-sync response format for AI applications.

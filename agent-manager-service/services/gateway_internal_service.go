@@ -22,10 +22,13 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
+	"github.com/google/uuid"
 	"gopkg.in/yaml.v3"
 	"gorm.io/gorm"
 
+	"github.com/wso2/agent-manager/agent-manager-service/models"
 	"github.com/wso2/agent-manager/agent-manager-service/repositories"
 	"github.com/wso2/agent-manager/agent-manager-service/utils"
 )
@@ -36,6 +39,7 @@ type GatewayInternalAPIService struct {
 	proxyRepo        repositories.LLMProxyRepository
 	deploymentRepo   repositories.DeploymentRepository
 	gatewayRepo      repositories.GatewayRepository
+	artifactRepo     repositories.ArtifactRepository
 	infraResourceMgr InfraResourceManager
 	encryptionKey    []byte
 }
@@ -87,6 +91,7 @@ func NewGatewayInternalAPIService(
 	proxyRepo repositories.LLMProxyRepository,
 	deploymentRepo repositories.DeploymentRepository,
 	gatewayRepo repositories.GatewayRepository,
+	artifactRepo repositories.ArtifactRepository,
 	infraResourceMgr InfraResourceManager,
 	encryptionKey []byte,
 ) *GatewayInternalAPIService {
@@ -95,6 +100,7 @@ func NewGatewayInternalAPIService(
 		proxyRepo:        proxyRepo,
 		deploymentRepo:   deploymentRepo,
 		gatewayRepo:      gatewayRepo,
+		artifactRepo:     artifactRepo,
 		infraResourceMgr: infraResourceMgr,
 		encryptionKey:    encryptionKey,
 	}
@@ -181,7 +187,7 @@ func (s *GatewayInternalAPIService) GetActiveLLMProviderDeploymentByGateway(ctx 
 	providerYaml := string(deployment.Content)
 
 	// Resolve secret references in the YAML
-	resolvedYaml, err := s.resolveSecretsInYAML(ctx, providerYaml, "upstream.auth")
+	resolvedYaml, err := s.resolveSecretsForGateway(ctx, models.KindLLMProvider, providerYaml)
 	if err != nil {
 		slog.Error("GatewayInternalAPIService: failed to resolve secrets in provider YAML",
 			"providerID", providerID, "error", err)
@@ -218,7 +224,7 @@ func (s *GatewayInternalAPIService) GetActiveLLMProxyDeploymentByGateway(ctx con
 	proxyYaml := string(deployment.Content)
 
 	// Resolve secret references in the YAML
-	resolvedYaml, err := s.resolveSecretsInYAML(ctx, proxyYaml, "provider.auth")
+	resolvedYaml, err := s.resolveSecretsForGateway(ctx, models.KindLLMProxy, proxyYaml)
 	if err != nil {
 		slog.Error("GatewayInternalAPIService: failed to resolve secrets in proxy YAML",
 			"proxyID", proxyID, "error", err)
@@ -229,6 +235,117 @@ func (s *GatewayInternalAPIService) GetActiveLLMProxyDeploymentByGateway(ctx con
 		proxyID: resolvedYaml,
 	}
 	return proxyYamlMap, nil
+}
+
+// ListGatewayDeployments lists the gateway's deployments for its startup sync: every
+// deployment_status row, named the way the gateway stores the artifact and in the state it is
+// being driven to, so a row still DEPLOYING or UNDEPLOYING reads as deployed or undeployed.
+//
+// deployedAt is the row's performed_at. The gateway re-fetches a deployment whose deployedAt
+// differs from what it holds, and from then on holds this value.
+func (s *GatewayInternalAPIService) ListGatewayDeployments(ctx context.Context, ouID, gatewayID string) ([]models.ControlPlaneDeployment, error) {
+	rows, err := s.deploymentRepo.ListForGatewaySync(ctx, gatewayID, ouID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list gateway deployments: %w", err)
+	}
+	deployments := make([]models.ControlPlaneDeployment, 0, len(rows))
+	for _, row := range rows {
+		kind, ok := row.GatewayKind()
+		if !ok {
+			continue
+		}
+		// The gateway keeps deployedAt at millisecond precision.
+		deployedAt := row.PerformedAt.UTC().Truncate(time.Millisecond)
+		deploymentID := row.DeploymentID.String()
+		deployments = append(deployments, models.ControlPlaneDeployment{
+			ArtifactID:   row.GatewayArtifactID(),
+			DeploymentID: deploymentID,
+			Kind:         kind,
+			State:        strings.ToLower(string(row.StatusDesired)),
+			DeployedAt:   deployedAt,
+			Etag:         fmt.Sprintf("%s-%d", deploymentID, deployedAt.UnixMilli()),
+		})
+	}
+	return deployments, nil
+}
+
+// GetGatewayDeploymentFiles returns the artifact YAML of each requested deployment the gateway is
+// meant to hold, with secrets resolved as its single pull resolves them. Ids that name no such
+// deployment are left out, and so is a deployment that can't be rendered: one bad deployment must
+// not fail the gateway's whole sync.
+func (s *GatewayInternalAPIService) GetGatewayDeploymentFiles(ctx context.Context, ouID, gatewayID string, deploymentIDs []string) ([]utils.DeploymentArchiveEntry, error) {
+	ids := make([]uuid.UUID, 0, len(deploymentIDs))
+	for _, id := range deploymentIDs {
+		if parsed, err := uuid.Parse(id); err == nil {
+			ids = append(ids, parsed)
+		}
+	}
+	contents, err := s.deploymentRepo.GetContentsForGatewaySync(ctx, gatewayID, ouID, ids)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get gateway deployment contents: %w", err)
+	}
+
+	files := make([]utils.DeploymentArchiveEntry, 0, len(contents))
+	for _, content := range contents {
+		resolved, err := s.resolveSecretsForGateway(ctx, content.ArtifactKind, string(content.Content))
+		if err != nil {
+			slog.Warn("GatewayInternalAPIService: leaving a deployment out of the gateway's sync batch",
+				"deploymentID", content.DeploymentID, "artifactUUID", content.ArtifactUUID, "gatewayID", gatewayID, "error", err)
+			continue
+		}
+		files = append(files, utils.DeploymentArchiveEntry{
+			DeploymentID: content.DeploymentID.String(),
+			FileName:     gatewayArtifactFilePrefix(content.ArtifactKind) + content.GatewayArtifactID() + ".yaml",
+			Content:      []byte(resolved),
+		})
+	}
+	return files, nil
+}
+
+// gatewayArtifactFilePrefix is the file name prefix the kind's single pull gives its YAML.
+func gatewayArtifactFilePrefix(artifactKind string) string {
+	switch artifactKind {
+	case models.KindLLMProvider:
+		return "llm-provider-"
+	case models.KindLLMProxy:
+		return "llm-proxy-"
+	case models.KindMCPProxy, models.KindMCPMapping:
+		return "mcp-proxy-"
+	default:
+		return "agent-"
+	}
+}
+
+// CheckArtifactsExist answers, for each id the gateway names an artifact by, whether AMS still has
+// that artifact. The gateway keeps a local artifact missing from its deployment list when it does.
+func (s *GatewayInternalAPIService) CheckArtifactsExist(ctx context.Context, ouID string, artifactIDs []string) ([]models.ArtifactExistence, error) {
+	existing, err := s.artifactRepo.ExistingGatewayArtifactIDs(ctx, ouID, artifactIDs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check artifact existence: %w", err)
+	}
+	exists := make(map[string]bool, len(existing))
+	for _, id := range existing {
+		exists[id] = true
+	}
+	answers := make([]models.ArtifactExistence, 0, len(artifactIDs))
+	for _, id := range artifactIDs {
+		answers = append(answers, models.ArtifactExistence{ArtifactID: id, Exists: exists[id]})
+	}
+	return answers, nil
+}
+
+// resolveSecretsForGateway resolves the secretRefs of an artifact of the kind into the values the
+// gateway is served: an LLM provider's upstream auth, an LLM proxy's provider auth, and every
+// secretRef in an MCP proxy or Agent, whose upstream auth may sit in several places.
+func (s *GatewayInternalAPIService) resolveSecretsForGateway(ctx context.Context, artifactKind, yamlContent string) (string, error) {
+	switch artifactKind {
+	case models.KindLLMProvider:
+		return s.resolveSecretsInYAML(ctx, yamlContent, "upstream.auth")
+	case models.KindLLMProxy:
+		return s.resolveSecretsInYAML(ctx, yamlContent, "provider.auth")
+	default:
+		return s.resolveAllSecretsInYAML(ctx, yamlContent)
+	}
 }
 
 // resolveSecretsInYAML parses YAML, finds auth.secretRef, decrypts it,

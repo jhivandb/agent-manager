@@ -34,6 +34,9 @@ const (
 	// keys looks exactly like a legitimate sync until you can see who pulled
 	// what and when it started.
 	ActionAPIKeySync Action = "api-key:sync"
+	// ActionDeploymentSync is a data-plane gateway fetching its deployments in
+	// its startup sync, upstream secrets resolved.
+	ActionDeploymentSync Action = "deployment:sync"
 
 	ActionGitSecretCreate Action = "git-secret:create"
 	ActionGitSecretDelete Action = "git-secret:delete"
@@ -199,6 +202,8 @@ func init() {
 	RegisterDetailSchema(ActionAPIKeySync, map[string]FieldKind{
 		"keyCount": KindCount,
 	})
+	Register(ActionDeploymentSync, ClassRead, SeverityNotice)
+	RegisterDetailSchema(ActionDeploymentSync, nil)
 
 	registerCredential(ActionGitSecretCreate, map[string]FieldKind{
 		"secretType": KindEnum,

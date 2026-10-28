@@ -322,7 +322,7 @@ The operations below emit a record describing what actually changed, not just th
 | Agent lifecycle | `agent:build` | Fail-open |
 | Gateways | `gateway:delete`, `gateway:set-identity-provider`, `gateway:remove-identity-provider` | Fail-closed |
 | Gateways | `gateway:create` / `:update` / `:assign-environment` / `:unassign-environment` | Fail-open |
-| Internal | `gateway:push-manifest`, `api-key:sync` (bulk sync, coalesced per gateway) | Fail-open |
+| Internal | `gateway:push-manifest`, `api-key:sync` (bulk sync, coalesced per gateway), `deployment:sync` (startup sync fetch and existence check, coalesced per gateway) | Fail-open |
 | Agent config | `agent-config:update` / `:delete` | Fail-open |
 | A2A card source | `agent:set-card-source` / `agent:remove-card-source` | Fail-open |
 | A2A proxy | `agent:set-a2a-proxy` / `agent:remove-a2a-proxy` | Fail-closed |
@@ -371,6 +371,7 @@ The registry is the source of truth (`audit/actions.go`, `audit/actions_domain.g
 | `authn:failure` | authn | 3 warning | `authHeader`, `reason` |
 | `authz:deny` | authz | 3 warning | `grantedScopes`, `imageId`, `missingScope`, `reason` |
 | `authz:root-ou-bypass` | authz | 4 critical | `rootOUBypass` |
+| `deployment:sync` | read | 2 notice | — |
 | `environment:read` | read | 1 info | — |
 | `gateway-token:revoke` | credential | 4 critical | `gatewayName`, `tokenId` |
 | `gateway-token:rotate` | credential | 4 critical | `expiresAt`, `gatewayName`, `tokenId` |
