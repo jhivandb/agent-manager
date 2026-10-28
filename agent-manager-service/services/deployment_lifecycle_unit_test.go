@@ -132,17 +132,18 @@ func TestLLMProviderDeployStartsDeployingAndNamesTheProviderByUUID(t *testing.T)
 
 func TestLLMProviderUndeploy(t *testing.T) {
 	for _, tc := range []struct {
-		name          string
-		status        models.DeploymentStatus
-		eventDeployID string
+		name            string
+		status, desired models.DeploymentStatus
+		eventDeployID   string
 	}{
-		{"an acked deployment, by its id", models.DeploymentStatusDeployed, "row-id"},
-		{"a deployment still deploying, without an id", models.DeploymentStatusDeploying, ""},
-		{"a failed deployment, without an id", models.DeploymentStatusFailed, ""},
+		{"an acked deployment, by its id", models.DeploymentStatusDeployed, models.DeploymentStatusDeployed, "row-id"},
+		{"a deployment still deploying, without an id", models.DeploymentStatusDeploying, models.DeploymentStatusDeployed, ""},
+		{"a failed deployment, without an id", models.DeploymentStatusFailed, models.DeploymentStatusDeployed, ""},
+		{"a failed undeploy, again without an id", models.DeploymentStatusFailed, models.DeploymentStatusUndeployed, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := newLifecycleRig()
-			r.withDeployment(tc.status, models.DeploymentStatusDeployed)
+			r.withDeployment(tc.status, tc.desired)
 			r.beginsUndeploy(tc.eventDeployID)
 
 			got, err := r.providerService().UndeployLLMProviderDeployment(r.handle, r.deploymentID.String(), r.gatewayID.String(), r.ouID)
@@ -163,7 +164,6 @@ func TestLLMProviderUndeployRefusesWhatIsNotPlaced(t *testing.T) {
 	for _, tc := range []struct{ status, desired models.DeploymentStatus }{
 		{models.DeploymentStatusUndeploying, models.DeploymentStatusUndeployed},
 		{models.DeploymentStatusUndeployed, models.DeploymentStatusUndeployed},
-		{models.DeploymentStatusFailed, models.DeploymentStatusUndeployed},
 	} {
 		r := newLifecycleRig()
 		r.withDeployment(tc.status, tc.desired)
@@ -237,15 +237,16 @@ func TestDeploymentListingsAcceptTheLifecycleStatuses(t *testing.T) {
 
 func TestLLMProxyUndeployCarriesTheDeploymentID(t *testing.T) {
 	for _, tc := range []struct {
-		status        models.DeploymentStatus
-		eventDeployID string
+		status, desired models.DeploymentStatus
+		eventDeployID   string
 	}{
-		{models.DeploymentStatusDeployed, "row-id"},
-		{models.DeploymentStatusDeploying, ""},
-		{models.DeploymentStatusFailed, ""},
+		{models.DeploymentStatusDeployed, models.DeploymentStatusDeployed, "row-id"},
+		{models.DeploymentStatusDeploying, models.DeploymentStatusDeployed, ""},
+		{models.DeploymentStatusFailed, models.DeploymentStatusDeployed, ""},
+		{models.DeploymentStatusFailed, models.DeploymentStatusUndeployed, ""},
 	} {
 		r := newLifecycleRig()
-		r.withDeployment(tc.status, models.DeploymentStatusDeployed)
+		r.withDeployment(tc.status, tc.desired)
 		r.beginsUndeploy(tc.eventDeployID)
 
 		got, err := r.proxyService().UndeployLLMProxyDeployment(context.Background(), r.handle, r.deploymentID.String(), r.gatewayID.String(), r.ouID)

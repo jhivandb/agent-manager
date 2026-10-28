@@ -271,13 +271,27 @@ func TestDeploymentBeginUndeploy(t *testing.T) {
 		})
 	}
 
+	t.Run("a failed undeploy is retried without an id", func(t *testing.T) {
+		f := seedLifecycle(t)
+		f.setRow(t, models.DeploymentStatusFailed, models.DeploymentStatusUndeployed, timeoutReason(), time.Now().Add(-time.Hour))
+
+		id, err := f.repo.BeginUndeploy(ctx, f.artifactUUID.String(), f.ouID, f.gatewayID.String())
+		require.NoError(t, err)
+		assert.Empty(t, id)
+		rec := f.row(t)
+		assert.Equal(t, models.DeploymentStatusUndeploying, rec.Status)
+		assert.Equal(t, models.DeploymentStatusUndeployed, rec.StatusDesired)
+		assert.Empty(t, rec.StatusReason)
+		assert.WithinDuration(t, time.Now(), rec.PerformedAt, time.Minute, "the timeout restarts")
+	})
+
 	t.Run("nothing to undeploy", func(t *testing.T) {
 		f := seedLifecycle(t)
 		_, err := f.repo.BeginUndeploy(ctx, f.artifactUUID.String(), f.ouID, uuid.NewString())
 		assert.ErrorIs(t, err, utils.ErrDeploymentNotActive, "no row")
 
 		for _, status := range []models.DeploymentStatus{
-			models.DeploymentStatusUndeploying, models.DeploymentStatusUndeployed, models.DeploymentStatusFailed,
+			models.DeploymentStatusUndeploying, models.DeploymentStatusUndeployed,
 		} {
 			f.setRow(t, status, models.DeploymentStatusUndeployed, nil, time.Now())
 			_, err := f.repo.BeginUndeploy(ctx, f.artifactUUID.String(), f.ouID, f.gatewayID.String())

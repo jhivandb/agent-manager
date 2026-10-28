@@ -62,7 +62,8 @@ type DeploymentRepository interface {
 	// BeginUndeploy moves the artifact's row on the gateway to UNDEPLOYING, desired UNDEPLOYED,
 	// and returns the deployment id the undeploy event must carry: the row's id when the gateway
 	// acked it (DEPLOYED), "" otherwise, so the gateway undeploys whichever version it holds.
-	// It returns utils.ErrDeploymentNotActive when there is no row or it is already being undeployed.
+	// A FAILED undeploy may be retried. It returns utils.ErrDeploymentNotActive when there is no
+	// row, or it is UNDEPLOYING or UNDEPLOYED.
 	BeginUndeploy(ctx context.Context, artifactUUID, orgUUID, gatewayID string) (eventDeploymentID string, err error)
 
 	// Deployment ack methods
@@ -324,7 +325,8 @@ func (r *DeploymentRepo) BeginUndeploy(ctx context.Context, artifactUUID, orgUUI
 		if result.Error != nil {
 			return result.Error
 		}
-		if result.RowsAffected == 0 || row.StatusDesired != models.DeploymentStatusDeployed {
+		retryingFailedUndeploy := row.Status == models.DeploymentStatusFailed && row.StatusDesired == models.DeploymentStatusUndeployed
+		if result.RowsAffected == 0 || (row.StatusDesired != models.DeploymentStatusDeployed && !retryingFailedUndeploy) {
 			return utils.ErrDeploymentNotActive
 		}
 

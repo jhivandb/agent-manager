@@ -58,6 +58,16 @@ func (d *Deployment) IsPlaced() bool {
 	return d.Status.ImpliedDesired() == DeploymentStatusDeployed
 }
 
+// IsUndeployable reports whether an undeploy may start from this deployment's row: it is placed,
+// or a previous undeploy of it FAILED and is being retried.
+func (d *Deployment) IsUndeployable() bool {
+	if d.IsPlaced() {
+		return true
+	}
+	return d.Status != nil && *d.Status == DeploymentStatusFailed &&
+		d.StatusDesired != nil && *d.StatusDesired == DeploymentStatusUndeployed
+}
+
 // IsLive reports whether the gateway has acknowledged holding this deployment.
 func (d *Deployment) IsLive() bool {
 	return d.Status != nil && *d.Status == DeploymentStatusDeployed

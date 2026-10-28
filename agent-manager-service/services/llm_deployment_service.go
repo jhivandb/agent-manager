@@ -296,8 +296,9 @@ func (s *LLMProviderDeploymentService) UndeployLLMProviderDeployment(providerID,
 			"deploymentID", deploymentID, "expectedGatewayID", gatewayID, "actualGatewayID", deployment.GatewayUUID.String())
 		return nil, utils.ErrGatewayIDMismatch
 	}
-	// Placed deployments can be undeployed, including one still DEPLOYING or one that FAILED.
-	if !deployment.IsPlaced() {
+	// Placed deployments can be undeployed, including one still DEPLOYING or one that FAILED, and
+	// so can one whose undeploy FAILED.
+	if !deployment.IsUndeployable() {
 		slog.Warn("LLMProviderDeploymentService.UndeployLLMProviderDeployment: deployment not active", "providerID", providerID,
 			"deploymentID", deploymentID, "status", deployment.Status)
 		return nil, utils.ErrDeploymentNotActive
