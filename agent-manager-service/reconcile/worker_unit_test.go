@@ -109,6 +109,46 @@ func TestWorkerSendsAnUnackedEventAgain(t *testing.T) {
 	assert.Empty(t, undeployEvent.Payload.(EventRef).DeploymentID, "which version the gateway holds is unknown")
 }
 
+func TestWorkerSendsATimedOutDeploymentsEventAgain(t *testing.T) {
+	h := newHarness(t)
+	h.idleScans()
+	timedOut := uuid.New()
+	h.intents.ClaimUnackedFunc = func(context.Context, time.Time, time.Time, int) ([]models.DeployIntent, error) {
+		return []models.DeployIntent{h.intent}, nil
+	}
+	h.intents.StatusRowsFunc = func(context.Context, models.DeployIntent) ([]models.DeploymentStatusRecord, error) {
+		return []models.DeploymentStatusRecord{
+			{GatewayUUID: h.gateway, DeploymentID: timedOut, Status: models.DeploymentStatusFailed,
+				StatusReason: models.DeploymentReasonTimeout, StatusDesired: models.DeploymentStatusDeployed},
+			{GatewayUUID: uuid.New(), DeploymentID: uuid.New(), Status: models.DeploymentStatusFailed,
+				StatusReason: "DEPLOYMENT_FAILED", StatusDesired: models.DeploymentStatusDeployed},
+		}, nil
+	}
+
+	NewWorker(h.core).RunOnce(context.Background())
+
+	require.Len(t, h.publisher.events, 1, "a late ack still settles a timed out deployment, not one the gateway failed")
+	assert.Equal(t, timedOut.String(), h.publisher.events[0].event.Payload.(EventRef).DeploymentID)
+}
+
+func TestWorkerResendUnackedRearmsTheGatewaysDeploymentsAndRunsSoon(t *testing.T) {
+	h := newHarness(t)
+	rearmed := int64(1)
+	h.intents.RearmUnackedFunc = func(_ context.Context, gatewayID string) (int64, error) {
+		assert.Equal(t, h.gateway.String(), gatewayID)
+		return rearmed, nil
+	}
+	w := NewWorker(h.core)
+
+	w.ResendUnacked(context.Background(), h.gateway.String())
+	assert.Len(t, w.nudge, 1, "a cycle runs soon")
+
+	<-w.nudge
+	rearmed = 0
+	w.ResendUnacked(context.Background(), h.gateway.String())
+	assert.Empty(t, w.nudge, "nothing to send")
+}
+
 func TestWorkerRunsAfterLiveForEachAckedDeployment(t *testing.T) {
 	h := newHarness(t)
 	kind := h.hooked()

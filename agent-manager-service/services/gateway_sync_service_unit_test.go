@@ -115,6 +115,30 @@ func TestListGatewayDeploymentsListsARowAwaitingAnAckBeforeItsEvent(t *testing.T
 	}
 }
 
+// The gateway lists its deployments when it starts, and its sync acks nothing: the events of
+// the rows still awaiting an ack are sent again so the gateway acks them.
+func TestListGatewayDeploymentsResendsWhatAwaitsAnAck(t *testing.T) {
+	rows := []models.GatewaySyncDeployment{{
+		GatewayArtifactRef: syncRef(models.KindLLMProvider, "provider"), DeploymentID: uuid.New(),
+		Status: models.DeploymentStatusDeployed, StatusDesired: models.DeploymentStatusDeployed,
+	}}
+	deployments := &repomocks.DeploymentRepositoryMock{
+		ListForGatewaySyncFunc: func(context.Context, string, string) ([]models.GatewaySyncDeployment, error) { return rows, nil },
+	}
+	var resent []string
+	svc := newGatewaySyncService(deployments, nil, nil).
+		WithSyncListed(func(_ context.Context, gatewayID string) { resent = append(resent, gatewayID) })
+
+	_, err := svc.ListGatewayDeployments(context.Background(), "ou-1", "gw-1")
+	require.NoError(t, err)
+	assert.Empty(t, resent, "everything is settled")
+
+	rows[0].Status = models.DeploymentStatusDeploying
+	_, err = svc.ListGatewayDeployments(context.Background(), "ou-1", "gw-1")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"gw-1"}, resent)
+}
+
 func TestListGatewayDeploymentsRepoError(t *testing.T) {
 	repoErr := errors.New("db down")
 	deployments := &repomocks.DeploymentRepositoryMock{

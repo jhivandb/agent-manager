@@ -74,16 +74,9 @@ type GatewaySyncDeployment struct {
 	PerformedAt   time.Time        `gorm:"column:performed_at"`
 }
 
-// AwaitsAck reports whether the row's transition still takes a gateway ack: it is in flight, or the
-// sweeper failed it and a late ack would still settle it.
+// AwaitsAck reports whether the row's transition still takes a gateway ack.
 func (d GatewaySyncDeployment) AwaitsAck() bool {
-	switch d.Status {
-	case DeploymentStatusDeploying, DeploymentStatusUndeploying:
-		return true
-	case DeploymentStatusFailed:
-		return d.StatusReason == DeploymentReasonTimeout
-	}
-	return false
+	return AwaitsAck(d.Status, d.StatusReason)
 }
 
 // GatewaySyncContent is the stored content of a deployment the gateway fetches in its startup sync.

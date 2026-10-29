@@ -42,6 +42,15 @@ type GatewayInternalAPIService struct {
 	artifactRepo     repositories.ArtifactRepository
 	infraResourceMgr InfraResourceManager
 	encryptionKey    []byte
+	// afterSyncListed runs once a gateway has listed deployments of which some await its ack.
+	afterSyncListed func(ctx context.Context, gatewayID string)
+}
+
+// WithSyncListed sets what runs once a starting gateway has listed its deployments and some of
+// them still await its ack: the reconcile worker's ResendUnacked.
+func (s *GatewayInternalAPIService) WithSyncListed(fn func(ctx context.Context, gatewayID string)) *GatewayInternalAPIService {
+	s.afterSyncListed = fn
+	return s
 }
 
 // DeploymentNotification represents the notification from gateway
@@ -247,14 +256,15 @@ func (s *GatewayInternalAPIService) GetActiveLLMProxyDeploymentByGateway(ctx con
 // deployedAt is the row's performed_at. The gateway re-fetches a deployment whose deployedAt
 // differs from what it holds, and from then on holds this value. The sync acks nothing, and the
 // gateway skips as stale an event no newer than what it holds, so a row still awaiting its ack is
-// listed a millisecond before its transition: its own event, replayed on reconnect or re-sent by
-// the worker, is then newer than the synced copy, and the gateway applies and acks it.
+// listed a millisecond before its transition, and its event is sent again: newer than the synced
+// copy, the gateway applies and acks it.
 func (s *GatewayInternalAPIService) ListGatewayDeployments(ctx context.Context, ouID, gatewayID string) ([]models.ControlPlaneDeployment, error) {
 	rows, err := s.deploymentRepo.ListForGatewaySync(ctx, gatewayID, ouID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list gateway deployments: %w", err)
 	}
 	deployments := make([]models.ControlPlaneDeployment, 0, len(rows))
+	awaitingAck := false
 	for _, row := range rows {
 		kind, ok := row.GatewayKind()
 		if !ok {
@@ -264,6 +274,7 @@ func (s *GatewayInternalAPIService) ListGatewayDeployments(ctx context.Context, 
 		deployedAt := row.PerformedAt.UTC().Truncate(time.Millisecond)
 		if row.AwaitsAck() {
 			deployedAt = deployedAt.Add(-time.Millisecond)
+			awaitingAck = true
 		}
 		deploymentID := row.DeploymentID.String()
 		deployments = append(deployments, models.ControlPlaneDeployment{
@@ -274,6 +285,9 @@ func (s *GatewayInternalAPIService) ListGatewayDeployments(ctx context.Context, 
 			DeployedAt:   deployedAt,
 			Etag:         fmt.Sprintf("%s-%d", deploymentID, deployedAt.UnixMilli()),
 		})
+	}
+	if awaitingAck && s.afterSyncListed != nil {
+		s.afterSyncListed(ctx, gatewayID)
 	}
 	return deployments, nil
 }

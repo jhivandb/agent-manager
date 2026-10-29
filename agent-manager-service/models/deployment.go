@@ -106,6 +106,18 @@ func NewPerformedAt() time.Time {
 // DeploymentReasonTimeout is the status_reason the sweeper records on a row that got no ack in time.
 const DeploymentReasonTimeout = "DEPLOYMENT_TIMEOUT"
 
+// AwaitsAck reports whether a deployment_status row in this status still takes a gateway ack: its
+// transition is in flight, or the sweeper failed it and a late ack would still settle it.
+func AwaitsAck(status DeploymentStatus, reason string) bool {
+	switch status {
+	case DeploymentStatusDeploying, DeploymentStatusUndeploying:
+		return true
+	case DeploymentStatusFailed:
+		return reason == DeploymentReasonTimeout
+	}
+	return false
+}
+
 // IsValidDeploymentStatusFilter reports whether s is a status a deployment listing can filter on.
 func IsValidDeploymentStatusFilter(s string) bool {
 	switch DeploymentStatus(s) {

@@ -76,6 +76,22 @@ func (w *Worker) Nudge() {
 	}
 }
 
+// ResendUnacked sends again, soon, the event of every deployment on the gateway that still awaits
+// its ack, with a fresh budget of sends. The gateway's startup sync applies what it is missing but
+// acks nothing, and it skips as stale an event it already holds, so only a later event can settle
+// what was in flight, or timed out, while it was away.
+func (w *Worker) ResendUnacked(ctx context.Context, gatewayID string) {
+	rearmed, err := w.core.intents.RearmUnacked(ctx, gatewayID)
+	if err != nil {
+		w.core.logger.Error("Failed to rearm the unacked deployments of a starting gateway", "gatewayID", gatewayID, "error", err)
+		return
+	}
+	if rearmed > 0 {
+		w.core.logger.Info("Sending the unacked deployments of a starting gateway again", "gatewayID", gatewayID, "intents", rearmed)
+		w.Nudge()
+	}
+}
+
 func (w *Worker) runLoop(ctx context.Context) {
 	ticker := time.NewTicker(w.core.cfg.TickInterval)
 	defer ticker.Stop()
@@ -135,7 +151,8 @@ func (w *Worker) drainWithinLease(ctx context.Context, deadline time.Time, due [
 
 // republishUnacked sends again the event of a deployment the gateway has not acked: once when it
 // never went out (the publish failed, or the process died after the commit), and once more when
-// the gateway still has not answered. The timeout sweeper takes it from there.
+// the gateway still has not answered. The timeout sweeper takes it from there, and ResendUnacked
+// starts over when the gateway starts.
 func (w *Worker) republishUnacked(ctx context.Context) {
 	c := w.core
 	now := c.now()
@@ -156,7 +173,7 @@ func (w *Worker) republishUnacked(ctx context.Context) {
 			continue
 		}
 		for _, row := range rows {
-			if row.StatusDesired != intent.Desired || !isTransitional(row.Status) {
+			if row.StatusDesired != intent.Desired || !models.AwaitsAck(row.Status, row.StatusReason) {
 				continue
 			}
 			ref := EventRef{Intent: intent, GatewayID: row.GatewayUUID.String(), PerformedAt: row.PerformedAt}
@@ -173,10 +190,6 @@ func (w *Worker) republishUnacked(ctx context.Context) {
 			}
 		}
 	}
-}
-
-func isTransitional(status models.DeploymentStatus) bool {
-	return status == models.DeploymentStatusDeploying || status == models.DeploymentStatusUndeploying
 }
 
 // runAfterLive runs the AfterLive hook of each deployment a gateway acked since the last cycle.

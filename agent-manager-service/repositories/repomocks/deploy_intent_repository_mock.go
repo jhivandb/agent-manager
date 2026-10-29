@@ -62,6 +62,9 @@ import (
 //			MarkWaitingFunc: func(ctx context.Context, read models.DeployIntent, reason string, nextAttemptAt time.Time) error {
 //				panic("mock out the MarkWaiting method")
 //			},
+//			RearmUnackedFunc: func(ctx context.Context, gatewayID string) (int64, error) {
+//				panic("mock out the RearmUnacked method")
+//			},
 //			RequeueFunc: func(ctx context.Context, read models.DeployIntent) error {
 //				panic("mock out the Requeue method")
 //			},
@@ -122,6 +125,9 @@ type DeployIntentRepositoryMock struct {
 
 	// MarkWaitingFunc mocks the MarkWaiting method.
 	MarkWaitingFunc func(ctx context.Context, read models.DeployIntent, reason string, nextAttemptAt time.Time) error
+
+	// RearmUnackedFunc mocks the RearmUnacked method.
+	RearmUnackedFunc func(ctx context.Context, gatewayID string) (int64, error)
 
 	// RequeueFunc mocks the Requeue method.
 	RequeueFunc func(ctx context.Context, read models.DeployIntent) error
@@ -261,6 +267,13 @@ type DeployIntentRepositoryMock struct {
 			// NextAttemptAt is the nextAttemptAt argument value.
 			NextAttemptAt time.Time
 		}
+		// RearmUnacked holds details about calls to the RearmUnacked method.
+		RearmUnacked []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// GatewayID is the gatewayID argument value.
+			GatewayID string
+		}
 		// Requeue holds details about calls to the Requeue method.
 		Requeue []struct {
 			// Ctx is the ctx argument value.
@@ -302,6 +315,7 @@ type DeployIntentRepositoryMock struct {
 	lockMarkFailed           sync.RWMutex
 	lockMarkPublished        sync.RWMutex
 	lockMarkWaiting          sync.RWMutex
+	lockRearmUnacked         sync.RWMutex
 	lockRequeue              sync.RWMutex
 	lockStatusRows           sync.RWMutex
 	lockUpsert               sync.RWMutex
@@ -861,6 +875,42 @@ func (mock *DeployIntentRepositoryMock) MarkWaitingCalls() []struct {
 	mock.lockMarkWaiting.RLock()
 	calls = mock.calls.MarkWaiting
 	mock.lockMarkWaiting.RUnlock()
+	return calls
+}
+
+// RearmUnacked calls RearmUnackedFunc.
+func (mock *DeployIntentRepositoryMock) RearmUnacked(ctx context.Context, gatewayID string) (int64, error) {
+	if mock.RearmUnackedFunc == nil {
+		panic("DeployIntentRepositoryMock.RearmUnackedFunc: method is nil but DeployIntentRepository.RearmUnacked was just called")
+	}
+	callInfo := struct {
+		Ctx       context.Context
+		GatewayID string
+	}{
+		Ctx:       ctx,
+		GatewayID: gatewayID,
+	}
+	mock.lockRearmUnacked.Lock()
+	mock.calls.RearmUnacked = append(mock.calls.RearmUnacked, callInfo)
+	mock.lockRearmUnacked.Unlock()
+	return mock.RearmUnackedFunc(ctx, gatewayID)
+}
+
+// RearmUnackedCalls gets all the calls that were made to RearmUnacked.
+// Check the length with:
+//
+//	len(mockedDeployIntentRepository.RearmUnackedCalls())
+func (mock *DeployIntentRepositoryMock) RearmUnackedCalls() []struct {
+	Ctx       context.Context
+	GatewayID string
+} {
+	var calls []struct {
+		Ctx       context.Context
+		GatewayID string
+	}
+	mock.lockRearmUnacked.RLock()
+	calls = mock.calls.RearmUnacked
+	mock.lockRearmUnacked.RUnlock()
 	return calls
 }
 

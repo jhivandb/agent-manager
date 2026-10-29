@@ -114,7 +114,7 @@ var serviceProviderSet = wire.NewSet(
 	wire.Bind(new(services.MCPProxyRedeployer), new(*services.MCPProxyService)),
 	// The agent-identity controller needs only the identifier-derivation surface.
 	wire.Bind(new(controllers.MCPResourceServerIdentifierResolver), new(*services.MCPProxyService)),
-	services.NewGatewayInternalAPIService,
+	ProvideGatewayInternalAPIService,
 	services.NewMonitorScoresService,
 	services.NewCatalogService,
 	services.NewLLMProxyProvisioner,
@@ -475,6 +475,22 @@ func ProvideWebSocketController(
 ) controllers.WebSocketController {
 	rateLimitCount := cfg.WebSocket.RateLimitPerMin
 	return controllers.NewWebSocketController(manager, hub, gatewayService, ackHandler, rateLimitCount)
+}
+
+// ProvideGatewayInternalAPIService creates the gateway internal API service. A starting gateway's
+// sync acks nothing, so the worker sends again what still awaits its ack.
+func ProvideGatewayInternalAPIService(
+	providerRepo repositories.LLMProviderRepository,
+	proxyRepo repositories.LLMProxyRepository,
+	deploymentRepo repositories.DeploymentRepository,
+	gatewayRepo repositories.GatewayRepository,
+	artifactRepo repositories.ArtifactRepository,
+	infraResourceMgr services.InfraResourceManager,
+	encryptionKey []byte,
+	worker *reconcile.Worker,
+) *services.GatewayInternalAPIService {
+	return services.NewGatewayInternalAPIService(providerRepo, proxyRepo, deploymentRepo, gatewayRepo, artifactRepo,
+		infraResourceMgr, encryptionKey).WithSyncListed(worker.ResendUnacked)
 }
 
 // ProvideDeploymentAckHandler creates a new deployment ack handler

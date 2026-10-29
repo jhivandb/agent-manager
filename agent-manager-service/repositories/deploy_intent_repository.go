@@ -101,6 +101,9 @@ type DeployIntentRepository interface {
 	// ack and whose event was sent at most once and not since olderThan (or never, and the intent
 	// was done before olderThan), counting the send it claims them for.
 	ClaimUnacked(ctx context.Context, now, olderThan time.Time, limit int) ([]models.DeployIntent, error)
+	// RearmUnacked gives every done intent with a deployment on the gateway that still awaits an
+	// ack (see models.AwaitsAck) a fresh budget of sends, due at once, and returns how many.
+	RearmUnacked(ctx context.Context, gatewayID string) (int64, error)
 	// ClaimLive returns up to limit done intents of the given kinds whose gateway acked a
 	// deployment they have not been claimed live for, recording that deployment in
 	// LiveDeploymentID. Each deployment is claimed once.
@@ -354,6 +357,10 @@ func (r *deployIntentRepository) updateIfUnchanged(
 const inScope = `s.artifact_uuid = i.artifact_uuid AND s.ou_id = i.ou_id
 	AND (i.gateway_uuid IS NULL OR s.gateway_uuid = i.gateway_uuid)`
 
+// awaitsAck is models.AwaitsAck over deployment_status s. Its arguments: DEPLOYING, UNDEPLOYING,
+// FAILED and the timeout reason.
+const awaitsAck = `(s.status IN (?, ?) OR (s.status = ? AND s.status_reason = ?))`
+
 func (r *deployIntentRepository) ClaimUnacked(ctx context.Context, now, olderThan time.Time, limit int) ([]models.DeployIntent, error) {
 	var claimed []models.DeployIntent
 	err := r.db.WithContext(ctx).Raw(`
@@ -363,19 +370,33 @@ func (r *deployIntentRepository) ClaimUnacked(ctx context.Context, now, olderTha
 			WHERE i.state = ? AND i.publish_count < 2 AND COALESCE(i.published_at, i.updated_at) < ?
 			  AND EXISTS (
 				SELECT 1 FROM deployment_status s
-				WHERE `+inScope+` AND s.status_desired = i.desired AND s.status IN (?, ?))
+				WHERE `+inScope+` AND s.status_desired = i.desired AND `+awaitsAck+`)
 			ORDER BY COALESCE(i.published_at, i.updated_at) ASC
 			LIMIT ?
 			FOR UPDATE SKIP LOCKED
 		)
 		RETURNING *`,
 		now, models.DeployIntentDone, olderThan,
-		models.DeploymentStatusDeploying, models.DeploymentStatusUndeploying, limit,
+		models.DeploymentStatusDeploying, models.DeploymentStatusUndeploying,
+		models.DeploymentStatusFailed, models.DeploymentReasonTimeout, limit,
 	).Scan(&claimed).Error
 	if err != nil {
 		return nil, err
 	}
 	return claimed, nil
+}
+
+func (r *deployIntentRepository) RearmUnacked(ctx context.Context, gatewayID string) (int64, error) {
+	result := r.db.WithContext(ctx).Exec(`
+		UPDATE deploy_intents i SET publish_count = 0, published_at = NULL
+		WHERE i.state = ? AND EXISTS (
+			SELECT 1 FROM deployment_status s
+			WHERE `+inScope+` AND s.gateway_uuid = ? AND s.status_desired = i.desired AND `+awaitsAck+`)`,
+		models.DeployIntentDone, gatewayID,
+		models.DeploymentStatusDeploying, models.DeploymentStatusUndeploying,
+		models.DeploymentStatusFailed, models.DeploymentReasonTimeout,
+	)
+	return result.RowsAffected, result.Error
 }
 
 func (r *deployIntentRepository) ClaimLive(ctx context.Context, kinds []string, limit int) ([]models.DeployIntent, error) {

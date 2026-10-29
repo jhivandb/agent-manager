@@ -227,6 +227,44 @@ func TestDeployIntentClaimUnackedRepublishesAtMostTwiceAfterTheDelay(t *testing.
 	assert.False(t, claim(time.Now().Add(time.Hour)), "acked")
 }
 
+// A gateway's startup sync acks nothing, so when a gateway starts, the events of what it holds
+// unacked are sent again with a fresh budget, a deployment the sweeper timed out included.
+func TestDeployIntentRearmUnackedOnAGatewayStartsANewBudgetOfSends(t *testing.T) {
+	ctx := context.Background()
+	f := seedIntentFixture(t)
+	read := f.upsert(t, `{}`)
+	f.deploy(t, models.DeploymentStatusDeploying)
+	_, err := f.repo.MarkDone(ctx, read)
+	require.NoError(t, err)
+	require.NoError(t, db.GetDB().Exec(`UPDATE deployment_status SET status = ?, status_reason = ? WHERE artifact_uuid = ?`,
+		models.DeploymentStatusFailed, models.DeploymentReasonTimeout, f.artifact).Error)
+
+	claim := func(now time.Time) bool {
+		claimed, err := f.repo.ClaimUnacked(ctx, now, now.Add(-30*time.Second), 1000)
+		require.NoError(t, err)
+		return findIntent(claimed, read.ID) != nil
+	}
+	later := time.Now().Add(time.Minute)
+	assert.True(t, claim(later), "a timed out deployment still takes a late ack")
+	assert.True(t, claim(later.Add(time.Minute)))
+	assert.False(t, claim(later.Add(2*time.Minute)), "sent twice")
+
+	n, err := f.repo.RearmUnacked(ctx, uuid.NewString())
+	require.NoError(t, err)
+	assert.Zero(t, n, "only the gateway that started")
+	n, err = f.repo.RearmUnacked(ctx, f.gateway.String())
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, n)
+	assert.True(t, claim(later.Add(2*time.Minute)), "due again at once")
+	assert.True(t, claim(later.Add(3*time.Minute)))
+	assert.False(t, claim(later.Add(4*time.Minute)), "twice more at most")
+
+	require.NoError(t, db.GetDB().Exec(`UPDATE deployment_status SET status_reason = 'DEPLOYMENT_FAILED' WHERE artifact_uuid = ?`, f.artifact).Error)
+	n, err = f.repo.RearmUnacked(ctx, f.gateway.String())
+	require.NoError(t, err)
+	assert.Zero(t, n, "a deployment the gateway failed takes no late ack")
+}
+
 func TestDeployIntentClaimLiveClaimsEachAckedDeploymentOnce(t *testing.T) {
 	ctx := context.Background()
 	f := seedIntentFixture(t)

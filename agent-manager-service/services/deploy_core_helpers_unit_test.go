@@ -207,6 +207,10 @@ func (m *memIntents) ClaimUnacked(context.Context, time.Time, time.Time, int) ([
 	return nil, nil
 }
 
+func (m *memIntents) RearmUnacked(context.Context, string) (int64, error) {
+	return 0, nil
+}
+
 func (m *memIntents) ClaimLive(context.Context, []string, int) ([]models.DeployIntent, error) {
 	return nil, nil
 }
