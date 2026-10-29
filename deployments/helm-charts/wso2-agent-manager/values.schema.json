@@ -618,6 +618,27 @@
               "title": "dbOperationTimeout",
               "type": "integer"
             },
+            "deploymentTimeout": {
+              "additionalProperties": false,
+              "description": "How long a gateway deployment may stay DEPLOYING or UNDEPLOYING without the gateway's ack before it is marked FAILED, and how often that is checked. A late ack still settles the deployment.",
+              "properties": {
+                "timeout": {
+                  "default": "5m",
+                  "description": "Go duration after which an unacknowledged deployment is marked FAILED (DEPLOYMENT_TIMEOUT).",
+                  "title": "timeout",
+                  "type": "string"
+                },
+                "interval": {
+                  "default": "1m",
+                  "description": "Go duration between checks for timed-out deployments (DEPLOYMENT_TIMEOUT_INTERVAL).",
+                  "title": "interval",
+                  "type": "string"
+                }
+              },
+              "required": [],
+              "title": "deploymentTimeout",
+              "type": "object"
+            },
             "healthCheckTimeout": {
               "default": 5,
               "description": "Seconds a health check may take before it is treated as failed.",
