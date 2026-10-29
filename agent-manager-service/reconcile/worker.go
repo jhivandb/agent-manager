@@ -176,7 +176,18 @@ func (w *Worker) republishUnacked(ctx context.Context) {
 			if row.StatusDesired != intent.Desired || !models.AwaitsAck(row.Status, row.StatusReason) {
 				continue
 			}
-			ref := EventRef{Intent: intent, GatewayID: row.GatewayUUID.String(), PerformedAt: row.PerformedAt}
+			// The gateway skips without an ack an event no newer than what it holds, and it may hold
+			// this one already: it applied it but the ack was lost, or its startup sync applied it.
+			performedAt := c.now().Truncate(time.Millisecond)
+			restamped, err := c.deployments.RestampUnacked(ctx, row, performedAt)
+			if err != nil {
+				c.logger.Warn("Failed to re-time an unacked deployment", intentAttrs(intent, "gatewayID", row.GatewayUUID, "error", err)...)
+				continue
+			}
+			if !restamped {
+				continue
+			}
+			ref := EventRef{Intent: intent, GatewayID: row.GatewayUUID.String(), PerformedAt: performedAt}
 			event := kind.UndeployEvent
 			if intent.Desired == models.DeploymentStatusDeployed {
 				ref.DeploymentID, event = row.DeploymentID.String(), kind.DeployEvent

@@ -97,13 +97,22 @@ func TestWorkerSendsAnUnackedEventAgain(t *testing.T) {
 		}, nil
 	}
 
+	h.deployments.RestampUnackedFunc = func(_ context.Context, row models.DeploymentStatusRecord, at time.Time) (bool, error) {
+		assert.True(t, performedAt.Equal(row.PerformedAt))
+		return true, nil
+	}
+
 	NewWorker(h.core).RunOnce(context.Background())
 
 	require.Len(t, h.publisher.events, 2, "only the rows still waiting for an ack")
+	restamped := h.deployments.RestampUnackedCalls()
+	require.Len(t, restamped, 2)
 	deploy := h.publisher.events[0].event
 	assert.Equal(t, "widget.deployed", deploy.Type)
 	assert.Equal(t, deploying.String(), deploy.Payload.(EventRef).DeploymentID)
-	assert.True(t, performedAt.Equal(deploy.Payload.(EventRef).PerformedAt), "the same performedAt, so its ack still matches")
+	assert.True(t, h.now.Equal(deploy.Payload.(EventRef).PerformedAt),
+		"newer than what the gateway may hold, or it skips the event unacked")
+	assert.True(t, h.now.Equal(restamped[0].PerformedAt), "the row takes the event's performedAt, so its ack matches")
 	undeployEvent := h.publisher.events[1].event
 	assert.Equal(t, "widget.undeployed", undeployEvent.Type)
 	assert.Empty(t, undeployEvent.Payload.(EventRef).DeploymentID, "which version the gateway holds is unknown")
@@ -125,10 +134,29 @@ func TestWorkerSendsATimedOutDeploymentsEventAgain(t *testing.T) {
 		}, nil
 	}
 
+	h.deployments.RestampUnackedFunc = func(context.Context, models.DeploymentStatusRecord, time.Time) (bool, error) { return true, nil }
+
 	NewWorker(h.core).RunOnce(context.Background())
 
 	require.Len(t, h.publisher.events, 1, "a late ack still settles a timed out deployment, not one the gateway failed")
 	assert.Equal(t, timedOut.String(), h.publisher.events[0].event.Payload.(EventRef).DeploymentID)
+}
+
+func TestWorkerSkipsAnUnackedEventWhoseRowMovedOn(t *testing.T) {
+	h := newHarness(t)
+	h.idleScans()
+	h.intents.ClaimUnackedFunc = func(context.Context, time.Time, time.Time, int) ([]models.DeployIntent, error) {
+		return []models.DeployIntent{h.intent}, nil
+	}
+	h.intents.StatusRowsFunc = func(context.Context, models.DeployIntent) ([]models.DeploymentStatusRecord, error) {
+		return []models.DeploymentStatusRecord{{GatewayUUID: h.gateway, DeploymentID: uuid.New(),
+			Status: models.DeploymentStatusDeploying, StatusDesired: models.DeploymentStatusDeployed}}, nil
+	}
+	h.deployments.RestampUnackedFunc = func(context.Context, models.DeploymentStatusRecord, time.Time) (bool, error) { return false, nil }
+
+	NewWorker(h.core).RunOnce(context.Background())
+
+	assert.Empty(t, h.publisher.events, "acked, or a new transition, since it was read")
 }
 
 func TestWorkerResendUnackedRearmsTheGatewaysDeploymentsAndRunsSoon(t *testing.T) {

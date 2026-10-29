@@ -480,6 +480,61 @@ func TestDeploymentFailStaleTransitional(t *testing.T) {
 	assert.Equal(t, models.DeploymentStatusDeployed, settled.row(t).Status)
 }
 
+// An event sent again must be newer than what the gateway holds, or the gateway skips it without
+// an ack; the row takes the new performedAt so that ack still matches.
+func TestDeploymentRestampUnacked(t *testing.T) {
+	ctx := context.Background()
+	before := models.NewPerformedAt().Add(-time.Hour)
+	later := models.NewPerformedAt()
+	timeout := models.DeploymentReasonTimeout
+	failed := "DEPLOYMENT_FAILED"
+
+	for _, tc := range []struct {
+		name            string
+		status, desired models.DeploymentStatus
+		reason          *string
+		restamped       bool
+	}{
+		{"deploying", models.DeploymentStatusDeploying, models.DeploymentStatusDeployed, nil, true},
+		{"undeploying", models.DeploymentStatusUndeploying, models.DeploymentStatusUndeployed, nil, true},
+		{"timed out", models.DeploymentStatusFailed, models.DeploymentStatusDeployed, &timeout, true},
+		{"acked", models.DeploymentStatusDeployed, models.DeploymentStatusDeployed, nil, false},
+		{"failed by the gateway", models.DeploymentStatusFailed, models.DeploymentStatusDeployed, &failed, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := seedLifecycle(t)
+			f.setRow(t, tc.status, tc.desired, tc.reason, before)
+			row := f.row(t)
+
+			restamped, err := f.repo.RestampUnacked(ctx, row, later)
+			require.NoError(t, err)
+			assert.Equal(t, tc.restamped, restamped)
+			want := before
+			if tc.restamped {
+				want = later
+			}
+			got := f.row(t)
+			assert.True(t, want.Equal(got.PerformedAt), "performed_at %s, want %s", got.PerformedAt, want)
+			assert.Equal(t, tc.status, got.Status, "the status is kept")
+			if !tc.restamped {
+				return
+			}
+			assert.True(t, f.ack(t, models.DeploymentAck{
+				Action: map[models.DeploymentStatus]string{
+					models.DeploymentStatusDeployed: models.DeploymentAckActionDeploy, models.DeploymentStatusUndeployed: models.DeploymentAckActionUndeploy,
+				}[tc.desired],
+				Success: true, DeploymentID: row.DeploymentID.String(), PerformedAt: later,
+			}), "the ack of the event sent again settles the row")
+		})
+	}
+
+	f := seedLifecycle(t)
+	f.setRow(t, models.DeploymentStatusDeploying, models.DeploymentStatusDeployed, nil, later)
+	restamped, err := f.repo.RestampUnacked(ctx, f.row(t), before)
+	require.NoError(t, err)
+	assert.False(t, restamped, "never moved back")
+}
+
 // The catalog lists only deployments a gateway acked: a provider still deploying, or one that
 // failed, is not yet served there.
 func TestCatalogListsOnlyLiveDeployments(t *testing.T) {

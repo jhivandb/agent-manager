@@ -71,6 +71,9 @@ import (
 //			ListForGatewaySyncFunc: func(ctx context.Context, gatewayID string, orgUUID string) ([]models.GatewaySyncDeployment, error) {
 //				panic("mock out the ListForGatewaySync method")
 //			},
+//			RestampUnackedFunc: func(ctx context.Context, row models.DeploymentStatusRecord, performedAt time.Time) (bool, error) {
+//				panic("mock out the RestampUnacked method")
+//			},
 //			SetCurrentFunc: func(artifactUUID string, orgUUID string, gatewayID string, deploymentID string, status models.DeploymentStatus) (time.Time, error) {
 //				panic("mock out the SetCurrent method")
 //			},
@@ -137,6 +140,9 @@ type DeploymentRepositoryMock struct {
 
 	// ListForGatewaySyncFunc mocks the ListForGatewaySync method.
 	ListForGatewaySyncFunc func(ctx context.Context, gatewayID string, orgUUID string) ([]models.GatewaySyncDeployment, error)
+
+	// RestampUnackedFunc mocks the RestampUnacked method.
+	RestampUnackedFunc func(ctx context.Context, row models.DeploymentStatusRecord, performedAt time.Time) (bool, error)
 
 	// SetCurrentFunc mocks the SetCurrent method.
 	SetCurrentFunc func(artifactUUID string, orgUUID string, gatewayID string, deploymentID string, status models.DeploymentStatus) (time.Time, error)
@@ -304,6 +310,15 @@ type DeploymentRepositoryMock struct {
 			// OrgUUID is the orgUUID argument value.
 			OrgUUID string
 		}
+		// RestampUnacked holds details about calls to the RestampUnacked method.
+		RestampUnacked []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// Row is the row argument value.
+			Row models.DeploymentStatusRecord
+			// PerformedAt is the performedAt argument value.
+			PerformedAt time.Time
+		}
 		// SetCurrent holds details about calls to the SetCurrent method.
 		SetCurrent []struct {
 			// ArtifactUUID is the artifactUUID argument value.
@@ -355,6 +370,7 @@ type DeploymentRepositoryMock struct {
 	lockGetWithState                    sync.RWMutex
 	lockGetWithStateCtx                 sync.RWMutex
 	lockListForGatewaySync              sync.RWMutex
+	lockRestampUnacked                  sync.RWMutex
 	lockSetCurrent                      sync.RWMutex
 	lockSetCurrentCtx                   sync.RWMutex
 	lockWithTx                          sync.RWMutex
@@ -1041,6 +1057,46 @@ func (mock *DeploymentRepositoryMock) ListForGatewaySyncCalls() []struct {
 	mock.lockListForGatewaySync.RLock()
 	calls = mock.calls.ListForGatewaySync
 	mock.lockListForGatewaySync.RUnlock()
+	return calls
+}
+
+// RestampUnacked calls RestampUnackedFunc.
+func (mock *DeploymentRepositoryMock) RestampUnacked(ctx context.Context, row models.DeploymentStatusRecord, performedAt time.Time) (bool, error) {
+	if mock.RestampUnackedFunc == nil {
+		panic("DeploymentRepositoryMock.RestampUnackedFunc: method is nil but DeploymentRepository.RestampUnacked was just called")
+	}
+	callInfo := struct {
+		Ctx         context.Context
+		Row         models.DeploymentStatusRecord
+		PerformedAt time.Time
+	}{
+		Ctx:         ctx,
+		Row:         row,
+		PerformedAt: performedAt,
+	}
+	mock.lockRestampUnacked.Lock()
+	mock.calls.RestampUnacked = append(mock.calls.RestampUnacked, callInfo)
+	mock.lockRestampUnacked.Unlock()
+	return mock.RestampUnackedFunc(ctx, row, performedAt)
+}
+
+// RestampUnackedCalls gets all the calls that were made to RestampUnacked.
+// Check the length with:
+//
+//	len(mockedDeploymentRepository.RestampUnackedCalls())
+func (mock *DeploymentRepositoryMock) RestampUnackedCalls() []struct {
+	Ctx         context.Context
+	Row         models.DeploymentStatusRecord
+	PerformedAt time.Time
+} {
+	var calls []struct {
+		Ctx         context.Context
+		Row         models.DeploymentStatusRecord
+		PerformedAt time.Time
+	}
+	mock.lockRestampUnacked.RLock()
+	calls = mock.calls.RestampUnacked
+	mock.lockRestampUnacked.RUnlock()
 	return calls
 }
 

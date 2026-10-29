@@ -74,6 +74,11 @@ type DeploymentRepository interface {
 	// FailStaleTransitional fails every DEPLOYING or UNDEPLOYING row whose transition began before
 	// olderThan, with reason DEPLOYMENT_TIMEOUT, and returns how many it failed.
 	FailStaleTransitional(ctx context.Context, olderThan time.Time) (int64, error)
+	// RestampUnacked moves the performed_at of the row's deployment, while it still awaits the
+	// gateway's ack (models.AwaitsAck), to performedAt, the performedAt of its event sent again: the
+	// gateway skips without an ack an event no newer than what it holds. False when the row has
+	// moved on.
+	RestampUnacked(ctx context.Context, row models.DeploymentStatusRecord, performedAt time.Time) (bool, error)
 
 	// Gateway mapping methods (derived from deployment status)
 	// GetDeployedGatewaysByProvider returns the gateways the artifact is placed on: desired
@@ -423,6 +428,19 @@ func (r *DeploymentRepo) ApplyAck(ctx context.Context, gatewayID string, ack mod
 		return false, result.Error
 	}
 	return result.RowsAffected > 0, nil
+}
+
+// RestampUnacked re-times a row's unacked transition — see the interface doc comment.
+func (r *DeploymentRepo) RestampUnacked(ctx context.Context, row models.DeploymentStatusRecord, performedAt time.Time) (bool, error) {
+	result := r.db.WithContext(ctx).Table("deployment_status").
+		Where("artifact_uuid = ? AND ou_id = ? AND gateway_uuid = ? AND deployment_id = ? AND status_desired = ?",
+			row.ArtifactUUID, row.OUID, row.GatewayUUID, row.DeploymentID, row.StatusDesired).
+		Where("status IN ? OR (status = ? AND status_reason = ?)",
+			[]models.DeploymentStatus{models.DeploymentStatusDeploying, models.DeploymentStatusUndeploying},
+			models.DeploymentStatusFailed, models.DeploymentReasonTimeout).
+		Where("performed_at < ?", performedAt).
+		Update("performed_at", performedAt)
+	return result.RowsAffected > 0, result.Error
 }
 
 // FailStaleTransitional fails rows that never got an ack — see the interface doc comment. One
