@@ -127,13 +127,16 @@ func TestWorkerSendsATimedOutDeploymentsEventAgain(t *testing.T) {
 	}
 	h.intents.StatusRowsFunc = func(context.Context, models.DeployIntent) ([]models.DeploymentStatusRecord, error) {
 		return []models.DeploymentStatusRecord{
-			{GatewayUUID: h.gateway, DeploymentID: timedOut, Status: models.DeploymentStatusFailed,
-				StatusReason: models.DeploymentReasonTimeout, StatusDesired: models.DeploymentStatusDeployed},
-			{GatewayUUID: uuid.New(), DeploymentID: uuid.New(), Status: models.DeploymentStatusFailed,
-				StatusReason: "DEPLOYMENT_FAILED", StatusDesired: models.DeploymentStatusDeployed},
+			{
+				GatewayUUID: h.gateway, DeploymentID: timedOut, Status: models.DeploymentStatusFailed,
+				StatusReason: models.DeploymentReasonTimeout, StatusDesired: models.DeploymentStatusDeployed,
+			},
+			{
+				GatewayUUID: uuid.New(), DeploymentID: uuid.New(), Status: models.DeploymentStatusFailed,
+				StatusReason: "DEPLOYMENT_FAILED", StatusDesired: models.DeploymentStatusDeployed,
+			},
 		}, nil
 	}
-
 	h.deployments.RestampUnackedFunc = func(context.Context, models.DeploymentStatusRecord, time.Time) (bool, error) { return true, nil }
 
 	NewWorker(h.core).RunOnce(context.Background())
@@ -149,8 +152,10 @@ func TestWorkerSkipsAnUnackedEventWhoseRowMovedOn(t *testing.T) {
 		return []models.DeployIntent{h.intent}, nil
 	}
 	h.intents.StatusRowsFunc = func(context.Context, models.DeployIntent) ([]models.DeploymentStatusRecord, error) {
-		return []models.DeploymentStatusRecord{{GatewayUUID: h.gateway, DeploymentID: uuid.New(),
-			Status: models.DeploymentStatusDeploying, StatusDesired: models.DeploymentStatusDeployed}}, nil
+		return []models.DeploymentStatusRecord{{
+			GatewayUUID: h.gateway, DeploymentID: uuid.New(),
+			Status: models.DeploymentStatusDeploying, StatusDesired: models.DeploymentStatusDeployed,
+		}}, nil
 	}
 	h.deployments.RestampUnackedFunc = func(context.Context, models.DeploymentStatusRecord, time.Time) (bool, error) { return false, nil }
 
