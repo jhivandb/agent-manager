@@ -68,8 +68,22 @@ func (r GatewayArtifactRef) GatewayArtifactID() string {
 type GatewaySyncDeployment struct {
 	GatewayArtifactRef
 	DeploymentID  uuid.UUID        `gorm:"column:deployment_id"`
+	Status        DeploymentStatus `gorm:"column:status"`
 	StatusDesired DeploymentStatus `gorm:"column:status_desired"`
+	StatusReason  string           `gorm:"column:status_reason"`
 	PerformedAt   time.Time        `gorm:"column:performed_at"`
+}
+
+// AwaitsAck reports whether the row's transition still takes a gateway ack: it is in flight, or the
+// sweeper failed it and a late ack would still settle it.
+func (d GatewaySyncDeployment) AwaitsAck() bool {
+	switch d.Status {
+	case DeploymentStatusDeploying, DeploymentStatusUndeploying:
+		return true
+	case DeploymentStatusFailed:
+		return d.StatusReason == DeploymentReasonTimeout
+	}
+	return false
 }
 
 // GatewaySyncContent is the stored content of a deployment the gateway fetches in its startup sync.

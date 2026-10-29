@@ -117,6 +117,8 @@ func TestDeploymentListForGatewaySync(t *testing.T) {
 	setSyncRow(t, f.provider, f.gatewayID, models.DeploymentStatusDeployed, models.DeploymentStatusDeployed)
 	setSyncRow(t, f.proxy, f.gatewayID, models.DeploymentStatusUndeploying, models.DeploymentStatusUndeployed)
 	setSyncRow(t, f.mcp, f.gatewayID, models.DeploymentStatusFailed, models.DeploymentStatusDeployed)
+	require.NoError(t, db.GetDB().Exec(`UPDATE deployment_status SET status_reason = ? WHERE artifact_uuid = ?`,
+		models.DeploymentReasonTimeout, f.mcp).Error)
 	setSyncRow(t, f.mapping, f.gatewayID, models.DeploymentStatusUndeployed, models.DeploymentStatusUndeployed)
 	// The agent stays DEPLOYING, desired DEPLOYED.
 
@@ -129,12 +131,16 @@ func TestDeploymentListForGatewaySync(t *testing.T) {
 		desired      models.DeploymentStatus
 	}
 	got := map[uuid.UUID]entry{}
+	awaitingAck := map[uuid.UUID]bool{}
 	for _, r := range rows {
 		kind, ok := r.GatewayKind()
 		require.True(t, ok, r.ArtifactKind)
 		assert.WithinDuration(t, time.Now(), r.PerformedAt, time.Minute)
 		got[r.ArtifactUUID] = entry{r.DeploymentID, kind, r.GatewayArtifactID(), r.StatusDesired}
+		awaitingAck[r.ArtifactUUID] = r.AwaitsAck()
 	}
+	assert.Equal(t, map[uuid.UUID]bool{f.provider: false, f.proxy: true, f.mcp: true, f.mapping: false, f.agent: true},
+		awaitingAck, "rows in flight, and rows the sweeper timed out, still await an ack")
 	assert.Equal(t, map[uuid.UUID]entry{
 		f.provider: {providerDep, models.GatewayKindLlmProvider, f.provider.String(), models.DeploymentStatusDeployed},
 		f.proxy:    {proxyDep, models.GatewayKindLlmProxy, f.proxyHandle, models.DeploymentStatusUndeployed},

@@ -80,6 +80,41 @@ func TestListGatewayDeploymentsReportsTheDesiredStateUnderTheGatewaysNames(t *te
 	assert.NotEqual(t, got[0].Etag, got[1].Etag, "the etag follows the deployment")
 }
 
+// A gateway that restarts applies what its startup sync lists without acking it, and skips as
+// stale a later event no newer than what it holds. A row still waiting for an ack is listed a
+// millisecond before its transition, so the row's own event, replayed or re-sent, is newer than the
+// gateway's copy and gets the ack that settles the row.
+func TestListGatewayDeploymentsListsARowAwaitingAnAckBeforeItsEvent(t *testing.T) {
+	performedAt := time.Date(2026, 10, 28, 12, 0, 0, 123000000, time.UTC)
+	row := func(status, desired models.DeploymentStatus, reason string) models.GatewaySyncDeployment {
+		return models.GatewaySyncDeployment{
+			GatewayArtifactRef: syncRef(models.KindLLMProvider, "provider"), DeploymentID: uuid.New(),
+			Status: status, StatusDesired: desired, StatusReason: reason, PerformedAt: performedAt,
+		}
+	}
+	rows := []models.GatewaySyncDeployment{
+		row(models.DeploymentStatusDeploying, models.DeploymentStatusDeployed, ""),
+		row(models.DeploymentStatusUndeploying, models.DeploymentStatusUndeployed, ""),
+		row(models.DeploymentStatusFailed, models.DeploymentStatusDeployed, models.DeploymentReasonTimeout),
+		row(models.DeploymentStatusFailed, models.DeploymentStatusUndeployed, models.DeploymentReasonTimeout),
+		row(models.DeploymentStatusDeployed, models.DeploymentStatusDeployed, ""),
+		row(models.DeploymentStatusUndeployed, models.DeploymentStatusUndeployed, ""),
+		row(models.DeploymentStatusFailed, models.DeploymentStatusDeployed, "DEPLOYMENT_FAILED"),
+	}
+	deployments := &repomocks.DeploymentRepositoryMock{
+		ListForGatewaySyncFunc: func(context.Context, string, string) ([]models.GatewaySyncDeployment, error) { return rows, nil },
+	}
+
+	got, err := newGatewaySyncService(deployments, nil, nil).ListGatewayDeployments(context.Background(), "ou-1", "gw-1")
+	require.NoError(t, err)
+	require.Len(t, got, len(rows))
+
+	beforeTheEvent := performedAt.Add(-time.Millisecond)
+	for i, want := range []time.Time{beforeTheEvent, beforeTheEvent, beforeTheEvent, beforeTheEvent, performedAt, performedAt, performedAt} {
+		assert.Equal(t, want, got[i].DeployedAt, "row %d (%s, desired %s, %q)", i, rows[i].Status, rows[i].StatusDesired, rows[i].StatusReason)
+	}
+}
+
 func TestListGatewayDeploymentsRepoError(t *testing.T) {
 	repoErr := errors.New("db down")
 	deployments := &repomocks.DeploymentRepositoryMock{

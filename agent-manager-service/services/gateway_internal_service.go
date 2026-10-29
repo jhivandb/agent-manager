@@ -245,7 +245,10 @@ func (s *GatewayInternalAPIService) GetActiveLLMProxyDeploymentByGateway(ctx con
 // being driven to, so a row still DEPLOYING or UNDEPLOYING reads as deployed or undeployed.
 //
 // deployedAt is the row's performed_at. The gateway re-fetches a deployment whose deployedAt
-// differs from what it holds, and from then on holds this value.
+// differs from what it holds, and from then on holds this value. The sync acks nothing, and the
+// gateway skips as stale an event no newer than what it holds, so a row still awaiting its ack is
+// listed a millisecond before its transition: its own event, replayed on reconnect or re-sent by
+// the worker, is then newer than the synced copy, and the gateway applies and acks it.
 func (s *GatewayInternalAPIService) ListGatewayDeployments(ctx context.Context, ouID, gatewayID string) ([]models.ControlPlaneDeployment, error) {
 	rows, err := s.deploymentRepo.ListForGatewaySync(ctx, gatewayID, ouID)
 	if err != nil {
@@ -259,6 +262,9 @@ func (s *GatewayInternalAPIService) ListGatewayDeployments(ctx context.Context, 
 		}
 		// The gateway keeps deployedAt at millisecond precision.
 		deployedAt := row.PerformedAt.UTC().Truncate(time.Millisecond)
+		if row.AwaitsAck() {
+			deployedAt = deployedAt.Add(-time.Millisecond)
+		}
 		deploymentID := row.DeploymentID.String()
 		deployments = append(deployments, models.ControlPlaneDeployment{
 			ArtifactID:   row.GatewayArtifactID(),

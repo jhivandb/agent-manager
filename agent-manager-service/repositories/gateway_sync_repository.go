@@ -34,7 +34,7 @@ const gatewaySyncArtifactColumns = "a.uuid AS artifact_uuid, a.handle AS artifac
 func (r *DeploymentRepo) ListForGatewaySync(ctx context.Context, gatewayID, orgUUID string) ([]models.GatewaySyncDeployment, error) {
 	var rows []models.GatewaySyncDeployment
 	err := r.db.WithContext(ctx).Table("deployment_status s").
-		Select(gatewaySyncArtifactColumns+", s.deployment_id, s.status_desired, s.performed_at").
+		Select(gatewaySyncArtifactColumns+", s.deployment_id, s.status, s.status_desired, COALESCE(s.status_reason, '') AS status_reason, s.performed_at").
 		Joins("INNER JOIN artifacts a ON a.uuid = s.artifact_uuid AND a.ou_id = s.ou_id").
 		Where("s.gateway_uuid = ? AND s.ou_id = ?", gatewayID, orgUUID).
 		Order("s.performed_at").
