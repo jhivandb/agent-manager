@@ -1,0 +1,1001 @@
+openapi: 3.0.3
+info:
+  title: Agent Manager Service, project-scoped MCP proxies (for Integration Platform)
+  version: 0.1.0-draft
+  description: |
+    Proposed API, 2026-10-29. Design: `spec.md` (same directory).
+
+    Shapes follow what the agent-manager-service handlers actually encode, not `docs/api_v1_openapi.yaml`,
+    which has drifted. The reused shapes and where they come from:
+    - Errors: `utils.WriteErrorResponseWithReason` → `spec.ErrorResponse` `{message, code, reason?, additionalData?}`.
+      `code` comes from `utils/error_codes.go`, or is derived from the status (`NOT_FOUND`, `CONFLICT`, ...).
+    - Deletes: `204` with no body (`utils.WriteSuccessResponse` skips encoding for 204).
+    - Pagination: `models.PaginationInfo` `{count, offset, limit}`. `limit` defaults to 50; values outside 1..100 fall
+      back to 50 (`utils/constants.go:92-94`), with no 400.
+    - Security: `models.SecurityConfig` (`models/llm_provider.go:182-200`), extended with `jwt`.
+    - Policies: `models.MCPPolicy` (`models/mcp_proxy.go:156-160`).
+    - Upstream auth: `models.UpstreamAuth` (`models/upstream.go:48-53`). `secretRef` is internal and not accepted here.
+    - Keys: `models.CreateAPIKeyRequest/Response`, `models.ListAPIKeysResponse`/`APIKeyInfo`, and
+      `models.IssueTestAPIKeyResponse` (`models/apikey.go`). The project list uses the LLM-proxy shape
+      `{keys: [...]}`. The agent key list encodes a raw `[]StoredAPIKey`; don't copy that.
+
+    **Caller and org.** Integration Platform calls with a platform-idp client-credentials token issued to the root
+    OU (audience `urn:wso2:amp`, scopes `amp:mcp-server:*`). It names the tenant org in `X-Impersonate-Org`, which
+    the deployment's `OrgOverrideResolver` honours only for allow-listed clients. The `{orgName}` path segment is
+    routing only, as on every AMS route.
+servers:
+  - url: /api/v1
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Project MCP Proxies
+    description: New. Proxies owned by a project, created and managed by Integration Platform.
+  - name: Project MCP Proxy Environments
+    description: New. One binding per environment, and one gateway artifact per binding.
+  - name: Project MCP Proxy API Keys
+    description: New. Keys are per environment.
+  - name: MCP Proxies (org, changed)
+    description: Existing org routes. Only the changes needed for the agent Configure → Tools picker are shown.
+
+paths:
+  # ---------------------------------------------------------------------------
+  # Project proxies
+  # ---------------------------------------------------------------------------
+  /orgs/{orgName}/projects/{projName}/mcp-proxies:
+    parameters:
+      - $ref: "#/components/parameters/OrgName"
+      - $ref: "#/components/parameters/ProjName"
+      - $ref: "#/components/parameters/ImpersonateOrg"
+    get:
+      tags: [Project MCP Proxies]
+      operationId: listProjectMCPProxies
+      summary: List the project's MCP proxies
+      x-required-scope: amp:mcp-server:read
+      parameters:
+        - name: component
+          in: query
+          description: Only proxies whose `source.componentName` matches.
+          schema: {type: string}
+        - name: endpoint
+          in: query
+          description: Only proxies whose `source.endpointName` matches. Usually combined with `component`.
+          schema: {type: string}
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: Proxies owned by this project. Org-level proxies and other projects' proxies are never listed.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ProjectMCPProxyListResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/ProjectNotFound"}
+        "500": {$ref: "#/components/responses/InternalError"}
+
+  /orgs/{orgName}/projects/{projName}/mcp-proxies/{proxyId}:
+    parameters:
+      - $ref: "#/components/parameters/OrgName"
+      - $ref: "#/components/parameters/ProjName"
+      - $ref: "#/components/parameters/ProxyId"
+      - $ref: "#/components/parameters/ImpersonateOrg"
+    put:
+      tags: [Project MCP Proxies]
+      operationId: upsertProjectMCPProxy
+      summary: Create or update a project MCP proxy (idempotent)
+      description: |
+        Creates the proxy if no proxy with this handle exists in the org, otherwise updates it. Handles are unique
+        across the org. A handle already used by an org-level proxy or by another project's proxy returns
+        `409 HANDLE_IN_USE`.
+
+        `source` is fixed after create: changing it returns `400 IMMUTABLE_FIELD`. A new source is a new proxy.
+        Updating name, description or version re-renders every bound environment.
+      x-required-scope: "amp:mcp-server:create (new) / amp:mcp-server:update (existing)"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ProjectMCPProxyRequest"}
+      responses:
+        "200":
+          description: Updated.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ProjectMCPProxyResponse"}
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ProjectMCPProxyResponse"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/ProjectNotFound"}
+        "409":
+          description: "`HANDLE_IN_USE`: the handle belongs to an org-level proxy or another project's proxy."
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "500": {$ref: "#/components/responses/InternalError"}
+    get:
+      tags: [Project MCP Proxies]
+      operationId: getProjectMCPProxy
+      summary: Get a project MCP proxy with its environment bindings
+      x-required-scope: amp:mcp-server:read
+      responses:
+        "200":
+          description: The proxy.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ProjectMCPProxyResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/ProxyNotFound"}
+        "500": {$ref: "#/components/responses/InternalError"}
+    delete:
+      tags: [Project MCP Proxies]
+      operationId: deleteProjectMCPProxy
+      summary: Delete a project MCP proxy
+      description: |
+        Undeploys every environment, revokes every key and deletes the proxy.
+
+        **Refuses while AM agents use the proxy** (decided 2026-10-29), like the org delete (`ErrMCPProxyHasMappings`):
+        `409 MCP_PROXY_IN_USE`. IP handles the 409 before deleting its MCP component.
+      x-required-scope: amp:mcp-server:delete
+      responses:
+        "204": {description: Deleted.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/ProxyNotFound"}
+        "409":
+          description: "`MCP_PROXY_IN_USE`: AM agents use the proxy as a tool. Nothing is deleted."
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "500": {$ref: "#/components/responses/InternalError"}
+
+  # ---------------------------------------------------------------------------
+  # Environment bindings
+  # ---------------------------------------------------------------------------
+  /orgs/{orgName}/projects/{projName}/mcp-proxies/{proxyId}/environments/{envName}:
+    parameters:
+      - $ref: "#/components/parameters/OrgName"
+      - $ref: "#/components/parameters/ProjName"
+      - $ref: "#/components/parameters/ProxyId"
+      - $ref: "#/components/parameters/EnvName"
+      - $ref: "#/components/parameters/ImpersonateOrg"
+    put:
+      tags: [Project MCP Proxy Environments]
+      operationId: putProjectMCPProxyEnvironment
+      summary: Bind (or re-bind) the proxy to an environment and deploy it
+      description: |
+        Synchronous. Every call does the following:
+        1. Resolves the upstream: the in-cluster service URL of `source.componentName`/`source.endpointName`, from
+           that component's release binding in this environment. AMS resolved it itself, so it skips the SSRF
+           check. If the component isn't deployed there yet, the call returns `409 UPSTREAM_NOT_READY`, stores
+           nothing, and IP retries on its next ensure call.
+        2. Picks the gateway with the MCP kind's `Targets`: `gatewayId` if given, otherwise the environment's
+           egress gateway, anchored on the one the binding is already placed on. More than one candidate without
+           `gatewayId` returns `400 AMBIGUOUS_GATEWAY`. The gateway can't change once placed (`400 IMMUTABLE_FIELD`).
+           **No gateway is not an error** (reconciliation design §4.2): the binding is saved and validated by a
+           render, and no `deployment_status` row is written. The placement pass deploys it when a gateway is
+           mapped to the environment.
+        3. Validates `security.jwt.issuers` against the identity providers registered on that gateway
+           (`400 UNKNOWN_KEY_MANAGER`). With no gateway yet, they are checked at placement and an unknown name shows
+           as `Failed`.
+        4. Checks the gateway context `/<projName><context>` against every other artifact on that gateway, of any kind:
+           equal, containing or nested is `409 CONTEXT_IN_USE`, and nothing is stored. With no gateway yet, the check
+           runs at placement and a clash shows as `Failed`.
+        5. Stores the binding with the resolved upstream URL, renders it inline (MCP's `Render` reads only the DB,
+           so the upstream must already be stored), and moves the `deployment_status` row to DEPLOYING with an
+           event, all in one transaction. The gateway's ack later turns it into `Deployed` or `Failed`. Poll `GET`
+           for the result, as IP polls APIP's `WaitForDeployment` today.
+
+        **A PUT re-queues a `Failed` binding** even when nothing changed (reconciliation design §4.4, decided
+        2026-10-29), so IP's ensure loop heals a failed deploy. Unchanged `Deployed`/`Deploying` bindings are left
+        alone.
+
+        The request body replaces the binding's security, policies and upstream auth. An omitted field is reset to
+        its default; it is not kept.
+      x-required-scope: amp:mcp-server:update
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/MCPProxyEnvironmentRequest"}
+      responses:
+        "200":
+          description: Binding updated.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/MCPProxyEnvironmentResponse"}
+        "201":
+          description: Binding created.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/MCPProxyEnvironmentResponse"}
+        "400":
+          description: |
+            `VALIDATION_ERROR`, `AMBIGUOUS_GATEWAY`, `UNKNOWN_KEY_MANAGER`, `IMMUTABLE_FIELD`, or a policy
+            that isn't available on the gateway.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404":
+          description: "`NOT_FOUND` (proxy) or `ENVIRONMENT_NOT_FOUND`."
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "409":
+          description: "`UPSTREAM_NOT_READY` or `CONTEXT_IN_USE`. Nothing was stored."
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "500": {$ref: "#/components/responses/InternalError"}
+    get:
+      tags: [Project MCP Proxy Environments]
+      operationId: getProjectMCPProxyEnvironment
+      summary: Get the proxy's binding in one environment
+      x-required-scope: amp:mcp-server:read
+      responses:
+        "200":
+          description: The binding.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/MCPProxyEnvironmentResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404":
+          description: "`NOT_FOUND`: no proxy, or the proxy isn't bound to this environment."
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "500": {$ref: "#/components/responses/InternalError"}
+    delete:
+      tags: [Project MCP Proxy Environments]
+      operationId: deleteProjectMCPProxyEnvironment
+      summary: Undeploy the proxy from an environment and drop the binding
+      description: |
+        Deletes the binding (MCP has no undeploy, only delete; reconciliation design §9). FK cascades remove the
+        status rows, and the delete event is untracked, so this returns as soon as the transaction commits. Revokes
+        that environment's keys. The open decision on the proxy `DELETE` applies here too.
+      x-required-scope: amp:mcp-server:update
+      responses:
+        "204": {description: Unbound.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404":
+          description: "`NOT_FOUND`: no proxy, or the proxy isn't bound to this environment."
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "500": {$ref: "#/components/responses/InternalError"}
+
+  # ---------------------------------------------------------------------------
+  # API keys (per environment)
+  # ---------------------------------------------------------------------------
+  /orgs/{orgName}/projects/{projName}/mcp-proxies/{proxyId}/environments/{envName}/api-keys:
+    parameters:
+      - $ref: "#/components/parameters/OrgName"
+      - $ref: "#/components/parameters/ProjName"
+      - $ref: "#/components/parameters/ProxyId"
+      - $ref: "#/components/parameters/EnvName"
+      - $ref: "#/components/parameters/ImpersonateOrg"
+    post:
+      tags: [Project MCP Proxy API Keys]
+      operationId: createProjectMCPProxyAPIKey
+      summary: Create an API key for the proxy in one environment
+      description: |
+        The key is valid only on this environment's binding. The plaintext is returned once. A past `expiresAt` is
+        rejected with `400` (the gateway would silently drop the key). Test keys use `/api-keys/test`.
+      x-required-scope: amp:mcp-server:api-key-manage
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CreateAPIKeyRequest"}
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CreateAPIKeyResponse"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404":
+          description: "`NOT_FOUND`: no proxy, or the proxy isn't bound to this environment."
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "409":
+          description: "`CONFLICT`: a key with this name already exists; or the binding's security mode is not `apiKey`."
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "500": {$ref: "#/components/responses/InternalError"}
+    get:
+      tags: [Project MCP Proxy API Keys]
+      operationId: listProjectMCPProxyAPIKeys
+      summary: List the environment's API keys (masked)
+      description: Lists user-managed keys only. Test keys from `/api-keys/test` are hidden.
+      x-required-scope: amp:mcp-server:api-key-manage
+      responses:
+        "200":
+          description: Keys.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ListAPIKeysResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404":
+          description: "`NOT_FOUND`: no proxy, or the proxy isn't bound to this environment."
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "500": {$ref: "#/components/responses/InternalError"}
+
+  /orgs/{orgName}/projects/{projName}/mcp-proxies/{proxyId}/environments/{envName}/api-keys/{keyName}:
+    parameters:
+      - $ref: "#/components/parameters/OrgName"
+      - $ref: "#/components/parameters/ProjName"
+      - $ref: "#/components/parameters/ProxyId"
+      - $ref: "#/components/parameters/EnvName"
+      - name: keyName
+        in: path
+        required: true
+        description: The key's `name` from create or list.
+        schema: {type: string}
+      - $ref: "#/components/parameters/ImpersonateOrg"
+    delete:
+      tags: [Project MCP Proxy API Keys]
+      operationId: revokeProjectMCPProxyAPIKey
+      summary: Revoke an API key
+      x-required-scope: amp:mcp-server:api-key-manage
+      responses:
+        "204": {description: Revoked.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404":
+          description: "`NOT_FOUND`: no proxy, binding or key."
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "500": {$ref: "#/components/responses/InternalError"}
+
+  /orgs/{orgName}/projects/{projName}/mcp-proxies/{proxyId}/environments/{envName}/api-keys/test:
+    parameters:
+      - $ref: "#/components/parameters/OrgName"
+      - $ref: "#/components/parameters/ProjName"
+      - $ref: "#/components/parameters/ProxyId"
+      - $ref: "#/components/parameters/EnvName"
+      - $ref: "#/components/parameters/ImpersonateOrg"
+    post:
+      tags: [Project MCP Proxy API Keys]
+      operationId: issueProjectMCPProxyTestAPIKey
+      summary: Issue a short-lived test key
+      description: |
+        AMS provides IP's test keys (decided 2026-10-29). It mirrors the agents' `/api-keys/test`, with the improved
+        rules:
+        - the key lasts 1 hour by default, configurable, and never less than 1 hour;
+        - each caller gets up to 3 live keys, and a new one evicts the oldest instead of rotating one key.
+
+        Under M2M the caller is IP's client, not an end user, so IP passes `forUser` to keep the 3 slots per user.
+      x-required-scope: amp:mcp-server:api-key-manage
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                forUser:
+                  type: string
+                  description: Opaque end-user id that the 3 slots are counted against. Defaults to the token's `sub`.
+      responses:
+        "200":
+          description: Issued.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/IssueTestAPIKeyResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404":
+          description: "`NOT_FOUND`: no proxy, or the proxy isn't bound to this environment."
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "500": {$ref: "#/components/responses/InternalError"}
+
+  # ---------------------------------------------------------------------------
+  # Existing org routes: changes for the agent Configure → Tools picker
+  # ---------------------------------------------------------------------------
+  /orgs/{orgName}/mcp-proxies:
+    parameters:
+      - $ref: "#/components/parameters/OrgName"
+    get:
+      tags: ["MCP Proxies (org, changed)"]
+      operationId: listMCPProxies
+      summary: "List MCP proxies (CHANGED: optional `project` filter)"
+      description: |
+        Unchanged without `project`: returns org-level proxies only, so IP's proxies stay off the MCP proxy page.
+        With `project`: returns org-level proxies plus that project's proxies. The agent Configure → Tools picker
+        (`AddMCPToolConfigPanel.tsx`) passes the agent's project.
+      x-required-scope: amp:mcp-server:read
+      parameters:
+        - name: project
+          in: query
+          description: New. Also include this project's proxies.
+          schema: {type: string}
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: "`models.MCPProxyListResponse`, with the new `projectName` on each item."
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/MCPProxyListResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+
+  /orgs/{orgName}/mcp-proxies/{proxyId}:
+    parameters:
+      - $ref: "#/components/parameters/OrgName"
+      - $ref: "#/components/parameters/ProxyId"
+    get:
+      tags: ["MCP Proxies (org, changed)"]
+      operationId: getMCPProxy
+      summary: "Get an MCP proxy (CHANGED: also returns project proxies, read only)"
+      description: |
+        The picker's `useMCPProxySecurity` reads `endpoints[].security` from this response. A project proxy returns
+        the existing `models.MCPProxyDTO` shape: one endpoint per bound environment, each with its single
+        `environments[]` entry, plus `projectName`. The upstream URL is omitted for project proxies.
+      x-required-scope: amp:mcp-server:read
+      responses:
+        "200":
+          description: "`models.MCPProxyDTO`, with the new `projectName`. Endpoint security can now carry `jwt`."
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/MCPProxyDTOChanges"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/ProxyNotFound"}
+        "500": {$ref: "#/components/responses/InternalError"}
+    put:
+      tags: ["MCP Proxies (org, changed)"]
+      operationId: updateMCPProxy
+      summary: "Update an MCP proxy (CHANGED: refuses project proxies)"
+      description: Body and success responses are unchanged. New `409 PROJECT_OWNED` when the proxy belongs to a project.
+      x-required-scope: amp:mcp-server:update
+      responses:
+        "409":
+          description: "`PROJECT_OWNED`. Project proxies are managed only through the project routes."
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+    delete:
+      tags: ["MCP Proxies (org, changed)"]
+      operationId: deleteMCPProxy
+      summary: "Delete an MCP proxy (CHANGED: refuses project proxies)"
+      x-required-scope: amp:mcp-server:delete
+      responses:
+        "409":
+          description: "`PROJECT_OWNED`, or the existing has-mappings conflict."
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        A platform-idp token with audience `urn:wso2:amp`. IP uses client credentials (root OU) together with
+        `X-Impersonate-Org`. The console uses the user's token, and only on the org routes.
+
+  parameters:
+    OrgName:
+      name: orgName
+      in: path
+      required: true
+      description: Org handle. Routing only; the org comes from the token or from `X-Impersonate-Org`.
+      schema: {type: string}
+    ProjName:
+      name: projName
+      in: path
+      required: true
+      description: OpenChoreo project name, resolved with `ocClient.GetProject`. Unknown → `404 PROJECT_NOT_FOUND`.
+      schema: {type: string}
+    ProxyId:
+      name: proxyId
+      in: path
+      required: true
+      description: Proxy handle, unique across the org. IP passes its `endpointAPIHandle`.
+      schema:
+        type: string
+        pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+        maxLength: 100
+    EnvName:
+      name: envName
+      in: path
+      required: true
+      description: Environment name, e.g. `development`. Unknown → `404 ENVIRONMENT_NOT_FOUND`.
+      schema: {type: string}
+    ImpersonateOrg:
+      name: X-Impersonate-Org
+      in: header
+      required: false
+      description: |
+        Tenant org UUID. Required for IP's M2M calls; ignored unless the deployment's `OrgOverrideResolver`
+        allow-lists the calling client. The override replaces both the org UUID and the handle for the request.
+      schema: {type: string, format: uuid}
+    Limit:
+      name: limit
+      in: query
+      description: Page size. Values outside 1..100 fall back to 50.
+      schema: {type: integer, default: 50}
+    Offset:
+      name: offset
+      in: query
+      description: Items to skip. A negative value falls back to 0.
+      schema: {type: integer, default: 0}
+
+  responses:
+    BadRequest:
+      description: "`BAD_REQUEST` / `VALIDATION_ERROR` / `IMMUTABLE_FIELD`. A malformed body gives `Invalid request body`."
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/ErrorResponse"}
+    Unauthorized:
+      description: "`UNAUTHORIZED`: missing or invalid token."
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/ErrorResponse"}
+    Forbidden:
+      description: "`FORBIDDEN`: missing scope, missing org identity in the token, or an impersonation that isn't allowed."
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/ErrorResponse"}
+    ProjectNotFound:
+      description: "`PROJECT_NOT_FOUND`."
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/ErrorResponse"}
+    ProxyNotFound:
+      description: |
+        `NOT_FOUND`. Also returned when the proxy exists but belongs to another project or to the org, so ownership
+        isn't revealed.
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/ErrorResponse"}
+    InternalError:
+      description: "`INTERNAL_ERROR`."
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/ErrorResponse"}
+
+  schemas:
+    # ------------------------------------------------------------------ proxy
+    ProjectMCPProxyRequest:
+      type: object
+      required: [name, source]
+      properties:
+        name:
+          type: string
+          description: Display name.
+          example: Orders MCP
+        description:
+          type: string
+        version:
+          type: string
+          description: Defaults to `v1`.
+          example: v1
+        context:
+          type: string
+          description: |
+            Context path relative to the project. Defaults to `/<proxyId>`. The gateway serves it at
+            `/<projName><context>`; reads return it as sent, and `publicUrl` carries the full path. The gateway display
+            name is `<projName> <name>`.
+          example: /orders-mcp-3f2a9c1e
+        mcpSpecVersion:
+          type: string
+          description: MCP protocol version of the upstream server, if known.
+          example: "2025-06-18"
+        source:
+          $ref: "#/components/schemas/MCPProxySource"
+
+    MCPProxySource:
+      type: object
+      description: The OpenChoreo component endpoint the proxy fronts. Fixed after create.
+      required: [componentName, endpointName]
+      properties:
+        componentName:
+          type: string
+          example: orders-mcp
+        endpointName:
+          type: string
+          example: mcp
+
+    ProjectMCPProxyResponse:
+      type: object
+      required: [id, name, version, context, projectName, source, environments]
+      properties:
+        id:
+          type: string
+          description: Handle.
+          example: orders-mcp-mcp-3f2a9c1e
+        name: {type: string}
+        description: {type: string}
+        version: {type: string}
+        context: {type: string}
+        mcpSpecVersion: {type: string}
+        projectName: {type: string}
+        source:
+          $ref: "#/components/schemas/MCPProxySource"
+        environments:
+          type: array
+          items: {$ref: "#/components/schemas/MCPProxyEnvironmentResponse"}
+        createdBy: {type: string, readOnly: true}
+        createdAt: {type: string, format: date-time, readOnly: true}
+        updatedAt: {type: string, format: date-time, readOnly: true}
+
+    ProjectMCPProxyListResponse:
+      type: object
+      required: [count, list, pagination]
+      properties:
+        count:
+          type: integer
+          description: Items in this page (as `models.MCPProxyListResponse.count`).
+        list:
+          type: array
+          items: {$ref: "#/components/schemas/ProjectMCPProxyListItem"}
+        pagination:
+          $ref: "#/components/schemas/PaginationInfo"
+
+    ProjectMCPProxyListItem:
+      type: object
+      required: [id, name, version, context, source, environments]
+      properties:
+        id: {type: string}
+        name: {type: string}
+        description: {type: string}
+        version: {type: string}
+        context: {type: string}
+        source:
+          $ref: "#/components/schemas/MCPProxySource"
+        environments:
+          type: array
+          description: A summary per binding. GET the binding for its security and policies.
+          items:
+            type: object
+            required: [environmentName]
+            properties:
+              environmentName: {type: string}
+              deploymentStatus: {$ref: "#/components/schemas/MCPDeploymentStatus"}
+              deploymentStatusReason: {type: string}
+              publicUrl: {type: string, format: uri}
+        createdAt: {type: string, format: date-time, readOnly: true}
+        updatedAt: {type: string, format: date-time, readOnly: true}
+
+    # ----------------------------------------------------- environment binding
+    MCPProxyEnvironmentRequest:
+      type: object
+      description: Replaces the binding's configuration. Every field is optional; an omitted field resets to its default.
+      properties:
+        gatewayId:
+          type: string
+          format: uuid
+          description: |
+            Required only when the environment has more than one egress-capable gateway (normally there is one `BOTH` gateway). Can't change once deployed.
+        security:
+          $ref: "#/components/schemas/SecurityConfig"
+        policies:
+          type: array
+          description: |
+            Gateway policies, e.g. CORS and `basic-ratelimit`. They must be available on the gateway (see
+            `GET /orgs/{orgName}/mcp-proxies/policies`). For CORS, allow the headers `Mcp-Session-Id` and
+            `Mcp-Protocol-Version`.
+          items: {$ref: "#/components/schemas/MCPPolicy"}
+        upstreamAuth:
+          $ref: "#/components/schemas/UpstreamAuth"
+
+    MCPProxyEnvironmentResponse:
+      type: object
+      required: [environmentName, environmentUuid, context]
+      properties:
+        environmentName: {type: string, example: development}
+        environmentUuid: {type: string, format: uuid}
+        deploymentStatus:
+          $ref: "#/components/schemas/MCPDeploymentStatus"
+        deploymentStatusReason:
+          type: string
+          description: |
+            The additive field that the reconciliation PR plans as a follow-up on `MCPEndpointEnvironment`. Carries
+            the ack's `errorCode` or `DEPLOYMENT_TIMEOUT` for `Failed`, the render reason for a waiting `Deploying`,
+            and `NO_GATEWAY` when `deploymentStatus` is absent.
+        gatewayId:
+          type: string
+          format: uuid
+          description: Absent while the environment has no gateway.
+        context: {type: string}
+        publicUrl:
+          type: string
+          format: uri
+          description: Gateway vhost plus `/<projName><context>`, as `buildPublicProxyURL`. Empty if the gateway has no vhost.
+          example: https://dev-gw.example.com/orders/orders-mcp-3f2a9c1e
+        security:
+          $ref: "#/components/schemas/SecurityConfig"
+        policies:
+          type: array
+          items: {$ref: "#/components/schemas/MCPPolicy"}
+        upstreamAuth:
+          $ref: "#/components/schemas/UpstreamAuthRedacted"
+        updatedAt: {type: string, format: date-time, readOnly: true}
+
+    MCPDeploymentStatus:
+      type: string
+      description: |
+        The MCP words from gateway reconciliation (`gateway-reconciliation-v2`, #2183; `models.MCPDeploymentStatus*`), produced by
+        `MCPDeploymentStatusOf` from the derived user status. A PENDING row, or a redeploy still waiting, shows as
+        `Deploying`. `Undeploying` and `Undeployed` can't occur on project bindings, because they are deleted, never
+        undeployed.
+
+        Absent when the binding has no `deployment_status` row (no gateway in the environment); see
+        `deploymentStatusReason`.
+      enum: [Deploying, Deployed, Undeploying, Undeployed, Failed]
+
+    # --------------------------------------------------------------- security
+    SecurityConfig:
+      type: object
+      description: |
+        `models.SecurityConfig`, extended with `jwt`. At most one variant is enabled; none, or `enabled: false`,
+        means no security. Project routes accept `apiKey` and `jwt`; `identity` is rejected (`400`) in phase 1.
+        Default when the field is omitted: `apiKey` in a header named `X-API-Key`.
+      properties:
+        enabled:
+          type: boolean
+        apiKey:
+          $ref: "#/components/schemas/APIKeySecurity"
+        jwt:
+          $ref: "#/components/schemas/JWTSecurity"
+        identity:
+          $ref: "#/components/schemas/IdentitySecurity"
+
+    APIKeySecurity:
+      type: object
+      description: "`models.APIKeySecurity`."
+      properties:
+        enabled: {type: boolean}
+        key:
+          type: string
+          description: Header or query parameter name.
+          example: X-API-Key
+        in:
+          type: string
+          enum: [header, query]
+          example: header
+
+    JWTSecurity:
+      type: object
+      description: |
+        New. Rendered as the gateway `mcp-auth` policy (`appendMCPIdentityAuthPolicies`, generalized), with
+        `issuers` and `audiences` from here and no tool scopes.
+
+        An AM agent can use the proxy only when the issuer is `ThunderKeyManager`. The picker then treats it like
+        `identity`, and the agent sends its AgentID token. A proxy with any other issuer is shown in the picker as
+        not usable by agents.
+      properties:
+        enabled: {type: boolean}
+        issuers:
+          type: array
+          description: |
+            Names of identity providers registered on the binding's gateway. `ThunderKeyManager` is the
+            environment's ThunderID, the same issuer as IP's `org-idp`. Other names are custom IdPs added through
+            `/gateways/{id}/identity-providers`.
+          items: {type: string}
+          default: [ThunderKeyManager]
+          example: [ThunderKeyManager]
+        audiences:
+          type: array
+          description: Accepted `aud` values. Empty means the audience isn't checked. (Day-1 check that `mcp-auth` forwards it.)
+          items: {type: string}
+
+    IdentitySecurity:
+      type: object
+      description: "`models.IdentitySecurity`. Not accepted on project routes in phase 1."
+      properties:
+        enabled: {type: boolean}
+
+    # --------------------------------------------------------------- policies
+    MCPPolicy:
+      type: object
+      description: "`models.MCPPolicy`."
+      required: [name, version]
+      properties:
+        name: {type: string, example: basic-ratelimit}
+        version: {type: string, example: v1}
+        displayName: {type: string}
+        executionCondition: {type: string}
+        params:
+          type: object
+          additionalProperties: true
+
+    UpstreamAuth:
+      type: object
+      description: "`models.UpstreamAuth`, without the internal `secretRef`. Credentials AMS adds when it calls the upstream."
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum: [api-key, none]
+        header:
+          type: string
+          example: Authorization
+        value:
+          type: string
+          writeOnly: true
+          description: Stored encrypted; never returned.
+
+    UpstreamAuthRedacted:
+      type: object
+      properties:
+        type: {type: string, enum: [api-key, none]}
+        header: {type: string}
+
+    # ---------------------------------------------------------------- api keys
+    CreateAPIKeyRequest:
+      type: object
+      description: "`models.CreateAPIKeyRequest` without the internal `purpose`."
+      properties:
+        name:
+          type: string
+          minLength: 3
+          description: Unique per binding. Generated from `displayName` if omitted.
+        displayName:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
+          description: RFC 3339. IP's test keys use now + 1 h.
+
+    CreateAPIKeyResponse:
+      type: object
+      description: "`models.CreateAPIKeyResponse`."
+      required: [status, message]
+      properties:
+        status:
+          type: string
+          description: '"success" or "error".'
+        message: {type: string}
+        keyId:
+          type: string
+          description: The key's `name`. Use it to revoke.
+        apiKey:
+          type: string
+          description: Plaintext. Returned only here.
+        gatewayConnected:
+          type: boolean
+          description: False means the key is stored but works only after the gateway reconnects and syncs.
+
+    ListAPIKeysResponse:
+      type: object
+      description: "`models.ListAPIKeysResponse`."
+      required: [keys]
+      properties:
+        keys:
+          type: array
+          items: {$ref: "#/components/schemas/APIKeyInfo"}
+
+    APIKeyInfo:
+      type: object
+      description: "`models.APIKeyInfo`."
+      required: [name, displayName, maskedApiKey, status, createdAt]
+      properties:
+        name: {type: string}
+        displayName: {type: string}
+        maskedApiKey: {type: string}
+        status:
+          type: string
+          description: e.g. active, revoked.
+        createdAt: {type: string, format: date-time}
+        expiresAt: {type: string, format: date-time, nullable: true}
+
+    IssueTestAPIKeyResponse:
+      type: object
+      description: "`models.IssueTestAPIKeyResponse`."
+      required: [status, message, expiresAt]
+      properties:
+        status: {type: string}
+        message: {type: string}
+        keyId: {type: string}
+        apiKey: {type: string}
+        expiresAt: {type: string, format: date-time}
+        gatewayConnected: {type: boolean}
+
+    # ----------------------------------------------------- org routes (changed)
+    MCPProxyListResponse:
+      type: object
+      description: "`models.MCPProxyListResponse`."
+      required: [count, list, pagination]
+      properties:
+        count: {type: integer}
+        list:
+          type: array
+          items:
+            type: object
+            description: "`models.MCPProxyListItem` plus `projectName`."
+            properties:
+              id: {type: string}
+              name: {type: string}
+              description: {type: string}
+              version: {type: string}
+              context: {type: string}
+              mcpSpecVersion: {type: string}
+              status: {type: string}
+              projectName:
+                type: string
+                nullable: true
+                description: New. Set for project proxies; absent for org-level ones.
+              createdBy: {type: string}
+              createdAt: {type: string, format: date-time}
+              updatedAt: {type: string, format: date-time}
+        pagination:
+          $ref: "#/components/schemas/PaginationInfo"
+
+    MCPProxyDTOChanges:
+      type: object
+      description: |
+        Only the changes to `models.MCPProxyDTO` (`models/mcp_proxy.go:171-185`); every other field is unchanged.
+        - `projectName` is new.
+        - `endpoints[].security` can carry `jwt`.
+        - For project proxies, `endpoints[].upstream.main.url` is omitted, so in-cluster URLs aren't exposed.
+      properties:
+        projectName:
+          type: string
+          nullable: true
+        endpoints:
+          type: array
+          items:
+            type: object
+            properties:
+              security:
+                $ref: "#/components/schemas/SecurityConfig"
+
+    # ------------------------------------------------------------------ common
+    PaginationInfo:
+      type: object
+      description: "`models.PaginationInfo`."
+      required: [count, offset, limit]
+      properties:
+        count: {type: integer}
+        offset: {type: integer}
+        limit: {type: integer}
+
+    ErrorResponse:
+      type: object
+      description: "`spec.ErrorResponse`, as written by `utils.WriteErrorResponseWithReason`."
+      required: [message, code]
+      properties:
+        message:
+          type: string
+          description: Shown to users.
+        code:
+          type: string
+          description: |
+            Existing codes: `BAD_REQUEST`, `VALIDATION_ERROR`, `IMMUTABLE_FIELD`, `UNAUTHORIZED`, `FORBIDDEN`,
+            `NOT_FOUND`, `CONFLICT`, `PROJECT_NOT_FOUND`, `ENVIRONMENT_NOT_FOUND`, `INTERNAL_ERROR`.
+            New: `HANDLE_IN_USE`, `UPSTREAM_NOT_READY`, `AMBIGUOUS_GATEWAY`, `UNKNOWN_KEY_MANAGER`,
+            `PROJECT_OWNED`, `MCP_PROXY_IN_USE`.
+        reason:
+          type: string
+          description: Sanitized technical detail.
+        additionalData:
+          type: object
+          additionalProperties: true
