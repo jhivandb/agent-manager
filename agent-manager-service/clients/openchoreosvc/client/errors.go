@@ -21,6 +21,7 @@ package client
 import (
 	"fmt"
 	"log/slog"
+	"net/http"
 
 	"github.com/wso2/agent-manager/agent-manager-service/clients/openchoreosvc/gen"
 	"github.com/wso2/agent-manager/agent-manager-service/utils"
@@ -60,6 +61,18 @@ func handleErrorResponse(statusCode int, errs ErrorResponses) error {
 	default:
 		return fmt.Errorf("unexpected error: status %d", statusCode)
 	}
+}
+
+// handleProjectErrorResponse is handleErrorResponse for a call scoped to one project,
+// where a 404 can only mean that project is missing. The error carries
+// utils.ErrProjectNotFound for callers that map it to a 404, and keeps
+// utils.ErrNotFound for callers that translate the generic error themselves.
+func handleProjectErrorResponse(statusCode int, projectName string, errs ErrorResponses) error {
+	err := handleErrorResponse(statusCode, errs)
+	if statusCode == http.StatusNotFound {
+		return fmt.Errorf("%w %q: %w", utils.ErrProjectNotFound, projectName, err)
+	}
+	return err
 }
 
 // logErrorDetails logs error details if present.
