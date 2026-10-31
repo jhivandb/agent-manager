@@ -17,18 +17,12 @@
 package services
 
 import (
-	"context"
 	"fmt"
-	"log/slog"
-	"sort"
 	"strings"
-	"time"
 
-	"github.com/google/uuid"
 	"gopkg.in/yaml.v3"
 
 	"github.com/wso2/agent-manager/agent-manager-service/models"
-	"github.com/wso2/agent-manager/agent-manager-service/repositories"
 )
 
 const (
@@ -230,104 +224,4 @@ func buildA2AAgentDeploymentYAML(in A2AAgentDeploymentInput) (*A2AAgentDeploymen
 			A2A:         a2a,
 		},
 	}, nil
-}
-
-// collectA2AAgentDeletionTargets returns the gateways that could be holding
-// this artifact as an A2A Agent, or nil when it never was one.
-//
-// Must run before the artifact row is deleted, since its deployment rows go
-// with it (FK cascade). The recipient set is the union of the gateways the
-// artifact has deployment rows for and every active gateway in the org — the
-// same union gatewayIDsForDeletion builds for MCP proxies, because a gateway
-// left holding a deleted agent keeps routing to a workload that is gone.
-//
-// Only the A2A publication reconciler writes deployment rows for an agent
-// artifact, so their presence identifies an A2A agent even once the component,
-// and with it the subtype, is already gone.
-func collectA2AAgentDeletionTargets(
-	deploymentRepo repositories.DeploymentRepository,
-	gatewayRepo repositories.GatewayRepository,
-	artifactUUID uuid.UUID,
-	ouID string,
-	isA2AAgent bool,
-	logger *slog.Logger,
-) []string {
-	if artifactUUID == uuid.Nil {
-		return nil
-	}
-
-	gatewayIDs := map[string]struct{}{}
-	if deploymentRepo != nil {
-		deployed, err := deploymentRepo.GetDeployedGatewaysByProvider(artifactUUID, ouID)
-		if err != nil {
-			logger.Warn("Failed to list deployed gateways for A2A agent deletion",
-				"artifactID", artifactUUID, "error", err)
-		}
-		for _, id := range deployed {
-			if strings.TrimSpace(id) != "" {
-				gatewayIDs[id] = struct{}{}
-			}
-		}
-	}
-	if !isA2AAgent && len(gatewayIDs) == 0 {
-		return nil
-	}
-	if gatewayRepo != nil {
-		active := true
-		gateways, err := gatewayRepo.ListWithFilters(repositories.GatewayFilterOptions{
-			OrganizationID: ouID,
-			Status:         &active,
-		})
-		if err != nil {
-			logger.Warn("Failed to list active gateways for A2A agent deletion",
-				"artifactID", artifactUUID, "error", err)
-		}
-		for _, gw := range gateways {
-			if gw != nil {
-				gatewayIDs[gw.UUID.String()] = struct{}{}
-			}
-		}
-	}
-
-	targets := make([]string, 0, len(gatewayIDs))
-	for id := range gatewayIDs {
-		targets = append(targets, id)
-	}
-	sort.Strings(targets)
-	return targets
-}
-
-// sendA2AAgentWithdrawal tells each gateway to stop serving the artifact's Agent: undeployed when
-// keepKeys, so a later publish reuses its API keys, else deleted together with them.
-//
-// Best effort and detached from request cancellation: the change has committed, so a returning
-// handler must not strand a gateway still serving the Agent.
-func sendA2AAgentWithdrawal(
-	ctx context.Context,
-	events *GatewayEventsService,
-	artifactUUID uuid.UUID,
-	gatewayIDs []string,
-	keepKeys bool,
-	logger *slog.Logger,
-) {
-	if events == nil || artifactUUID == uuid.Nil {
-		return
-	}
-	ctx = context.WithoutCancel(ctx)
-	agentID := artifactUUID.String()
-	broadcast := func(gatewayID string) error {
-		return events.BroadcastAgentDeletionEvent(ctx, gatewayID, &models.AgentDeletionEvent{AgentID: agentID})
-	}
-	if keepKeys {
-		event := &models.AgentUndeploymentEvent{AgentID: agentID, PerformedAt: time.Now().Truncate(time.Millisecond)}
-		broadcast = func(gatewayID string) error {
-			return events.BroadcastAgentUndeploymentEvent(ctx, gatewayID, event)
-		}
-	}
-	for _, gatewayID := range gatewayIDs {
-		if err := broadcast(gatewayID); err != nil {
-			logger.Warn("Failed to withdraw the A2A agent from a gateway",
-				"artifactID", artifactUUID, "gatewayID", gatewayID, "keepKeys", keepKeys, "error", err)
-		}
-	}
 }

@@ -51,17 +51,38 @@ func lostInsertRace(t *testing.T) (ouID, envID string, winner *models.Artifact, 
 	t.Cleanup(func() { _ = artifacts.Delete(db.GetDB(), winner.UUID.String()) })
 
 	lookups := 0
-	racing = &repomocks.ArtifactRepositoryMock{
+	reads := artifacts
+	mock := &repomocks.ArtifactRepositoryMock{
 		GetByHandleFunc: func(handle, ouID string) (*models.Artifact, error) {
 			lookups++
 			if lookups == 1 {
 				return nil, utils.ErrArtifactNotFound
 			}
-			return artifacts.GetByHandle(handle, ouID)
+			return reads.GetByHandle(handle, ouID)
 		},
 		CreateFunc: artifacts.Create,
 	}
-	return ouID, envID, winner, racing
+	mock.WithTxFunc = func(tx *gorm.DB) repositories.ArtifactRepository {
+		reads = artifacts.WithTx(tx)
+		return mock
+	}
+	return ouID, envID, winner, mock
+}
+
+// Inside a transaction the artifact is read through it, so one the transaction created is found, not inserted again.
+func TestEnsureAgentEnvAPIArtifactReadsThroughTheCallersTransaction(t *testing.T) {
+	artifacts := repositories.NewArtifactRepo(db.GetDB())
+	ouID, envID := "ou-"+uuid.New().String()[:8], uuid.New().String()
+
+	err := db.GetDB().Transaction(func(tx *gorm.DB) error {
+		created, err := ensureAgentEnvAPIArtifact(tx, artifacts, ouID, "checkout", "weather", envID)
+		require.NoError(t, err)
+		again, err := ensureAgentEnvAPIArtifact(tx, artifacts, ouID, "checkout", "weather", envID)
+		require.NoError(t, err)
+		assert.Equal(t, created.UUID, again.UUID)
+		return errRollback
+	})
+	require.ErrorIs(t, err, errRollback)
 }
 
 func TestEnsureAgentEnvAPIArtifactSurvivesLosingTheInsertRaceInsideATransaction(t *testing.T) {

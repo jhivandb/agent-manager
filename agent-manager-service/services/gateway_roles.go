@@ -17,11 +17,13 @@
 package services
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/wso2/agent-manager/agent-manager-service/db"
 	"github.com/wso2/agent-manager/agent-manager-service/models"
 	"github.com/wso2/agent-manager/agent-manager-service/repositories"
 	"gorm.io/gorm"
@@ -111,12 +113,12 @@ func resolveEgressGatewayForEnvironment(
 }
 
 // resolveEgressGatewayForArtifact anchors selection to the gateway the artifact is
-// already deployed to in this environment, falling through to environment-only selection
-// only when the artifact has no deployment there. That fallthrough is the sole place
+// already placed on in this environment, falling through to environment-only selection
+// only when the artifact isn't placed there. That fallthrough is the sole place
 // ambiguity can arise.
 //
-// deployedGatewayIDs is the artifact's DEPLOYED gateway_uuid set, supplied by the caller
-// (GetDeployedGatewaysByProvider / GetLLMProxyDeployments).
+// deployedGatewayIDs is the artifact's placed gateway_uuid set (rows heading for DEPLOYED,
+// in any status), supplied by the caller from PlacedGateways.
 //
 // The anchor's role is deliberately NOT re-validated: the role is immutable after
 // registration, so an artifact's existing gateway is always still egress-capable. Role is
@@ -157,6 +159,33 @@ func resolveEgressGatewayForArtifact(
 		return gw, nil
 	}
 	return resolveEgressGatewayForEnvironment(repo, ouID, envUUID, requested)
+}
+
+// placedOn runs a kind's PlacedOn query, records whose artifacts PlacedCondition finds placed, through tx.
+func placedOn(ctx context.Context, tx *gorm.DB, records string, args []any) (bool, error) {
+	var placed bool
+	err := tx.WithContext(ctx).Raw(`SELECT EXISTS (`+records+`)`, args...).Scan(&placed).Error
+	return placed, err
+}
+
+// placementReposIn are the repositories bound to the transaction ctx carries, if any, so a placement made inside a
+// save reads the save's rows on its connection.
+func placementReposIn(
+	ctx context.Context, deployments repositories.DeploymentRepository, gateways repositories.GatewayRepository,
+) (repositories.DeploymentRepository, repositories.GatewayRepository) {
+	tx := db.TxFrom(ctx)
+	if tx == nil {
+		return deployments, gateways
+	}
+	return deployments.WithTx(tx), gateways.WithTx(tx)
+}
+
+// gatewaysIn is gateways bound to the transaction ctx carries, if any.
+func gatewaysIn(ctx context.Context, gateways repositories.GatewayRepository) repositories.GatewayRepository {
+	if tx := db.TxFrom(ctx); tx != nil {
+		return gateways.WithTx(tx)
+	}
+	return gateways
 }
 
 // validateEgressPlacement checks that the named gateway may host this artifact: it must

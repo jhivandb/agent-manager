@@ -143,7 +143,7 @@ func TestCreateExternalAgentWithA2ASubTypeGetsNoGatewayPublication(t *testing.T)
 	require.Empty(t, openChoreoClient.AttachTraitsCalls(), "no a2a-gateway-route or any other trait")
 
 	var queued int64
-	require.NoError(t, db.GetDB().Model(&models.A2APublication{}).
+	require.NoError(t, db.GetDB().Model(&models.PlatformAgentExposure{}).
 		Where("agent_name = ?", agentName).Count(&queued).Error)
-	require.Zero(t, queued, "no gateway publication is queued")
+	require.Zero(t, queued, "an external agent is never exposed as a platform agent")
 }

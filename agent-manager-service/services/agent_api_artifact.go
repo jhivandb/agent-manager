@@ -49,11 +49,14 @@ func agentEnvAPIArtifact(
 	return artifact, nil
 }
 
+// ensureAgentEnvAPIArtifact reads or creates the agent's API artifact for the environment through db, which may be
+// the caller's transaction.
 func ensureAgentEnvAPIArtifact(
 	db *gorm.DB,
 	artifactRepo repositories.ArtifactRepository,
 	ouID, projectName, agentName, environmentID string,
 ) (*models.Artifact, error) {
+	artifactRepo = artifactRepo.WithTx(db)
 	handle := agentEnvAPIArtifactHandle(projectName, agentName, environmentID)
 	artifact, err := artifactRepo.GetByHandle(handle, ouID)
 	if err == nil {

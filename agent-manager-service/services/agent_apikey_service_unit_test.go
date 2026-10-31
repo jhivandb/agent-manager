@@ -31,6 +31,7 @@ import (
 	"github.com/wso2/agent-manager/agent-manager-service/clients/clientmocks"
 	"github.com/wso2/agent-manager/agent-manager-service/eventhub"
 	"github.com/wso2/agent-manager/agent-manager-service/models"
+	"github.com/wso2/agent-manager/agent-manager-service/repositories"
 	"github.com/wso2/agent-manager/agent-manager-service/repositories/repomocks"
 	"github.com/wso2/agent-manager/agent-manager-service/utils"
 	"github.com/wso2/agent-manager/agent-manager-service/websocket"
@@ -48,6 +49,10 @@ func (s *stubEventHub) RegisterGateway(string) error { return nil }
 func (s *stubEventHub) PublishEvent(_ context.Context, _ string, e eventhub.Event) error {
 	s.published = append(s.published, e)
 	return nil
+}
+
+func (s *stubEventHub) PublishEventTx(ctx context.Context, _ *gorm.DB, gatewayID string, e eventhub.Event) error {
+	return s.PublishEvent(ctx, gatewayID, e)
 }
 
 func (s *stubEventHub) Subscribe(string) (<-chan eventhub.Event, error) {
@@ -103,6 +108,7 @@ func newAPIKeyServiceFixture(t *testing.T, existing *models.StoredAPIKey) *apiKe
 			return &models.Artifact{UUID: artifactUUID, Kind: models.KindAgent}, nil
 		},
 	}
+	artifactRepo.WithTxFunc = func(*gorm.DB) repositories.ArtifactRepository { return artifactRepo }
 	gateway := newGateway(t, models.GatewayRoleIngress, true)
 	gateway.UUID = gatewayUUID
 	gatewayRepo := gatewayFixtureRepo(t, envUUID, []*models.Gateway{gateway})

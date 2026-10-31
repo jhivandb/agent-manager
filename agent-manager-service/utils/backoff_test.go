@@ -14,9 +14,19 @@
 // specific language governing permissions and limitations
 // under the License.
 
-package models
+package utils
 
-// Type aliases for backward compatibility with repository layer
+import (
+	"testing"
+	"time"
 
-// APIAssociation is an alias for AssociationMapping
-type APIAssociation = AssociationMapping
+	"github.com/stretchr/testify/assert"
+)
+
+func TestExponentialBackoff(t *testing.T) {
+	assert.Equal(t, 5*time.Second, ExponentialBackoff(0, 5*time.Second, 5*time.Minute))
+	assert.Equal(t, 10*time.Second, ExponentialBackoff(1, 5*time.Second, 5*time.Minute))
+	assert.Equal(t, 160*time.Second, ExponentialBackoff(5, 5*time.Second, 5*time.Minute))
+	assert.Equal(t, 5*time.Minute, ExponentialBackoff(6, 5*time.Second, 5*time.Minute))
+	assert.Equal(t, 5*time.Minute, ExponentialBackoff(1000, 5*time.Second, 5*time.Minute), "no overflow")
+}

@@ -23,9 +23,11 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/google/uuid"
 	"gopkg.in/yaml.v3"
 	"gorm.io/gorm"
 
+	"github.com/wso2/agent-manager/agent-manager-service/models"
 	"github.com/wso2/agent-manager/agent-manager-service/repositories"
 	"github.com/wso2/agent-manager/agent-manager-service/utils"
 )
@@ -35,9 +37,17 @@ type GatewayInternalAPIService struct {
 	providerRepo     repositories.LLMProviderRepository
 	proxyRepo        repositories.LLMProxyRepository
 	deploymentRepo   repositories.DeploymentRepository
+	artifactRepo     repositories.ArtifactRepository
 	gatewayRepo      repositories.GatewayRepository
 	infraResourceMgr InfraResourceManager
 	encryptionKey    []byte
+	artifacts        GatewayArtifacts
+}
+
+// GatewayArtifacts names an artifact as the gateway knows it: the kind, and the id it stores it under; ok is false
+// for a kind AMS doesn't deploy to gateways (reconcile.Core, which asks the registered kinds).
+type GatewayArtifacts interface {
+	GatewayArtifact(ref models.ArtifactRef) (kind, artifactID string, ok bool)
 }
 
 // DeploymentNotification represents the notification from gateway
@@ -86,14 +96,18 @@ func NewGatewayInternalAPIService(
 	providerRepo repositories.LLMProviderRepository,
 	proxyRepo repositories.LLMProxyRepository,
 	deploymentRepo repositories.DeploymentRepository,
+	artifactRepo repositories.ArtifactRepository,
 	gatewayRepo repositories.GatewayRepository,
 	infraResourceMgr InfraResourceManager,
 	encryptionKey []byte,
+	artifacts GatewayArtifacts,
 ) *GatewayInternalAPIService {
 	return &GatewayInternalAPIService{
+		artifacts:        artifacts,
 		providerRepo:     providerRepo,
 		proxyRepo:        proxyRepo,
 		deploymentRepo:   deploymentRepo,
+		artifactRepo:     artifactRepo,
 		gatewayRepo:      gatewayRepo,
 		infraResourceMgr: infraResourceMgr,
 		encryptionKey:    encryptionKey,
@@ -105,7 +119,7 @@ func NewGatewayInternalAPIService(
 // agent-scoped mapping artifact (artifacts); both live in the deployments table keyed by
 // artifact_uuid, so a single lookup handles both cases.
 func (s *GatewayInternalAPIService) GetActiveMCPProxyDeploymentByGateway(ctx context.Context, proxyID, ouID, gatewayID string) (map[string]string, error) {
-	return s.getActiveArtifactDeploymentByGateway(ctx, proxyID, ouID, gatewayID, "MCP proxy", utils.ErrMCPProxyNotFound)
+	return s.getActiveArtifactDeploymentByGateway(ctx, proxyID, ouID, gatewayID, kindMCPProxy, utils.ErrMCPProxyNotFound)
 }
 
 // GetActiveAgentDeploymentByGateway retrieves the currently deployed A2A Agent
@@ -115,14 +129,18 @@ func (s *GatewayInternalAPIService) GetActiveMCPProxyDeploymentByGateway(ctx con
 // what the agent's API keys are bound to — so the gateway resolves the Agent
 // and its keys through the same identity.
 func (s *GatewayInternalAPIService) GetActiveAgentDeploymentByGateway(ctx context.Context, agentID, ouID, gatewayID string) (map[string]string, error) {
-	return s.getActiveArtifactDeploymentByGateway(ctx, agentID, ouID, gatewayID, "Agent", utils.ErrAgentArtifactNotFound)
+	return s.getActiveArtifactDeploymentByGateway(ctx, agentID, ouID, gatewayID, models.KindAgent, utils.ErrAgentArtifactNotFound)
 }
 
 // getActiveArtifactDeploymentByGateway returns the artifact's deployed YAML with secrets resolved, or notFound.
 func (s *GatewayInternalAPIService) getActiveArtifactDeploymentByGateway(
-	ctx context.Context, artifactID, ouID, gatewayID, kindLabel string, notFound error,
+	ctx context.Context, artifactID, ouID, gatewayID, gatewayKind string, notFound error,
 ) (map[string]string, error) {
-	deployment, err := s.deploymentRepo.GetCurrentByGateway(artifactID, gatewayID, ouID)
+	artifactUUID, err := uuid.Parse(artifactID)
+	if err != nil {
+		return nil, notFound
+	}
+	deployment, err := s.deploymentRepo.GetPullable(ctx, ouID, artifactUUID, gatewayID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get deployment: %w", err)
 	}
@@ -130,9 +148,9 @@ func (s *GatewayInternalAPIService) getActiveArtifactDeploymentByGateway(
 		return nil, notFound
 	}
 
-	resolvedYaml, err := s.resolveAllSecretsInYAML(ctx, string(deployment.Content))
+	resolvedYaml, err := s.resolveSecretsFor(ctx, gatewayKind, string(deployment.Content))
 	if err != nil {
-		slog.Error("GatewayInternalAPIService: failed to resolve secrets in "+kindLabel+" YAML",
+		slog.Error("GatewayInternalAPIService: failed to resolve secrets in "+gatewayKind+" YAML",
 			"artifactID", artifactID, "error", err)
 		return nil, fmt.Errorf("failed to resolve secrets: %w", err)
 	}
@@ -142,8 +160,11 @@ func (s *GatewayInternalAPIService) getActiveArtifactDeploymentByGateway(
 
 // GetActiveDeploymentByGateway retrieves the currently deployed API artifact for a specific gateway
 func (s *GatewayInternalAPIService) GetActiveDeploymentByGateway(apiID, ouID, gatewayID string) (map[string]string, error) {
-	// Get the active deployment for this API on this gateway
-	deployment, err := s.deploymentRepo.GetCurrentByGateway(apiID, gatewayID, ouID)
+	apiUUID, err := uuid.Parse(apiID)
+	if err != nil {
+		return nil, utils.ErrDeploymentNotActive
+	}
+	deployment, err := s.deploymentRepo.GetPullable(context.Background(), ouID, apiUUID, gatewayID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get deployment: %w", err)
 	}
@@ -170,7 +191,7 @@ func (s *GatewayInternalAPIService) GetActiveLLMProviderDeploymentByGateway(ctx 
 		return nil, fmt.Errorf("LLM provider not found")
 	}
 
-	deployment, err := s.deploymentRepo.GetCurrentByGateway(provider.UUID.String(), gatewayID, ouID)
+	deployment, err := s.deploymentRepo.GetPullable(ctx, ouID, provider.UUID, gatewayID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get deployment: %w", err)
 	}
@@ -181,7 +202,7 @@ func (s *GatewayInternalAPIService) GetActiveLLMProviderDeploymentByGateway(ctx 
 	providerYaml := string(deployment.Content)
 
 	// Resolve secret references in the YAML
-	resolvedYaml, err := s.resolveSecretsInYAML(ctx, providerYaml, "upstream.auth")
+	resolvedYaml, err := s.resolveSecretsFor(ctx, models.KindLLMProvider, providerYaml)
 	if err != nil {
 		slog.Error("GatewayInternalAPIService: failed to resolve secrets in provider YAML",
 			"providerID", providerID, "error", err)
@@ -207,7 +228,7 @@ func (s *GatewayInternalAPIService) GetActiveLLMProxyDeploymentByGateway(ctx con
 		return nil, utils.ErrLLMProxyNotFound
 	}
 
-	deployment, err := s.deploymentRepo.GetCurrentByGateway(proxy.UUID.String(), gatewayID, ouID)
+	deployment, err := s.deploymentRepo.GetPullable(ctx, ouID, proxy.UUID, gatewayID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get deployment: %w", err)
 	}
@@ -218,7 +239,7 @@ func (s *GatewayInternalAPIService) GetActiveLLMProxyDeploymentByGateway(ctx con
 	proxyYaml := string(deployment.Content)
 
 	// Resolve secret references in the YAML
-	resolvedYaml, err := s.resolveSecretsInYAML(ctx, proxyYaml, "provider.auth")
+	resolvedYaml, err := s.resolveSecretsFor(ctx, models.KindLLMProxy, proxyYaml)
 	if err != nil {
 		slog.Error("GatewayInternalAPIService: failed to resolve secrets in proxy YAML",
 			"proxyID", proxyID, "error", err)
