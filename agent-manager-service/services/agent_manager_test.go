@@ -31,6 +31,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 
 	"github.com/wso2/agent-manager/agent-manager-service/clients/clientmocks"
 	"github.com/wso2/agent-manager/agent-manager-service/clients/openchoreosvc/client"
@@ -2126,6 +2127,7 @@ func deployAPIAgentMocks(existingConfig *models.AgentConfig) (*agentManagerServi
 			return &models.Artifact{UUID: uuid.Must(uuid.NewV7()), Handle: handle, Kind: models.KindAgent, OUID: orgUUID}, nil
 		},
 	}
+	artifactRepo.WithTxFunc = func(*gorm.DB) repositories.ArtifactRepository { return artifactRepo }
 	agentConfigRepo := &repomocks.AgentConfigRepositoryMock{
 		GetFunc: func(context.Context, string, string, string, string) (*models.AgentConfig, error) {
 			if existingConfig == nil {
@@ -2212,6 +2214,7 @@ func TestUpdateAgentDeploySettings_ResilienceTimeout(t *testing.T) {
 					return &models.Artifact{UUID: uuid.Must(uuid.NewV7()), Handle: handle, Kind: models.KindAgent, OUID: orgUUID}, nil
 				},
 			}
+			artifactRepo.WithTxFunc = func(*gorm.DB) repositories.ArtifactRepository { return artifactRepo }
 			agentConfigRepo := &repomocks.AgentConfigRepositoryMock{
 				GetFunc: func(context.Context, string, string, string, string) (*models.AgentConfig, error) {
 					if tc.existingConfig == nil {

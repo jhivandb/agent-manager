@@ -111,6 +111,8 @@ var gatewayInternalRoutes = []string{
 	"GET /apis/api-keys",
 	"GET /subscription-plans",
 	"GET /deployments",
+	"POST /deployments/fetch-batch",
+	"POST /artifacts/exists",
 	"GET /applications",
 	"POST /gateways/{gatewayId}/manifest",
 	"GET /llm-providers/{providerId}",

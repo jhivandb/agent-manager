@@ -44,6 +44,8 @@ type GatewayInternalController interface {
 	GetAPIKeys(w http.ResponseWriter, r *http.Request)
 	GetSubscriptionPlans(w http.ResponseWriter, r *http.Request)
 	GetDeployments(w http.ResponseWriter, r *http.Request)
+	FetchDeploymentBatch(w http.ResponseWriter, r *http.Request)
+	CheckArtifactsExist(w http.ResponseWriter, r *http.Request)
 	GetApplications(w http.ResponseWriter, r *http.Request)
 	PushGatewayManifest(w http.ResponseWriter, r *http.Request)
 }
@@ -386,25 +388,6 @@ func (c *gatewayInternalController) GetSubscriptionPlans(w http.ResponseWriter, 
 	}
 
 	utils.WriteSuccessResponse(w, http.StatusOK, []struct{}{})
-}
-
-type controlPlaneDeploymentsResponse struct {
-	Deployments []struct{} `json:"deployments"`
-}
-
-// GetDeployments handles GET /api/internal/v1/deployments
-// gateway-controller calls this on connect (and periodically) to reconcile its
-// local deployment cache with what the control plane believes is deployed, via
-// pkg/controlplane.FetchControlPlaneDeployments. Deployment state currently
-// lives entirely in the RestApi/LlmProvider CRs the gateway-operator manages,
-// not in agent-manager's own DB, so there is nothing yet to report here —
-// returns an empty list, matching GetSubscriptionPlans/GetApplications above.
-func (c *gatewayInternalController) GetDeployments(w http.ResponseWriter, r *http.Request) {
-	if _, ok := c.authenticateGateway(w, r, "internal-read"); !ok {
-		return
-	}
-
-	utils.WriteSuccessResponse(w, http.StatusOK, controlPlaneDeploymentsResponse{Deployments: []struct{}{}})
 }
 
 // gatewayApplicationResponse is the bulk-sync response format for AI applications.

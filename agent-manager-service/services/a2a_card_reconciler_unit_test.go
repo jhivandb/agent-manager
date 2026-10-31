@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -35,6 +36,7 @@ import (
 	"github.com/wso2/agent-manager/agent-manager-service/models"
 	"github.com/wso2/agent-manager/agent-manager-service/repositories"
 	"github.com/wso2/agent-manager/agent-manager-service/repositories/repomocks"
+	"github.com/wso2/agent-manager/agent-manager-service/utils"
 )
 
 func pendingCard(source models.A2AAgentCardSource) models.A2AAgentCard {
@@ -157,6 +159,43 @@ func TestCardReconcilerRetriesWhenNoEndpointIsReady(t *testing.T) {
 	retries := h.repo.MarkAttemptFailedCalls()
 	require.Len(t, retries, 1)
 	assert.WithinDuration(t, before.Add(5*time.Second), retries[0].NextAttemptAt, time.Second)
+}
+
+func TestCardReconcilerSkipsTheReplacementCheckOnAFailedAttempt(t *testing.T) {
+	h := newCardReconcilerHarness("")
+	row := pendingCard(models.A2AAgentCardSourcePlatform)
+	agentUUID := uuid.New()
+	row.AgentUUID = &agentUUID
+	h.ocClient.GetComponentFunc = func(context.Context, string, string, string) (*models.AgentResponse, error) {
+		return &models.AgentResponse{UUID: agentUUID.String()}, nil
+	}
+
+	h.svc.fetchOne(context.Background(), row)
+
+	assert.Len(t, h.repo.MarkAttemptFailedCalls(), 1)
+	assert.Empty(t, h.ocClient.GetComponentCalls())
+}
+
+func TestCardReconcilerDropsAReplacedAgentsUndeployedCardAsReplaced(t *testing.T) {
+	h := newCardReconcilerHarness("http://dev-org.gw.example/trip-planner/")
+	h.ocClient.GetReleaseBindingRolloutFunc = func(context.Context, string, string, string) (client.ReleaseBindingRollout, error) {
+		return client.ReleaseBindingRollout{}, nil
+	}
+	h.ocClient.GetComponentFunc = func(context.Context, string, string, string) (*models.AgentResponse, error) {
+		return nil, utils.ErrNotFound
+	}
+	h.repo.DeleteIfUnchangedFunc = func(context.Context, models.A2AAgentCard) error { return nil }
+	var logs strings.Builder
+	h.svc.logger = slog.New(slog.NewTextHandler(&logs, nil))
+	row := pendingCard(models.A2AAgentCardSourcePlatform)
+	agentUUID := uuid.New()
+	row.AgentUUID = &agentUUID
+
+	h.svc.fetchOne(context.Background(), row)
+
+	assert.Len(t, h.repo.DeleteIfUnchangedCalls(), 1)
+	assert.Contains(t, logs.String(), "deleted or replaced")
+	assert.NotContains(t, logs.String(), "not deployed in this environment")
 }
 
 func TestCardReconcilerBacksOffExponentially(t *testing.T) {
@@ -621,4 +660,48 @@ func TestCardReconcilerHidesInternalErrorsFromLastError(t *testing.T) {
 	retries := h.repo.MarkAttemptFailedCalls()
 	require.Len(t, retries, 1)
 	assert.Equal(t, a2aCardInternalError, retries[0].LastErr)
+}
+
+// A card whose agent was deleted, or replaced by a same-named one, is dropped once its fetch would have decided the card; a card with no
+// recorded component UUID is fetched as before.
+func TestCardReconcilerDropsTheCardOfAReplacedAgent(t *testing.T) {
+	recorded := uuid.New()
+	cases := map[string]struct {
+		agentUUID *uuid.UUID
+		component func() (*models.AgentResponse, error)
+		dropped   bool
+	}{
+		"replaced": {&recorded, func() (*models.AgentResponse, error) {
+			return &models.AgentResponse{UUID: uuid.NewString()}, nil
+		}, true},
+		"deleted": {&recorded, func() (*models.AgentResponse, error) { return nil, utils.ErrNotFound }, true},
+		"same agent": {&recorded, func() (*models.AgentResponse, error) {
+			return &models.AgentResponse{UUID: recorded.String()}, nil
+		}, false},
+		"no recorded UUID": {nil, func() (*models.AgentResponse, error) {
+			return &models.AgentResponse{UUID: uuid.NewString()}, nil
+		}, false},
+		"lookup failed": {&recorded, func() (*models.AgentResponse, error) { return nil, assert.AnError }, false},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			h := newCardReconcilerHarness("http://dev-org.gw.example/trip-planner/")
+			h.ocClient.GetComponentFunc = func(context.Context, string, string, string) (*models.AgentResponse, error) {
+				return tc.component()
+			}
+			h.repo.DeleteIfUnchangedFunc = func(context.Context, models.A2AAgentCard) error { return nil }
+			row := pendingCard(models.A2AAgentCardSourcePlatform)
+			row.AgentUUID = tc.agentUUID
+
+			h.svc.fetchOne(context.Background(), row)
+
+			if tc.dropped {
+				assert.Len(t, h.repo.DeleteIfUnchangedCalls(), 1)
+				assert.Empty(t, h.repo.MarkFetchedCalls(), "nothing is fetched for a replaced agent")
+				return
+			}
+			assert.Empty(t, h.repo.DeleteIfUnchangedCalls())
+			assert.Len(t, h.repo.MarkFetchedCalls(), 1)
+		})
+	}
 }
