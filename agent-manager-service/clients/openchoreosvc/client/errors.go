@@ -21,7 +21,6 @@ package client
 import (
 	"fmt"
 	"log/slog"
-	"net/http"
 
 	"github.com/wso2/agent-manager/agent-manager-service/clients/openchoreosvc/gen"
 	"github.com/wso2/agent-manager/agent-manager-service/utils"
@@ -64,12 +63,15 @@ func handleErrorResponse(statusCode int, errs ErrorResponses) error {
 }
 
 // handleProjectErrorResponse is handleErrorResponse for a call scoped to one project,
-// where a 404 can only mean that project is missing. The error carries
+// where OpenChoreo's own 404 can only mean that project is missing. The error carries
 // utils.ErrProjectNotFound for callers that map it to a 404, and keeps
 // utils.ErrNotFound for callers that translate the generic error themselves.
+// A 404 without OpenChoreo's JSON error body came from something in front of it,
+// such as a proxy or ingress, and stays an unexpected error: callers treat a missing
+// project as success on delete, so a false not-found would hide a failed delete.
 func handleProjectErrorResponse(statusCode int, projectName string, errs ErrorResponses) error {
 	err := handleErrorResponse(statusCode, errs)
-	if statusCode == http.StatusNotFound {
+	if errs.JSON404 != nil {
 		return fmt.Errorf("%w %q: %w", utils.ErrProjectNotFound, projectName, err)
 	}
 	return err

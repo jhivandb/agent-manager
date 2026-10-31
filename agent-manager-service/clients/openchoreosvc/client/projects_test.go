@@ -103,6 +103,17 @@ func TestProjectScopedCalls_NotFoundIsProjectNotFound(t *testing.T) {
 			require.ErrorIs(t, err, utils.ErrProjectNotFound)
 			require.ErrorIs(t, err, utils.ErrNotFound)
 		})
+		t.Run(name+"/404 without OpenChoreo body", func(t *testing.T) {
+			c := newTestClientRawHeaders(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "text/html")
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte("<html>404 Not Found</html>"))
+			}))
+			err := call(c)
+			require.Error(t, err)
+			require.NotErrorIs(t, err, utils.ErrProjectNotFound)
+			require.NotErrorIs(t, err, utils.ErrNotFound)
+		})
 		t.Run(name+"/500", func(t *testing.T) {
 			c := newTestClient(t, statusServer(http.StatusInternalServerError, gen.INTERNALERROR))
 			err := call(c)
